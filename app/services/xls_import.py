@@ -63,17 +63,42 @@ class XlsDependencyMissing(XlsImportError):
     """xlrd 1.x is not installed on this host."""
 
 
+def _column_letters(index: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA — spreadsheet column naming."""
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
 @dataclass(frozen=True)
 class ParsedPunch:
+    """One punch *occurrence*, not one spreadsheet row.
+
+    The export packs a whole day into a single cell, so several occurrences
+    share one row, column and cell address. `occurrence_index` distinguishes
+    them; the provenance fields point back at where they came from.
+    """
+
     slot_code: str
     work_date: str          # ISO
     punch_time: str         # HH:MM
-    sequence: int           # 0-based position inside that day's cell
+    punch_type: str         # this terminal emits none, so 'unknown'
+    occurrence_index: int   # 0-based position inside that day's cell
     raw_cell: str
+    source_sheet: str
+    source_row: int         # 0-based row in the sheet
+    source_column: int      # 0-based column in the sheet
 
     @property
     def punch_at(self) -> str:
         return f"{self.work_date}T{self.punch_time}:00"
+
+    @property
+    def source_cell(self) -> str:
+        return f"{_column_letters(self.source_column)}{self.source_row + 1}"
 
 
 @dataclass
@@ -92,6 +117,11 @@ class ParsedWorkbook:
     slots: list[ParsedSlot] = field(default_factory=list)
     punches: list[ParsedPunch] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Dates the source actually carried a column for. A date here with no
+    # punches is "the file said nothing happened"; a date missing from here was
+    # never covered by this import at all. Conflating the two is how a quiet
+    # day becomes a roomful of absences.
+    covered_dates: list[str] = field(default_factory=list)
 
     @property
     def active_slots(self) -> list[ParsedSlot]:
@@ -202,6 +232,7 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
 
     index = rows.index(period_row) + 1
     seen_slots: set[str] = set()
+    covered: set[str] = set()
     while index + 2 < len(rows) + 1:
         header = rows[index] if index < len(rows) else None
         if header is None:
@@ -210,6 +241,8 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
         if not day_columns:
             index += 1
             continue
+        for day in day_columns.values():
+            covered.add(f"{year:04d}-{month:02d}-{day:02d}")
         if index + 1 >= len(rows):
             warnings.append(f"row {index}: day header with no metadata row after it")
             break
@@ -252,7 +285,7 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
                 continue
             days_with_punches += 1
             work_date = f"{year:04d}-{month:02d}-{day:02d}"
-            for sequence, punch_time in enumerate(valid):
+            for occurrence, punch_time in enumerate(valid):
                 # Every occurrence is kept, including exact repeats of the same
                 # timestamp: the sample export has 06:40 three times in one day,
                 # and §2.4 forbids dropping a punch for looking duplicated.
@@ -261,8 +294,12 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
                         slot_code=slot_code,
                         work_date=work_date,
                         punch_time=punch_time,
-                        sequence=sequence,
+                        punch_type="unknown",
+                        occurrence_index=occurrence,
                         raw_cell=raw,
+                        source_sheet=RAW_SHEET_NAME,
+                        source_row=index + 2,
+                        source_column=column,
                     )
                 )
                 slot.punch_count += 1
@@ -272,14 +309,23 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
 
     if not result.slots:
         raise XlsImportError("no slot blocks found in 근태기록")
+    result.covered_dates = sorted(covered)
     return result
 
 
 def dedupe_key(terminal_id: str, punch: ParsedPunch) -> str:
     """Stable identity for one raw punch, used to make reimport idempotent.
 
-    The sequence number is part of the key on purpose. Without it, a day
-    containing the same timestamp twice would collide on the unique index and
-    one of the two raw events would be silently refused.
+    Definition: terminal + slot + work_date + punch_at + punch_type, plus an
+    occurrence ordinal when the same value repeats.
+
+    The ordinal is part of the key on purpose. Without it, a day containing the
+    same timestamp twice collides on the unique index and one of the two raw
+    events is silently refused — 12 real punches in one sample month. The cell
+    address is deliberately NOT part of the key: it is provenance, and keying on
+    it would make a re-exported file with shifted rows look like new data.
     """
-    return f"{terminal_id}|{punch.slot_code}|{punch.work_date}|{punch.punch_time}|{punch.sequence}"
+    return (
+        f"{terminal_id}|{punch.slot_code}|{punch.work_date}"
+        f"|{punch.punch_time}|{punch.punch_type}|{punch.occurrence_index}"
+    )

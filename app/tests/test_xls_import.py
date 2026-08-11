@@ -69,7 +69,7 @@ def test_exact_repeated_timestamps_are_all_preserved(export: Path):
     parsed = parse_workbook(export)
     day = [p for p in parsed.punches if p.slot_code == "004" and p.work_date == "2026-07-01"]
     assert [p.punch_time for p in day] == ["06:40", "06:40", "06:40", "16:11"]
-    assert [p.sequence for p in day] == [0, 1, 2, 3]
+    assert [p.occurrence_index for p in day] == [0, 1, 2, 3]
 
 
 def test_dedupe_key_includes_the_sequence(export: Path):
@@ -80,8 +80,8 @@ def test_dedupe_key_includes_the_sequence(export: Path):
     keys = [dedupe_key("default", p) for p in parsed.punches]
     assert len(set(keys)) == len(keys)
 
-    without_sequence = {k.rsplit("|", 1)[0] for k in keys}
-    assert len(without_sequence) < len(keys), "fixture must contain repeated timestamps"
+    without_ordinal = {k.rsplit("|", 1)[0] for k in keys}
+    assert len(without_ordinal) < len(keys), "fixture must contain repeated timestamps"
 
 
 def test_terminal_emits_no_punch_type_markers(export: Path):
@@ -461,3 +461,238 @@ def test_last_applied_import_is_reported(export, seeded, tmp_path):
         last = xls_pipeline.last_applied_import(conn)
     assert last and last["period_start"] == "2026-07-01"
     assert last["punch_event_count"] == 29
+
+
+# ---------------------------------------------------------------------------
+# provenance: a punch_event is one occurrence, traceable to its source cell
+# ---------------------------------------------------------------------------
+def test_punch_carries_provenance_separate_from_the_occurrence_ordinal(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        rows = conn.execute(
+            """
+            SELECT punch_at, source_sheet, source_row_no, source_column, source_cell,
+                   occurrence_index
+              FROM punch_events
+             WHERE terminal_slot_code = '004' AND work_date = '2026-07-01'
+             ORDER BY occurrence_index
+            """
+        ).fetchall()
+
+    assert len(rows) == 4
+    assert [r["occurrence_index"] for r in rows] == [0, 1, 2, 3]
+    # all four came out of one cell, so provenance is shared while the ordinal differs
+    assert len({r["source_cell"] for r in rows}) == 1
+    assert all(r["source_sheet"] == "근태기록" for r in rows)
+    assert all(r["source_row_no"] is not None and r["source_column"] is not None for r in rows)
+    assert rows[0]["source_cell"][0].isalpha() and rows[0]["source_cell"][1:].isdigit()
+
+
+def test_provenance_columns_are_immutable_too(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        punch_id = conn.execute(
+            "SELECT id FROM punch_events WHERE import_run_id IS NOT NULL LIMIT 1"
+        ).fetchone()[0]
+        for column, value in (
+            ("source_sheet", "다른시트"), ("source_column", 99),
+            ("source_cell", "ZZ99"), ("occurrence_index", 7),
+        ):
+            with pytest.raises(Exception, match="immutable"):
+                conn.execute(
+                    f"UPDATE punch_events SET {column} = ? WHERE id = ?", (value, punch_id)
+                )
+            conn.rollback()
+
+
+def test_dedupe_key_shape_is_the_agreed_one(export):
+    parsed = parse_workbook(export)
+    key = dedupe_key("default", parsed.punches[0])
+    terminal, slot, work_date, time, punch_type, ordinal = key.split("|")
+    assert terminal == "default"
+    assert punch_type == "unknown"
+    assert ordinal.isdigit()
+    # the cell address is provenance, not identity: a re-exported file with
+    # shifted rows must not look like new data
+    assert parsed.punches[0].source_cell not in key
+
+
+# ---------------------------------------------------------------------------
+# import_run lifecycle and confirmation binding
+# ---------------------------------------------------------------------------
+def test_import_run_exists_from_upload_even_if_parsing_fails(seeded, tmp_path):
+    junk = tmp_path / "broken.XLS"
+    junk.write_bytes(b"not a workbook at all")
+
+    with pytest.raises(XlsImportError):
+        _preview(junk, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        run = conn.execute(
+            "SELECT status, error_message, stored_source_path FROM import_runs "
+            " ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert run["status"] == "failed"
+    assert run["error_message"]
+    assert Path(run["stored_source_path"]).exists(), "the original is preserved even on failure"
+
+
+def test_confirmation_is_invalidated_when_the_mapping_changes(export, seeded, tmp_path):
+    """The operator reviewed one mapping; applying must not commit another."""
+    preview = _preview(export, seeded, tmp_path)
+
+    with db.transaction(seeded) as conn:
+        conn.execute("UPDATE terminal_slots SET employee_id = NULL WHERE slot_code = '001'")
+
+    with pytest.raises(xls_pipeline.ImportError_, match="changed after this preview"):
+        _apply(preview, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM punch_events WHERE import_run_id IS NOT NULL"
+        ).fetchone()[0] == 0
+
+
+def test_confirmation_is_invalidated_when_the_stored_file_changes(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    Path(preview.stored_source_path).write_bytes(b"tampered")
+
+    with pytest.raises(xls_pipeline.ImportError_, match="changed after the preview"):
+        _apply(preview, seeded, tmp_path)
+
+
+def test_preview_fingerprint_is_recorded_on_the_run(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        run = conn.execute(
+            "SELECT status, preview_fingerprint, confirmation_token FROM import_runs WHERE id = ?",
+            (preview.import_run_id,),
+        ).fetchone()
+    assert run["status"] == "previewed"
+    assert run["preview_fingerprint"] == preview.preview_fingerprint
+    assert run["confirmation_token"] == preview.confirmation_token
+
+
+# ---------------------------------------------------------------------------
+# coverage: "the file said nothing happened" vs "never imported"
+# ---------------------------------------------------------------------------
+def test_coverage_distinguishes_reported_zero_from_never_imported(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        rows = {
+            r["work_date"]: (r["coverage_status"], r["raw_punch_count"])
+            for r in conn.execute(
+                "SELECT work_date, coverage_status, raw_punch_count FROM import_run_days "
+                " WHERE import_run_id = ?",
+                (preview.import_run_id,),
+            )
+        }
+
+    # the fixture only has punches on 1 and 2 July; the file still covered the month
+    assert len(rows) == 31
+    assert rows["2026-07-01"][0] == "has_punches" and rows["2026-07-01"][1] > 0
+    assert rows["2026-07-05"] == ("reported_zero", 0)
+
+    # a month the file never mentioned has no coverage row at all
+    assert "2026-08-01" not in rows
+
+
+def test_reported_zero_is_never_turned_into_absence(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        quiet_days = [
+            r["work_date"] for r in conn.execute(
+                "SELECT work_date FROM import_run_days WHERE coverage_status = 'reported_zero'"
+            )
+        ]
+        assert quiet_days
+        marks = conn.execute(
+            "SELECT COUNT(*) FROM attendance_days "
+            f" WHERE work_date IN ({','.join('?' * len(quiet_days))}) AND status = 'absent'",
+            quiet_days,
+        ).fetchone()[0]
+    assert marks == 0
+
+
+# ---------------------------------------------------------------------------
+# rollback must not undo a human's work
+# ---------------------------------------------------------------------------
+def test_rollback_does_not_overwrite_a_manual_correction_made_after_the_import(
+    export, seeded, tmp_path
+):
+    from app.services.attendance import correct_attendance
+
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        employee_id = conn.execute(
+            "SELECT employee_id FROM terminal_slots WHERE slot_code = '001'"
+        ).fetchone()[0]
+
+    conn = db.connect(seeded)
+    try:
+        correct_attendance(
+            conn, employee_id=employee_id, work_date="2026-07-01",
+            changes={"status": "leave", "review_note": "관리자 확인: 연차였음"},
+            actor_id="admin", reason="수기 정정",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = xls_pipeline.rollback_import(preview.import_run_id, "잘못된 파일", db_path=seeded)
+
+    assert any(f["code"] == "rollback_conflict" for f in result["conflicts"])
+    with db.connection(seeded) as conn:
+        row = conn.execute(
+            "SELECT status, review_note FROM attendance_days "
+            " WHERE employee_id = ? AND work_date = '2026-07-01'",
+            (employee_id,),
+        ).fetchone()
+    assert row["status"] == "leave", "the rollback undid a human's correction"
+    assert row["review_note"] == "관리자 확인: 연차였음"
+
+
+def test_rollback_skips_confirmed_rows_and_reports_them(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+
+    with db.transaction(seeded) as conn:
+        employee_id = conn.execute(
+            "SELECT employee_id FROM terminal_slots WHERE slot_code = '002'"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE attendance_days SET confirmed_at = ?, confirmed_by = 'admin' "
+            " WHERE employee_id = ? AND work_date = '2026-07-01'",
+            ("2026-07-05T00:00:00Z", employee_id),
+        )
+
+    result = xls_pipeline.rollback_import(preview.import_run_id, "테스트", db_path=seeded)
+    assert any(f["code"] == "rollback_conflict" for f in result["conflicts"])
+
+    with db.connection(seeded) as conn:
+        status = conn.execute(
+            "SELECT status FROM attendance_days WHERE employee_id = ? AND work_date = '2026-07-01'",
+            (employee_id,),
+        ).fetchone()[0]
+    assert status == "normal", "a confirmed row must be left exactly as it was"
+
+
+def test_attendance_records_which_import_derived_it(export, seeded, tmp_path):
+    preview = _preview(export, seeded, tmp_path)
+    _apply(preview, seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        runs = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT last_import_run_id FROM attendance_days "
+                " WHERE source = 'fingerprint'"
+            )
+        }
+    assert runs == {preview.import_run_id}

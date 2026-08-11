@@ -2,15 +2,32 @@
 
 The flow is the one AI_BUILD_PLAN.md §7 Phase 3 requires:
 
-    upload -> preserve original -> parse -> preview -> findings
-           -> snapshot -> explicit confirmation -> apply -> import_run -> rollback
+     1. upload, preserve the original, open an import_run (pending)
+     2. hash the source
+     3. parse
+     4. build the preview            (no business data written)
+     5. slot mapping / findings
+     6. preview fingerprint + snapshot
+     7. explicit confirmation
+     8. verify the token still matches this file AND this preview
+     9. apply, in one transaction
+    10. import_run -> applied, with per-date coverage recorded
+    11. rollback available
 
-Preview touches no data. Apply is a single transaction, guarded by a
-confirmation token issued by the preview, and takes a database snapshot first.
+The import_run exists from the upload, not from the apply: it represents the
+whole lifecycle, which is what its pending/previewed/applied/failed/rolled_back
+states were designed for.
+
+The confirmation token is bound to import_run_id + source_sha256 + a fingerprint
+of the preview itself. If the file or the slot mapping changed after the
+operator reviewed it, the old confirmation no longer applies. This guards
+against a work mistake, not an attacker.
 
 Rollback never deletes a punch. Raw events are marked `rolled_back_at` and stay
-in the table forever (§2.4); derived attendance for the affected dates is
-recomputed afterwards.
+in the table forever (§2.4). Derived attendance is recomputed from what remains,
+but only for rows this import actually produced and that nobody has touched
+since — anything else becomes a rollback_conflict finding instead of being
+overwritten.
 """
 
 from __future__ import annotations
@@ -46,11 +63,13 @@ class ImportPreview:
     period_start: str
     period_end: str
     confirmation_token: str
+    preview_fingerprint: str = ""
     slots: list[dict] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)
     new_punches: int = 0
     already_imported: int = 0
     zero_punch_dates: list[str] = field(default_factory=list)
+    covered_dates: list[str] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[dict]:
@@ -68,6 +87,8 @@ class ImportPreview:
             "newPunches": self.new_punches,
             "alreadyImported": self.already_imported,
             "zeroPunchDates": self.zero_punch_dates,
+            "coveredDates": self.covered_dates,
+            "previewFingerprint": self.preview_fingerprint,
             "canApply": not self.blocking and self.new_punches > 0,
         }
 
@@ -109,6 +130,31 @@ def _slot_mapping(conn: sqlite3.Connection) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 # preview
 # ---------------------------------------------------------------------------
+def _preview_fingerprint(digest: str, slot_rows: list[dict], new_punches: int) -> str:
+    """A digest of what the operator actually reviewed.
+
+    Covers the file and the slot mapping the preview was computed against, so a
+    mapping change between review and apply invalidates the confirmation.
+    """
+    payload = json.dumps(
+        {
+            "source": digest,
+            "slots": [
+                {k: row[k] for k in ("slot", "employee", "status", "punchCount")}
+                for row in slot_rows
+            ],
+            "newPunches": new_punches,
+        },
+        ensure_ascii=False, sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _confirmation_token(run_id: int, digest: str, fingerprint: str, nonce: str) -> str:
+    material = f"{run_id}|{digest}|{fingerprint}|{nonce}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 def preview_import(
     source_path: Path | str,
     *,
@@ -118,7 +164,10 @@ def preview_import(
     threshold_minutes: int = punch_review.DEFAULT_REPEATED_PUNCH_MINUTES,
     created_by: str = "operator",
 ) -> ImportPreview:
-    """Parse, preserve the original, and report what applying would do."""
+    """Preserve the original, open an import run, and report what apply would do.
+
+    Writes no punch, attendance, leave or replacement data.
+    """
     source_path = Path(source_path)
     uploads = Path(uploads_dir) if uploads_dir else config.UPLOADS_DIR
     uploads.mkdir(parents=True, exist_ok=True)
@@ -129,30 +178,46 @@ def preview_import(
     if source_path.resolve() != stored.resolve():
         shutil.copy2(source_path, stored)
 
-    parsed = xls_import.parse_workbook(stored, source_filename=filename)
-
     conn = db.connect(db_path or config.DB_PATH)
     try:
-        token = secrets.token_urlsafe(24)
+        # Step 1: the run exists from the upload, before anything is parsed, so
+        # a file that fails to parse still leaves a record of the attempt.
         cursor = conn.execute(
             """
             INSERT INTO import_runs
                 (source_filename, stored_source_path, source_sha256, source_kind,
-                 period_start, period_end, status, source_row_count, created_by, started_at)
-            VALUES (?, ?, ?, 'fingerprint_xls', ?, ?, 'previewed', ?, ?, ?)
+                 status, created_by, started_at)
+            VALUES (?, ?, ?, 'fingerprint_xls', 'pending', ?, ?)
             """,
-            (
-                filename, str(stored), digest,
-                parsed.period_start, parsed.period_end,
-                len(parsed.punches), created_by, _now(),
-            ),
+            (filename, str(stored), digest, created_by, _now()),
         )
         run_id = int(cursor.lastrowid)
+        conn.commit()
 
-        preview = _build_preview(conn, parsed, run_id, stored, digest, token, threshold_minutes)
+        try:
+            parsed = xls_import.parse_workbook(stored, source_filename=filename)
+        except xls_import.XlsImportError as exc:
+            conn.execute(
+                "UPDATE import_runs SET status = 'failed', error_message = ? WHERE id = ?",
+                (str(exc), run_id),
+            )
+            conn.commit()
+            raise
+
+        preview = _build_preview(conn, parsed, run_id, stored, digest, threshold_minutes)
         conn.execute(
-            "UPDATE import_runs SET findings_json = ? WHERE id = ?",
-            (json.dumps({"token": token, "findings": preview.findings}, ensure_ascii=False), run_id),
+            """
+            UPDATE import_runs
+               SET status = 'previewed', period_start = ?, period_end = ?,
+                   source_row_count = ?, findings_json = ?,
+                   preview_fingerprint = ?, confirmation_token = ?
+             WHERE id = ?
+            """,
+            (
+                parsed.period_start, parsed.period_end, len(parsed.punches),
+                json.dumps({"findings": preview.findings}, ensure_ascii=False),
+                preview.preview_fingerprint, preview.confirmation_token, run_id,
+            ),
         )
         conn.commit()
         return preview
@@ -166,7 +231,6 @@ def _build_preview(
     run_id: int,
     stored: Path,
     digest: str,
-    token: str,
     threshold_minutes: int,
 ) -> ImportPreview:
     mapping = _slot_mapping(conn)
@@ -273,8 +337,11 @@ def _build_preview(
                     slot_code=slot_code, work_date=work_date, employee=employee,
                 ))
 
-    period_dates = _dates_in(parsed.period_start, parsed.period_end)
-    zero_dates = punch_review.whole_site_zero_punch_dates(period_dates, set(parsed.dates))
+    # Only dates the source actually carried a column for can be reported as
+    # quiet. A date the file never mentioned is simply not covered.
+    zero_dates = punch_review.whole_site_zero_punch_dates(
+        parsed.covered_dates, set(parsed.dates)
+    )
     for date in zero_dates:
         findings.append(Finding(
             "whole_site_zero_punch", "review",
@@ -282,6 +349,9 @@ def _build_preview(
             "확인이 필요하며, 전원 결근으로 처리하지 않습니다.",
             work_date=date,
         ))
+
+    fingerprint = _preview_fingerprint(digest, slot_rows, new_punches)
+    token = _confirmation_token(run_id, digest, fingerprint, secrets.token_urlsafe(16))
 
     return ImportPreview(
         import_run_id=run_id,
@@ -291,11 +361,13 @@ def _build_preview(
         period_start=parsed.period_start,
         period_end=parsed.period_end,
         confirmation_token=token,
+        preview_fingerprint=fingerprint,
         slots=slot_rows,
         findings=[f.as_dict() for f in findings],
         new_punches=new_punches,
         already_imported=already,
         zero_punch_dates=zero_dates,
+        covered_dates=parsed.covered_dates,
     )
 
 
@@ -340,16 +412,31 @@ def apply_import(
             raise ImportError_(
                 f"import run {import_run_id} is '{run['status']}'; only a previewed run can be applied"
             )
-        stored = json.loads(run["findings_json"] or "{}")
-        if not secrets.compare_digest(str(stored.get("token", "")), confirmation_token):
+        if not secrets.compare_digest(str(run["confirmation_token"] or ""), confirmation_token):
             raise ImportError_("confirmation token does not match this preview")
 
         source = Path(run["stored_source_path"])
         if not source.exists():
             raise ImportError_(f"preserved source file is missing: {source}")
+        if _sha256(source) != run["source_sha256"]:
+            raise ImportError_(
+                "the preserved source file changed after the preview; review it again"
+            )
         # Re-read from the preserved original rather than trusting anything
         # carried over from the preview request.
         parsed = xls_import.parse_workbook(source, source_filename=run["source_filename"])
+
+        # Recompute the preview against the mapping as it stands *now*. If a
+        # slot was mapped or unmapped since the operator reviewed it, they
+        # confirmed something else.
+        current = _build_preview(
+            conn, parsed, import_run_id, source, run["source_sha256"], threshold_minutes
+        )
+        if current.preview_fingerprint != run["preview_fingerprint"]:
+            raise ImportError_(
+                "the slot mapping or file changed after this preview was reviewed; "
+                "run the preview again before applying"
+            )
     finally:
         conn.close()
 
@@ -370,14 +457,17 @@ def apply_import(
                 """
                 INSERT INTO punch_events
                     (terminal_id, terminal_slot_code, punch_at, work_date, punch_type,
-                     raw_payload, source_filename, source_row_no, source_hash,
+                     raw_payload, source_filename, source_sheet, source_row_no,
+                     source_column, source_cell, occurrence_index, source_hash,
                      dedupe_key, import_run_id, employee_id, review_flag)
-                VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dedupe_key) DO NOTHING
                 """,
                 (
                     TERMINAL_ID, punch.slot_code, punch.punch_at, punch.work_date,
-                    punch.raw_cell, run["source_filename"], punch.sequence,
+                    punch.punch_type, punch.raw_cell, run["source_filename"],
+                    punch.source_sheet, punch.source_row, punch.source_column,
+                    punch.source_cell, punch.occurrence_index,
                     run["source_sha256"], key, import_run_id, employee_id,
                     None if employee_id else "unmapped_slot",
                 ),
@@ -399,7 +489,8 @@ def apply_import(
                 touched.add((employee_id, punch.work_date))
 
         _flag_repeated_punches(conn, import_run_id, threshold_minutes)
-        derived = derive_attendance(conn, sorted(touched))
+        _record_coverage(conn, import_run_id, parsed)
+        derived = derive_attendance(conn, sorted(touched), import_run_id=import_run_id)
 
         conn.execute(
             """
@@ -472,7 +563,39 @@ def _flag_repeated_punches(
             )
 
 
-def derive_attendance(conn: sqlite3.Connection, employee_days: list[tuple[int, str]]) -> int:
+def _record_coverage(conn: sqlite3.Connection, import_run_id: int, parsed) -> None:
+    """Record which dates this file covered, and how many punches each carried.
+
+    This is what makes "the export said 2026-07-17 was empty" different from
+    "August was never imported". Neither is an attendance verdict; the first is
+    a fact about the source that a human still has to explain.
+    """
+    counts: dict[str, int] = {}
+    for punch in parsed.punches:
+        counts[punch.work_date] = counts.get(punch.work_date, 0) + 1
+
+    for work_date in parsed.covered_dates:
+        count = counts.get(work_date, 0)
+        conn.execute(
+            """
+            INSERT INTO import_run_days
+                (import_run_id, work_date, source_date_present, raw_punch_count, coverage_status)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(import_run_id, work_date) DO UPDATE SET
+                raw_punch_count = excluded.raw_punch_count,
+                coverage_status = excluded.coverage_status
+            """,
+            (import_run_id, work_date, count,
+             "has_punches" if count else "reported_zero"),
+        )
+
+
+def derive_attendance(
+    conn: sqlite3.Connection,
+    employee_days: list[tuple[int, str]],
+    *,
+    import_run_id: int | None = None,
+) -> int:
     """Derive attendance_days from punches for the given employee-days.
 
     Rules, all conservative:
@@ -526,16 +649,20 @@ def derive_attendance(conn: sqlite3.Connection, employee_days: list[tuple[int, s
         conn.execute(
             """
             INSERT INTO attendance_days
-                (employee_id, work_date, status, actual_in_at, actual_out_at, source, review_flag)
-            VALUES (?, ?, ?, ?, ?, 'fingerprint', ?)
+                (employee_id, work_date, status, actual_in_at, actual_out_at, source,
+                 review_flag, last_import_run_id)
+            VALUES (?, ?, ?, ?, ?, 'fingerprint', ?, ?)
             ON CONFLICT(employee_id, work_date) DO UPDATE SET
                 status = excluded.status,
                 actual_in_at = excluded.actual_in_at,
                 actual_out_at = excluded.actual_out_at,
                 source = 'fingerprint',
-                review_flag = COALESCE(attendance_days.review_flag, excluded.review_flag)
+                review_flag = COALESCE(attendance_days.review_flag, excluded.review_flag),
+                last_import_run_id = COALESCE(excluded.last_import_run_id,
+                                              attendance_days.last_import_run_id)
             """,
-            (employee_id, work_date, status, times[0], times[-1] if len(times) > 1 else None, review_flag),
+            (employee_id, work_date, status, times[0],
+             times[-1] if len(times) > 1 else None, review_flag, import_run_id),
         )
         written += 1
     return written
@@ -544,6 +671,68 @@ def derive_attendance(conn: sqlite3.Connection, employee_days: list[tuple[int, s
 # ---------------------------------------------------------------------------
 # rollback
 # ---------------------------------------------------------------------------
+def _rollback_conflicts(
+    conn: sqlite3.Connection, import_run_id: int, finished_at: str | None
+) -> tuple[list[tuple[int, str]], list[Finding]]:
+    """Split affected attendance rows into 'safe to revert' and 'touched since'.
+
+    A row is only reverted when this import is the one that produced it and
+    nobody has changed it since. Anything else is reported as a conflict rather
+    than being silently overwritten — a rollback must not undo somebody's
+    manual correction.
+    """
+    rows = conn.execute(
+        """
+        SELECT DISTINCT a.id, a.employee_id, a.work_date, a.confirmed_at,
+               a.last_import_run_id, a.source, e.name
+          FROM punch_events p
+          JOIN attendance_days a
+            ON a.employee_id = p.employee_id AND a.work_date = p.work_date
+          JOIN employees e ON e.id = a.employee_id
+         WHERE p.import_run_id = ? AND p.employee_id IS NOT NULL
+        """,
+        (import_run_id,),
+    ).fetchall()
+
+    safe: list[tuple[int, str]] = []
+    conflicts: list[Finding] = []
+    for row in rows:
+        if row["confirmed_at"]:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "관리자가 확정한 근태입니다. 롤백이 값을 되돌리지 않았습니다.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        if row["last_import_run_id"] != import_run_id:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "이 import 가 만든 행이 아닙니다(다른 import 또는 수기 입력). "
+                "롤백이 값을 되돌리지 않았습니다.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        edited = conn.execute(
+            """
+            SELECT 1 FROM audit_log
+             WHERE entity_type = 'attendance_days' AND entity_id = ?
+               AND action = 'attendance.correct'
+               AND (? IS NULL OR occurred_at > ?)
+             LIMIT 1
+            """,
+            (row["id"], finished_at, finished_at),
+        ).fetchone()
+        if edited:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "import 이후 수동으로 수정된 근태입니다. 롤백이 값을 되돌리지 않았습니다.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        safe.append((row["employee_id"], row["work_date"]))
+    return safe, conflicts
+
+
 def rollback_import(
     import_run_id: int,
     reason: str,
@@ -554,8 +743,9 @@ def rollback_import(
     """Undo an applied import without deleting a single raw punch.
 
     §2.4 is absolute: raw events are marked rolled_back_at and stay in the
-    table. Derived attendance for the affected days is recomputed from whatever
-    punches remain active.
+    table. Derived attendance is recomputed only for rows this import produced
+    and that nobody has touched since; the rest become rollback_conflict
+    findings for a human to resolve.
     """
     if not reason or not reason.strip():
         raise ImportError_("a rollback must carry a reason for the audit log")
@@ -570,11 +760,7 @@ def rollback_import(
                 f"import run {import_run_id} is '{run['status']}'; only an applied run can be rolled back"
             )
 
-        affected = conn.execute(
-            "SELECT DISTINCT employee_id, work_date FROM punch_events "
-            " WHERE import_run_id = ? AND employee_id IS NOT NULL",
-            (import_run_id,),
-        ).fetchall()
+        safe, conflicts = _rollback_conflicts(conn, import_run_id, run["finished_at"])
 
         conn.execute("BEGIN")
         marked = conn.execute(
@@ -582,11 +768,15 @@ def rollback_import(
             " WHERE import_run_id = ? AND rolled_back_at IS NULL",
             (_now(), reason, import_run_id),
         ).rowcount
-        redone = derive_attendance(conn, [(r["employee_id"], r["work_date"]) for r in affected])
+        redone = derive_attendance(conn, safe, import_run_id=import_run_id)
 
         conn.execute(
-            "UPDATE import_runs SET status = 'rolled_back', rolled_back_at = ? WHERE id = ?",
-            (_now(), import_run_id),
+            "UPDATE import_runs SET status = 'rolled_back', rolled_back_at = ?, "
+            "       findings_json = ? WHERE id = ?",
+            (_now(),
+             json.dumps({"rollbackConflicts": [c.as_dict() for c in conflicts]},
+                        ensure_ascii=False),
+             import_run_id),
         )
         conn.execute(
             """
@@ -595,12 +785,18 @@ def rollback_import(
             VALUES ('import', ?, 'import.rollback', 'import_runs', ?, ?, ?)
             """,
             (actor_id, import_run_id,
-             json.dumps({"punchesMarked": marked, "attendanceRedone": redone}, ensure_ascii=False),
+             json.dumps({"punchesMarked": marked, "attendanceRedone": redone,
+                         "conflicts": len(conflicts)}, ensure_ascii=False),
              reason),
         )
         conn.commit()
-        return {"importRunId": import_run_id, "punchesMarkedRolledBack": marked,
-                "attendanceRecomputed": redone, "punchesDeleted": 0}
+        return {
+            "importRunId": import_run_id,
+            "punchesMarkedRolledBack": marked,
+            "attendanceRecomputed": redone,
+            "punchesDeleted": 0,
+            "conflicts": [c.as_dict() for c in conflicts],
+        }
     except Exception:
         conn.rollback()
         raise
