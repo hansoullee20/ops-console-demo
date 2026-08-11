@@ -11,6 +11,9 @@
             android:name=".MainActivity"
             android:exported="false" />
         <activity
+            android:name=".TemplateWakeActivity"
+            android:exported="false" />
+        <activity
             android:name=".PerfActivity"
             android:exported="true">
             <intent-filter>
