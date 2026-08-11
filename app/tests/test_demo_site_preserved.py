@@ -12,7 +12,10 @@ import subprocess
 
 from app.config import REPO_ROOT
 
-PUBLIC_FILES = ("index.html", "profile.css", "profile.js", ".nojekyll")
+# Committed files the public build serves. `demo-data.js` is generated at
+# deploy time and is deliberately not here.
+PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js", ".nojekyll")
+STAGED_FILES = PUBLIC_FILES + ("demo-data.js",)
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pages.yml"
 NEVER_PUBLISHED = ("app", "data", "uploads", "backups", "requirements.txt")
 
@@ -24,12 +27,31 @@ def test_demo_files_stay_at_repository_root():
         assert (REPO_ROOT / name).exists(), f"public demo file went missing: {name}"
 
 
-def test_demo_entrypoint_is_still_the_mock_console():
+def test_index_no_longer_carries_its_own_dataset():
+    """Phase 2 replaced the inline mock data with a single backend source."""
     html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     assert "<!doctype html>" in html.lower()
     assert 'lang="ko"' in html
-    # the demo still carries its own mock dataset; Phase 2 is what replaces it
-    assert "const employees=" in html
+    assert "const employees=[{" not in html
+    assert "let employees=[];" in html
+    assert "let days=[];" in html
+    assert "let monthStats={};" in html
+
+
+def test_index_references_its_assets_statically():
+    """The local app and the deployed demo must be the same page: the workflow
+    adds cache-busting to these references, it does not create them."""
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    for asset in ("profile.css", "profile.js", "data-source.js"):
+        assert f'"./{asset}"' in html, f"{asset} is not referenced statically"
+    assert "<!--OPS_DEMO_INJECT-->" in html
+
+
+def test_operational_build_carries_no_demo_marker():
+    """Demo mode is injected only into the deployed artifact."""
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    assert 'OPS_MODE="demo"' not in html
+    assert "demo-data.js" not in html
 
 
 def test_pages_workflow_publishes_an_allowlist_only():
@@ -47,7 +69,7 @@ def test_pages_workflow_never_stages_backend_or_data():
     copied = re.search(r"for f in ([^;]+); do", staging)
     assert copied, "staging step no longer copies an explicit file list"
     staged = copied.group(1).split()
-    assert set(staged) == set(PUBLIC_FILES)
+    assert set(staged) == set(STAGED_FILES)
     for forbidden in NEVER_PUBLISHED:
         assert forbidden not in staged
 
