@@ -23,6 +23,7 @@ index.html        루트 — GitHub Pages 가 여기서 서빙
 profile.css       루트
 profile.js        루트
 data-source.js    루트 — API/데모 모드 데이터 로딩
+import-ui.js      루트 — 지문 XLS 가져오기 흐름 (데모 빌드에서는 안내만)
 ```
 
 로컬 업무용 앱도 같은 파일을 FastAPI 가 화이트리스트로 서빙합니다

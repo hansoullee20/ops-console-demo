@@ -14,7 +14,8 @@ from app.config import REPO_ROOT
 
 # Committed files the public build serves. `demo-data.js` is generated at
 # deploy time and is deliberately not here.
-PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js", ".nojekyll")
+PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js",
+                "import-ui.js", ".nojekyll")
 STAGED_FILES = PUBLIC_FILES + ("demo-data.js",)
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pages.yml"
 NEVER_PUBLISHED = ("app", "data", "uploads", "backups", "requirements.txt")
@@ -42,7 +43,7 @@ def test_index_references_its_assets_statically():
     """The local app and the deployed demo must be the same page: the workflow
     adds cache-busting to these references, it does not create them."""
     html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
-    for asset in ("profile.css", "profile.js", "data-source.js"):
+    for asset in ("profile.css", "profile.js", "data-source.js", "import-ui.js"):
         assert f'"./{asset}"' in html, f"{asset} is not referenced statically"
     assert "<!--OPS_DEMO_INJECT-->" in html
 

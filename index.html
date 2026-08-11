@@ -9,7 +9,7 @@
 </style>
 <link rel="stylesheet" href="./profile.css">
 </head><body>
-<header class="top"><div class="brand">대학 미화 운영</div><span class="demo">DEMO DATA · 18명</span><nav class="nav" id="topNav"><button class="on" data-page="ops">운영</button><button data-page="attendance">근태</button><button data-page="leave">휴가</button><button data-page="employees">직원</button><button data-page="docs">문서</button></nav><div class="spacer"></div><button class="topbtn" onclick="toast('원본 지문기록 보관함')">원본기록</button><button class="topbtn primary" onclick="toast('지문 XLS 가져오기')">지문 XLS 가져오기</button></header>
+<header class="top"><div class="brand">대학 미화 운영</div><span class="demo">DEMO DATA · 18명</span><nav class="nav" id="topNav"><button class="on" data-page="ops">운영</button><button data-page="attendance">근태</button><button data-page="leave">휴가</button><button data-page="employees">직원</button><button data-page="docs">문서</button></nav><div class="spacer"></div><button class="topbtn" onclick="OPS_OPEN_IMPORT_HISTORY()">원본기록</button><button class="topbtn primary" onclick="OPS_OPEN_IMPORT()">지문 XLS 가져오기</button></header>
 <main class="wrap">
 <section class="page on" id="page-ops"><div class="toolbar"><div class="datebox"><button onclick="toast('이전 기간')">‹</button><strong id="periodTitle">8월 10일–16일</strong><button onclick="toast('다음 기간')">›</button></div><div class="segment" id="opsView"><button data-view="daily">일</button><button class="on" data-view="weekly">주</button><button data-view="monthly">월</button></div><div class="brief" id="opsBrief"></div><button class="issuebtn" id="issueBtn" onclick="toggleIssues()">확인할 항목 <span class="badge" id="issueCount">0</span></button></div><div id="opsContent"></div></section>
 <section class="page" id="page-attendance"><div class="toolbar"><div class="datebox"><button onclick="toast('이전 달')">‹</button><strong id="attendanceMonth">2026년 8월</strong><button onclick="toast('다음 달')">›</button></div><div class="brief">지문 원본 → 자동판정 → 관리자 보정 → 제출용 출근부</div><button class="issuebtn" onclick="toast('근태 이상만 필터')">이상 <span class="badge" id="attendanceIssueCount">0</span></button></div><section class="panel"><div class="summarybar" id="attendanceSummary"></div><div class="panelhead"><div><h1>8월 월간 근태</h1><div class="desc">직원별 월간 결과</div></div><div class="right"><button class="btn" onclick="toast('목업: 근태 검증 다시 실행')">검증 다시 실행</button><button class="btn primary" onclick="toast('목업: 출근부 XLS 생성')">출근부 XLS 생성</button></div></div><div class="attgrid" id="attendanceGrid"></div></section></section>
@@ -38,4 +38,5 @@ function openAI(){aiWrap.classList.add('open')}function closeAI(){aiWrap.classLi
 </script><script src="./profile.js"></script>
 <!--OPS_DEMO_INJECT-->
 <script src="./data-source.js"></script>
+<script src="./import-ui.js"></script>
 </body></html>

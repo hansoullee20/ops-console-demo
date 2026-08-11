@@ -4,3 +4,8 @@
 .profile-actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;width:100%}.profile-actions .btn{padding:8px 4px;font-size:11px;white-space:nowrap}
 .drawerwrap:not(.open),.ai-panel-wrap:not(.open){visibility:hidden!important}.drawerwrap.open,.ai-panel-wrap.open{visibility:visible!important}
 @media(max-width:620px){.profileweek{gap:3px}.profileday{padding:5px 1px}.profileday .tag{font-size:8px}.profile-actions{grid-template-columns:repeat(3,1fr)}.profile-actions .btn:nth-child(4),.profile-actions .btn:nth-child(5){grid-column:auto}}
+
+/* The import preview is the first drawer content taller than the screen: a
+   month's slots plus every finding. Without this the drawer body pushed the
+   footer off-screen and the 적용 button could not be reached at all. */
+.drawerbody{overflow-y:auto;min-height:0;flex:1}.drawerfoot{flex:none}

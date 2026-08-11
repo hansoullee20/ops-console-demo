@@ -33,7 +33,7 @@ def test_health_reports_ready_database(app_client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["app"] == "ops-console-backend"
-    assert body["phase"] == 2
+    assert body["phase"] == 3
     assert body["database"]["reachable"] is True
     assert body["database"]["foreign_keys_enforced"] is True
     assert body["database"]["schema_version"] == LATEST_VERSION
@@ -150,16 +150,22 @@ def test_startup_migrates_the_database(monkeypatch, tmp_path: Path):
         assert migrate.schema_version(conn) == LATEST_VERSION
 
 
-def test_phase_2_exposes_only_read_routes():
-    """Phase 2 connects the frontend to a read-only API. The attendance
-    correction service exists and is tested, but no mutation endpoint is
-    exposed until the UI actually needs attendance editing."""
+def test_the_write_surface_is_the_import_flow_only():
+    """Phase 3 adds the fingerprint import and nothing else that writes.
+
+    Attendance correction remains a service, not an endpoint; the exact
+    allowlist is pinned in test_api.py.
+    """
     schema = create_app().openapi()["paths"]
     assert "/health" in schema
     assert "/api/v1/bootstrap" in schema
 
-    for path, operations in schema.items():
-        for method in operations:
-            assert method.lower() in {"get", "head", "options"}, (
-                f"{method.upper()} {path} is a mutation endpoint"
-            )
+    writable = {
+        path for path, operations in schema.items()
+        for method in operations
+        if method.lower() not in {"get", "head", "options"}
+    }
+    assert writable and all(path.startswith("/api/v1/imports") for path in writable), (
+        f"a write endpoint outside the import flow: {sorted(writable)}"
+    )
+    assert "/api/v1/attendance" in schema      # still read-only

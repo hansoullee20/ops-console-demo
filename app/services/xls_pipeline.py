@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import shutil
 import sqlite3
@@ -105,6 +106,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _safe_name(filename: str) -> str:
+    """A filename that can only ever land inside the uploads directory.
+
+    The operator's file name is recorded verbatim in import_runs; this is only
+    for the stored copy's path. Without it, a name like `../../index.html`
+    would write outside uploads/.
+    """
+    name = Path(str(filename or "")).name
+    name = re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", name).strip("._") or "upload.xls"
+    return name[:120]
+
+
 def _dates_in(period_start: str, period_end: str) -> list[str]:
     from app.services.ops import _date_range
 
@@ -174,7 +187,9 @@ def preview_import(
 
     filename = original_filename or source_path.name
     digest = _sha256(source_path)
-    stored = uploads / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{digest[:12]}-{filename}"
+    stored = uploads / (
+        f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{digest[:12]}-{_safe_name(filename)}"
+    )
     if source_path.resolve() != stored.resolve():
         shutil.copy2(source_path, stored)
 

@@ -3,6 +3,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
+python-multipart>=0.0.9   # the XLS upload endpoint receives multipart form data
 
 # reading the fingerprint terminal's legacy .XLS export.
 # Pinned to 1.x on purpose: xlrd 2.x removed .xls support entirely.
