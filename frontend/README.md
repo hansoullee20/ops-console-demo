@@ -2,29 +2,42 @@
 
 이 디렉터리는 **의도적으로 비어 있습니다.**
 
-AI_BUILD_PLAN.md Phase 1 의 목표 구조에는 `frontend/` 가 있지만, 현재 공개 데모는
-GitHub Pages 가 저장소 루트에서 서빙합니다:
+## 결정 (Phase 2)
+
+`index.html`, `profile.js`, `profile.css` 는 **저장소 루트에 그대로 둡니다.**
+Phase 2 에서 `frontend/` 로 이동하지 않습니다.
+
+이유:
+Phase 2 의 위험은 DB/API/프론트엔드 데이터 흐름 통합에 집중되어야 합니다.
+현재 GitHub Pages 배포는 실제 운영에서 검증이 끝난 상태이므로
+(공개 4개 파일 200, 백엔드·운영 파일 404),
+디렉터리 이동을 API 통합 작업과 한 PR 에 묶지 않습니다.
+
+`frontend/` 이동이 여전히 바람직하다면 Phase 2 가 안정되고 독립 검증을 거친 뒤
+**별도의 작은 PR** 로 처리합니다.
+
+## 현재 배치
 
 ```
-index.html
-profile.css
-profile.js
+index.html        루트 — GitHub Pages 가 여기서 서빙
+profile.css       루트
+profile.js        루트
+data-source.js    루트 — API/데모 모드 데이터 로딩
 ```
 
-이 파일들을 `frontend/` 로 옮기면 공개 데모 URL 이 바뀌고 현재 동작이 깨집니다.
-Phase 1 규칙은 "현재 UI 와 데모 동작을 그대로 유지"이므로 이동하지 않았습니다.
-
-이동은 Phase 2(백엔드 API 연결) 에서 배포 경로 변경과 함께 한 번에 처리하는 것이
-안전합니다.
+로컬 업무용 앱도 같은 파일을 FastAPI 가 화이트리스트로 서빙합니다
+(`app/routers/frontend.py`). 로컬과 배포본의 HTML 동작은 동일합니다.
 
 ---
 
 This directory is intentionally empty.
 
-The Phase 1 target layout in `AI_BUILD_PLAN.md` includes `frontend/`, but the
-public demo is served by GitHub Pages from the repository root. Moving
-`index.html`, `profile.css` and `profile.js` here would change the live demo URL
-and break current behavior, which Phase 1 explicitly forbids.
+**Decision (Phase 2): keep `index.html`, `profile.js` and `profile.css` at the
+repository root. Do not move the frontend into `frontend/` in this phase.**
 
-The move should happen in Phase 2, together with the deployment path change,
-when the frontend starts consuming the backend API.
+Phase 2 should isolate risk to DB/API/frontend data-flow integration. The
+current GitHub Pages deployment has already been verified in production, so a
+directory migration is not combined with the API integration work.
+
+If a `frontend/` move is still desirable, handle it later as a separate small
+PR after Phase 2 is stable and independently verified.

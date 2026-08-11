@@ -24,34 +24,73 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject demo enhancements
+      # The demo's data is generated from the canonical seed, through a real
+      # database and the same read models the API uses — never hand-maintained
+      # as a second dataset, and never committed. Seeding and exporting are
+      # standard-library only, so no `pip install` is needed here.
+      - name: Generate demo snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m app.exporters.demo_snapshot demo-data.js
+          head -3 demo-data.js
+
+      # index.html references its assets statically, so the local app and the
+      # deployed demo are the same page. This step only adds cache-busting and
+      # marks the artifact as the demo build.
+      - name: Mark demo build and add cache busters
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import os
-          p=Path('index.html')
-          s=p.read_text(encoding='utf-8')
-          v=os.environ.get('GITHUB_SHA','dev')[:12]
-          s=s.replace('</head>', f'<link rel="stylesheet" href="./profile.css?v={v}">\n</head>', 1)
-          s=s.replace('</body>', f'<script src="./profile.js?v={v}"></script>\n</body>', 1)
-          p.write_text(s,encoding='utf-8')
+          import os, sys
+
+          version = os.environ.get('GITHUB_SHA', 'dev')[:12]
+          html = Path('index.html').read_text(encoding='utf-8')
+
+          for asset in ('profile.css', 'profile.js', 'data-source.js'):
+              reference = f'"./{asset}"'
+              if reference not in html:
+                  sys.exit(f'index.html no longer references {asset} statically')
+              html = html.replace(reference, f'"./{asset}?v={version}"')
+
+          marker = '<!--OPS_DEMO_INJECT-->'
+          if marker not in html:
+              sys.exit('index.html is missing the demo injection marker')
+          html = html.replace(marker, (
+              '<script>window.OPS_MODE="demo";</script>\n'
+              f'<script src="./demo-data.js?v={version}"></script>'
+          ), 1)
+
+          Path('index.html').write_text(html, encoding='utf-8')
+          print(f'demo build marked, assets versioned {version}')
           PY
 
-      # The published artifact is an explicit allowlist of the public demo files.
-      # Uploading the whole repository would publish the backend, and anything
-      # that ever lands in data/ uploads/ backups/, to the public internet
-      # (AI_BUILD_PLAN.md §4: no public SQLite, no public backend).
+      # The published artifact is an explicit allowlist. Uploading the whole
+      # repository would publish the backend, and anything that ever lands in
+      # data/ uploads/ backups/, to the public internet (AI_BUILD_PLAN.md §4).
       - name: Stage public demo files
         shell: bash
         run: |
           set -euo pipefail
           rm -rf _site
           mkdir -p _site
-          for f in index.html profile.css profile.js .nojekyll; do
+          for f in index.html profile.css profile.js data-source.js demo-data.js .nojekyll; do
             cp "$f" "_site/$f"
           done
           ls -la _site
+
+      - name: Verify the artifact is demo-only and leaks nothing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find _site -type f | wc -l)" -eq 6
+          grep -q 'window.OPS_MODE="demo"' _site/index.html
+          grep -q 'OPS_DEMO_SNAPSHOT' _site/demo-data.js
+          if grep -rqiE 'ops_console\.db|PRIVATE KEY|OPS_TOKEN' _site; then
+            echo "artifact contains something it must not"; exit 1
+          fi
+          echo "artifact verified"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

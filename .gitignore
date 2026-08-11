@@ -12,6 +12,10 @@ backups/*
 *.sqlite
 *.sqlite3
 
+# generated at deploy time from the canonical seed — never committed,
+# or it becomes the duplicate dataset it exists to avoid
+demo-data.js
+
 # fingerprint terminal exports and other raw source files
 *.XLS
 *.xls

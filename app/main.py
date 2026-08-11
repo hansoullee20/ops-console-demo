@@ -1,14 +1,18 @@
 """OPS Console backend — FastAPI application.
 
-Phase 1 scope (AI_BUILD_PLAN.md §7): backend skeleton only.
+Phase 2 scope (AI_BUILD_PLAN.md §7): one backend source behind the same UI.
 
   * SQLite initialisation and migrations on start-up
   * a health endpoint
+  * a read-only operations API
+  * the console UI, served by an explicit file allowlist
 
-Explicitly NOT in this phase: business endpoints, seeding the demo dataset,
-serving or connecting the frontend, XLS import, AI tooling, remote access.
-The static demo under the repository root is untouched and still runs
-standalone on GitHub Pages.
+Explicitly NOT in this phase: mutation endpoints (the attendance correction
+service exists and is tested, but is not exposed over HTTP), XLS import, AI
+tooling, remote access. The backend binds to loopback.
+
+The public GitHub Pages demo is a separate, static artifact built from the same
+seed; it never talks to this API, and this app never serves demo data.
 """
 
 from __future__ import annotations
@@ -19,13 +23,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import config, migrate
-from app.routers import health
+from app.routers import api, frontend, health
 
 logger = logging.getLogger("ops_console")
 
 DESCRIPTION = (
-    "Backend skeleton for the university cleaning-staff operations console. "
-    "Phase 1: database, migrations and health only."
+    "Backend for the university cleaning-staff operations console. "
+    "Phase 2: database, migrations, health, and a read-only operations API."
 )
 
 
@@ -53,10 +57,13 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="OPS Console Backend",
         description=DESCRIPTION,
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
     app.include_router(health.router)
+    app.include_router(api.router)
+    # last: its catch-all /{filename} route must not shadow the API
+    app.include_router(frontend.router)
     return app
 
 
