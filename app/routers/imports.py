@@ -8,7 +8,9 @@ deliberately narrow:
     POST   /api/v1/imports/{id}/apply      confirm and commit
     POST   /api/v1/imports/{id}/rollback   undo, without deleting a punch
     GET    /api/v1/imports                 what has been imported
+    GET    /api/v1/imports/pending         previews waiting on a human
     GET    /api/v1/imports/{id}            one run, with its coverage
+    GET    /api/v1/imports/{id}/preview    the stored preview, re-openable later
 
 Three rules the endpoints exist to enforce:
 
@@ -40,7 +42,7 @@ from app.schemas.imports import (
     RollbackRequest,
     RollbackResult,
 )
-from app.services import ops, xls_import, xls_pipeline
+from app.services import import_watch, ops, xls_import, xls_pipeline
 
 router = APIRouter(prefix="/api/v1/imports", tags=["imports"])
 
@@ -159,6 +161,49 @@ def rollback_run(run_id: int, body: RollbackRequest) -> RollbackResult:
     except xls_pipeline.ImportError_ as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RollbackResult(**result)
+
+
+@router.get("/pending", summary="Imports waiting for a human to confirm")
+def list_pending() -> dict:
+    """The queue the folder watch fills.
+
+    A watched file is previewed automatically, then stops here. Nothing in this
+    list has changed any attendance data.
+    """
+    conn = _connect()
+    try:
+        runs = import_watch.pending_runs(conn)
+    finally:
+        conn.close()
+    return {
+        "pending": runs,
+        "watchDir": str(config.WATCH_DIR) if config.WATCH_DIR else None,
+    }
+
+
+@router.get("/{run_id}/preview", summary="The stored preview for a run")
+def get_preview(run_id: int) -> dict:
+    """Re-open a preview that was computed earlier, possibly by the watcher.
+
+    This is the review snapshot. Applying does not trust it: `apply` re-reads
+    the preserved file and recomputes the preview against the current slot
+    mapping before it writes anything.
+    """
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT status, preview_json FROM import_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no import run {run_id}")
+        if not row["preview_json"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"import run {run_id} is '{row['status']}' and has no stored preview",
+            )
+        return json.loads(row["preview_json"])
+    finally:
+        conn.close()
 
 
 @router.get("", response_model=list[ImportRunSummary], summary="Import history")

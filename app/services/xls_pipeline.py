@@ -176,6 +176,7 @@ def preview_import(
     original_filename: str | None = None,
     threshold_minutes: int = punch_review.DEFAULT_REPEATED_PUNCH_MINUTES,
     created_by: str = "operator",
+    discovered_by: str = "upload",
 ) -> ImportPreview:
     """Preserve the original, open an import run, and report what apply would do.
 
@@ -201,10 +202,10 @@ def preview_import(
             """
             INSERT INTO import_runs
                 (source_filename, stored_source_path, source_sha256, source_kind,
-                 status, created_by, started_at)
-            VALUES (?, ?, ?, 'fingerprint_xls', 'pending', ?, ?)
+                 status, created_by, started_at, discovered_by)
+            VALUES (?, ?, ?, 'fingerprint_xls', 'pending', ?, ?, ?)
             """,
-            (filename, str(stored), digest, created_by, _now()),
+            (filename, str(stored), digest, created_by, _now(), discovered_by),
         )
         run_id = int(cursor.lastrowid)
         conn.commit()
@@ -225,13 +226,18 @@ def preview_import(
             UPDATE import_runs
                SET status = 'previewed', period_start = ?, period_end = ?,
                    source_row_count = ?, findings_json = ?,
-                   preview_fingerprint = ?, confirmation_token = ?
+                   preview_fingerprint = ?, confirmation_token = ?,
+                   preview_json = ?
              WHERE id = ?
             """,
             (
                 parsed.period_start, parsed.period_end, len(parsed.punches),
                 json.dumps({"findings": preview.findings}, ensure_ascii=False),
-                preview.preview_fingerprint, preview.confirmation_token, run_id,
+                preview.preview_fingerprint, preview.confirmation_token,
+                # Kept so a run previewed by the folder watcher can still be
+                # reviewed hours later, by someone who never saw it happen.
+                json.dumps(preview.as_dict(), ensure_ascii=False),
+                run_id,
             ),
         )
         conn.commit()

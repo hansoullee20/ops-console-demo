@@ -80,8 +80,72 @@
     });
   }
 
+  // --- the queue the folder watch fills --------------------------------------
+  // When the backend watches the program's export folder, files are previewed
+  // without anybody asking. Those previews wait here — the button carries the
+  // count so a waiting import is visible without hunting for it.
+  var pending = [];
+  var watchDir = null;   // the export folder the backend watches, if any
+
+  function refreshPending() {
+    if (isDemo()) return Promise.resolve();
+    return send(API + '/pending', { headers: { Accept: 'application/json' } })
+      .then(function (payload) {
+        pending = (payload && payload.pending) || [];
+        watchDir = (payload && payload.watchDir) || null;
+        var button = document.querySelector('header .topbtn.primary');
+        if (button) {
+          button.textContent = pending.length
+            ? '지문 XLS 가져오기 · 확인 대기 ' + pending.length
+            : '지문 XLS 가져오기';
+        }
+      })
+      .catch(function () { /* the badge is not worth an error screen */ });
+  }
+
+  window.OPS_IMPORT_REFRESH_PENDING = refreshPending;
+
+  function showPendingList() {
+    var rows = pending.map(function (r) {
+      var how = r.discoveredBy === 'watch' ? '자동 감지' : '직접 올림';
+      var period = r.periodStart ? esc(r.periodStart) + ' ~ ' + esc(r.periodEnd) : '—';
+      return '<tr><td><b>' + esc(r.sourceFilename || '—') + '</b>' +
+        '<div class="sub">#' + r.importRunId + ' · ' + period + ' · ' + how + '</div></td>' +
+        '<td>' + (r.newPunches == null ? '—' : r.newPunches + '건') + '</td>' +
+        '<td><button class="btn primary" onclick="OPS_IMPORT_REVIEW(' + r.importRunId +
+        ')">검토</button></td></tr>';
+    }).join('');
+
+    drawer('확인 대기 중인 가져오기', pending.length + '건 · 아직 아무것도 반영되지 않았습니다',
+      '<div class="box" style="overflow-x:auto"><table><thead><tr><th>파일</th>' +
+      '<th>새 기록</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p style="color:#6d7682;margin-top:12px;line-height:1.7">' +
+      '내보내기 폴더에서 발견된 파일은 <b>미리보기까지만 자동</b>으로 진행됩니다. ' +
+      '근태에 반영하려면 사람이 검토하고 확인해야 합니다.</p>',
+      '<button class="btn" onclick="closeDrawer()">닫기</button>' +
+      '<button class="btn primary" onclick="OPS_OPEN_IMPORT_UPLOAD()">새 파일 올리기</button>');
+  }
+
+  window.OPS_IMPORT_REVIEW = function (runId) {
+    drawer('가져오기 미리보기', '불러오는 중', '<p style="padding:8px 0;color:#6d7682">…</p>', '');
+    send(API + '/' + runId + '/preview', { headers: { Accept: 'application/json' } })
+      .then(function (preview) {
+        current = preview;
+        showPreview(preview);
+      })
+      .catch(function (err) { fail('미리보기를 불러오지 못했습니다.', err.message); });
+  };
+
   // --- step 1: pick a file ---------------------------------------------------
   window.OPS_OPEN_IMPORT = function () {
+    if (isDemo()) return demoNotice();
+    // A waiting preview is the thing to deal with first; uploading another file
+    // on top of it just makes two queues.
+    if (pending.length) return showPendingList();
+    return window.OPS_OPEN_IMPORT_UPLOAD();
+  };
+
+  window.OPS_OPEN_IMPORT_UPLOAD = function () {
     if (isDemo()) return demoNotice();
     current = null;
     applied = null;
@@ -99,7 +163,12 @@
       '여기에서 선택하십시오. 이 앱은 단말에 직접 접속하지 않습니다.</p>' +
       '<p style="color:#6d7682;margin-top:10px;line-height:1.7">' +
       '먼저 <b>미리보기</b>만 실행합니다. 이 단계에서는 근태 데이터가 전혀 바뀌지 않으며, ' +
-      '무엇이 들어오는지 확인한 뒤에만 적용됩니다.</p>',
+      '무엇이 들어오는지 확인한 뒤에만 적용됩니다.</p>' +
+      (watchDir
+        ? '<p style="color:#6d7682;margin-top:10px;line-height:1.7">' +
+          '이 PC 는 <b>' + esc(watchDir) + '</b> 폴더도 감시합니다. 프로그램이 그 폴더로 ' +
+          '내보내면 미리보기까지 자동으로 진행되고, 확인 대기로 올라옵니다.</p>'
+        : ''),
       '<button class="btn" onclick="closeDrawer()">취소</button>' +
       '<button class="btn primary" onclick="OPS_IMPORT_PREVIEW()">미리보기</button>');
   };
@@ -211,6 +280,7 @@
     })
       .then(function (result) {
         applied = result;
+        refreshPending();
         drawer('가져오기 완료', current.sourceFilename,
           '<div class="box"><div class="kv">' +
             '<div class="k">추가된 기록</div><div><b>' + result.inserted + '</b>건</div>' +
@@ -240,6 +310,7 @@
       body: JSON.stringify({ reason: reason.trim() })
     })
       .then(function (result) {
+        refreshPending();
         var conflicts = result.conflicts || [];
         drawer('되돌리기 완료', 'import #' + id,
           '<div class="box"><div class="kv">' +
@@ -296,4 +367,11 @@
       })
       .catch(function (err) { fail('가져오기 기록을 불러오지 못했습니다.', err.message); });
   };
+
+  // Ask once on load whether the folder watch left anything waiting.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', refreshPending);
+  } else {
+    refreshPending();
+  }
 })();

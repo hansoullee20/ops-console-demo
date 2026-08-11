@@ -7,6 +7,8 @@ Phase 2's one backend source behind the same UI.
   * a health endpoint
   * a read-only operations API
   * the fingerprint import: upload -> preview -> confirm -> apply -> rollback
+  * an optional watch on the folder the terminal's PC program exports into,
+    which previews new files but never applies them
   * the console UI, served by an explicit file allowlist
 
 Explicitly NOT in this phase: the attendance correction endpoint (the service
@@ -26,6 +28,7 @@ from fastapi import FastAPI
 
 from app import config, migrate
 from app.routers import api, frontend, health, imports
+from app.services import import_watch
 
 logger = logging.getLogger("ops_console")
 
@@ -53,7 +56,16 @@ async def lifespan(app: FastAPI):
         # A failed migration must not silently start a half-configured host.
         # /health reports the problem instead.
         logger.error("database initialisation failed: %s", exc)
-    yield
+
+    # Optional folder watch: previews new terminal exports, never applies them.
+    watcher = import_watch.build_from_config()
+    if watcher is not None:
+        watcher.start()
+    try:
+        yield
+    finally:
+        if watcher is not None:
+            watcher.stop()
 
 
 def create_app() -> FastAPI:
@@ -82,6 +94,13 @@ def main() -> None:  # pragma: no cover - CLI convenience
             "uvicorn is not installed. Install backend dependencies with:\n"
             "    pip install -r requirements.txt"
         )
+    # uvicorn only configures its own loggers, so without this the folder
+    # watcher would run completely silently — including when it refuses to run
+    # (wrong folder, demo database). Unattended work has to be visible.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
     # Loopback by default: the backend is a work-PC host, not a public service.
     uvicorn.run("app.main:app", host=config.HOST, port=config.PORT, reload=False)
 

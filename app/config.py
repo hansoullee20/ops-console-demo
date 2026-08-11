@@ -45,6 +45,13 @@ MAX_UPLOAD_BYTES = int(os.environ.get("OPS_MAX_UPLOAD_BYTES", str(25 * 1024 * 10
 # exercised against the demo seed on purpose, never by accident.
 ALLOW_DEMO_IMPORT = os.environ.get("OPS_ALLOW_DEMO_IMPORT", "").strip() == "1"
 
+# Optional: a folder the terminal's PC program exports into. When set, the
+# backend previews new .XLS files by itself so nobody has to remember to upload
+# one. Applying is never automatic — see app/services/import_watch.py.
+_watch_dir = os.environ.get("OPS_WATCH_DIR", "").strip()
+WATCH_DIR = Path(_watch_dir) if _watch_dir else None
+WATCH_INTERVAL_SECONDS = int(os.environ.get("OPS_WATCH_INTERVAL_SECONDS", "600"))
+
 
 def ensure_runtime_dirs() -> None:
     """Create the writable runtime directories if they do not exist."""
