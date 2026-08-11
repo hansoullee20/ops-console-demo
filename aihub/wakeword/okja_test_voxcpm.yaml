@@ -1,0 +1,70 @@
+# AI Hub / Okja wake-word smoke test
+# Based on LiveKit WakeWord's official multilingual VoxCPM test config.
+# Goal: verify the zero-cost Korean custom wake-word training pipeline before scaling up.
+
+model_name: okja_v1_test
+
+target_phrases:
+  - "옥자"
+  - "옥자야"
+  - "Hey Okja"
+
+tts_backend: voxcpm
+
+voxcpm_tts:
+  voice_design_prompts:
+    - "A Korean elderly woman, clear natural voice, moderate pace, warm tone"
+    - "A Korean adult woman, clear mid-pitch voice, moderate pace, neutral tone"
+    - "A Korean adult man, clear natural voice, moderate pace, neutral tone"
+  cfg_values: [2.0]
+  inference_timesteps_list: [10]
+
+# Smoke-test scale only. This is NOT the final production model.
+n_samples: 24
+n_samples_val: 8
+n_background_samples: 40
+n_background_samples_val: 8
+tts_batch_size: 4
+
+# Korean manual hard negatives matter because automatic adversarial generation is English-biased.
+custom_negative_phrases:
+  - "옥상"
+  - "옥수수"
+  - "독자"
+  - "박자"
+  - "여자"
+  - "오자"
+  - "옥자씨"
+  - "헤이"
+  - "오케이"
+  - "Hey"
+  - "Okay"
+  - "Hey Google"
+  - "Okay Google"
+
+data_dir: ./wakeword_data
+output_dir: ./wakeword_output
+
+augmentation:
+  clip_duration: 2.0
+  batch_size: 8
+  rounds: 2
+  background_paths: [./wakeword_data/backgrounds]
+  rir_paths: [./wakeword_data/rirs]
+
+# Tiny DNN first because this run only verifies the pipeline.
+# After the smoke test passes, switch to conv_attention and production-scale data.
+model:
+  model_type: dnn
+  model_size: tiny
+
+steps: 500
+learning_rate: 0.001
+max_negative_weight: 1000
+target_fp_per_hour: 1.0
+
+batch_n_per_class:
+  positive: 10
+  adversarial_negative: 10
+  ACAV100M_sample: 64
+  background_noise: 10
