@@ -24,21 +24,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fix closed overlay opacity
+      - name: Inject demo enhancements
+        shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('index.html')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace(
-              '.scrim{position:absolute;inset:0;background:rgba(16,24,40,.2)}',
-              '.scrim{position:absolute;inset:0;background:rgba(16,24,40,.2);opacity:0}.drawerwrap.open .scrim{opacity:1}'
-          )
-          s = s.replace(
-              '.ai-scrim{position:absolute;inset:0;background:rgba(17,24,39,.12)}',
-              '.ai-scrim{position:absolute;inset:0;background:rgba(17,24,39,.12);opacity:0}.ai-panel-wrap.open .ai-scrim{opacity:1}'
-          )
-          p.write_text(s, encoding='utf-8')
+          import os
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          v=os.environ.get('GITHUB_SHA','dev')[:12]
+          s=s.replace('</head>', f'<link rel="stylesheet" href="./profile.css?v={v}">\n</head>', 1)
+          s=s.replace('</body>', f'<script src="./profile.js?v={v}"></script>\n</body>', 1)
+          p.write_text(s,encoding='utf-8')
           PY
 
       - name: Configure Pages
