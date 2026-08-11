@@ -1,5 +1,6 @@
 package com.soul.aihub;
 
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Debug;
@@ -9,6 +10,7 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -40,6 +42,20 @@ public class PerfActivity extends MainActivity {
         ViewGroup content = findViewById(android.R.id.content);
         if (content != null && content.getChildCount() > 0 && content.getChildAt(0) instanceof LinearLayout) {
             LinearLayout root = (LinearLayout) content.getChildAt(0);
+
+            Button localWakeButton = new Button(this);
+            localWakeButton.setAllCaps(false);
+            localWakeButton.setTextSize(17);
+            localWakeButton.setText("실험 · 초경량 로컬 옥자 감지");
+            localWakeButton.setOnClickListener(v ->
+                    startActivity(new Intent(this, TemplateWakeActivity.class)));
+            LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            buttonParams.topMargin = 20;
+            root.addView(localWakeButton, buttonParams);
+
             perfText = new TextView(this);
             perfText.setTextColor(Color.rgb(160, 255, 180));
             perfText.setTextSize(14);
