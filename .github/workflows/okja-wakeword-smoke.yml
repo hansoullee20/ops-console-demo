@@ -1,0 +1,67 @@
+name: Train Okja Wakeword Smoke
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/okja_test_voxcpm.yaml'
+      - '.github/workflows/okja-wakeword-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng libsndfile1 ffmpeg sox portaudio19-dev
+
+      - name: Install LiveKit WakeWord with multilingual training extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'livekit-wakeword[train,eval,export,voxcpm]'
+
+      - name: Show versions and disk
+        run: |
+          python --version
+          livekit-wakeword --help | head -40
+          df -h
+
+      - name: Download smoke-test models and data
+        run: |
+          livekit-wakeword setup --config aihub/wakeword/okja_test_voxcpm.yaml
+          df -h
+
+      - name: Train and export Okja smoke model
+        run: |
+          livekit-wakeword run aihub/wakeword/okja_test_voxcpm.yaml
+
+      - name: Show outputs
+        if: always()
+        run: |
+          echo '--- output ---'
+          find wakeword_output -maxdepth 3 -type f -printf '%p %k KB\n' 2>/dev/null | sort || true
+          echo '--- disk ---'
+          df -h
+
+      - name: Upload wake-word result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-wakeword-smoke
+          path: |
+            wakeword_output/**
+          if-no-files-found: warn
+          retention-days: 7
