@@ -47,8 +47,13 @@ public class PerfActivity extends MainActivity {
             localWakeButton.setAllCaps(false);
             localWakeButton.setTextSize(17);
             localWakeButton.setText("실험 · 초경량 로컬 옥자 감지");
-            localWakeButton.setOnClickListener(v ->
-                    startActivity(new Intent(this, TemplateWakeActivity.class)));
+            localWakeButton.setOnClickListener(v -> {
+                startActivity(new Intent(this, TemplateWakeActivity.class));
+                // Important for a clean benchmark: destroy the parent activity so
+                // Android SpeechRecognizer/TTS cannot keep running behind the
+                // local AudioRecord + MFCC/DTW detector.
+                finish();
+            });
             LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
