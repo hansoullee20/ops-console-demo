@@ -38,7 +38,7 @@ public class PerfActivity extends MainActivity {
             localWakeButton.setTextSize(17);
             localWakeButton.setText("비교 테스트 · 로컬 옥자 감지");
             localWakeButton.setOnClickListener(v -> {
-                startActivity(new Intent(this, TemplateWakeActivity.class));
+                startActivity(new Intent(this, StableTemplateWakeActivity.class));
                 // Destroy STT activity so the local benchmark has no SpeechRecognizer/TTS overlap.
                 finish();
             });
