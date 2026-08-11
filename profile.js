@@ -36,7 +36,13 @@
       <div class="profileweektitle">이번 주</div>
       <div class="profileweek">${week}</div>
       <div class="profilesummary">정상 ${counts.ok} · 연차 ${counts.leave} · 병가 ${counts.sick} · 대체 ${counts.replacement} · 확인 ${counts.issue}</div>`;
-    dfoot.innerHTML='<button class="btn" data-profile-nav="attendance">근태 보기</button><button class="btn" data-profile-nav="leave">휴가 보기</button><button class="btn primary" data-profile-close>닫기</button>';
+    dfoot.innerHTML=`<div class="profile-actions">
+      <button class="btn" data-profile-nav="attendance">근태</button>
+      <button class="btn" data-profile-nav="leave">휴가</button>
+      <button class="btn" data-profile-action="replacement" data-employee="${esc(e.name)}">대체 배정</button>
+      <button class="btn" data-profile-nav="docs">문서</button>
+      <button class="btn primary" data-profile-action="memo" data-employee="${esc(e.name)}">메모</button>
+    </div>`;
     wrap.classList.add('open');
   };
   function nameFromTarget(t){
@@ -47,6 +53,20 @@
   document.addEventListener('click',function(ev){
     const nav=ev.target.closest('[data-profile-nav]');
     if(nav){ev.preventDefault();ev.stopPropagation();const page=nav.getAttribute('data-profile-nav');const b=document.querySelector(`#topNav button[data-page="${page}"]`);if(b)b.click();if(window.closeDrawer)closeDrawer();return;}
+    const action=ev.target.closest('[data-profile-action]');
+    if(action){
+      ev.preventDefault();ev.stopPropagation();
+      const kind=action.getAttribute('data-profile-action');
+      const name=action.getAttribute('data-employee')||'';
+      if(kind==='replacement'){
+        if(window.closeDrawer)closeDrawer();
+        if(window.toast)toast(`${name} · 대체 배정 화면 (목업)`);
+      }else if(kind==='memo'){
+        const note=window.prompt(`${name} 관리자 메모`,'');
+        if(note!==null && note.trim() && window.toast)toast(`${name} · 메모 저장 (목업)`);
+      }
+      return;
+    }
     if(ev.target.closest('[data-profile-close]')){ev.preventDefault();ev.stopPropagation();if(window.closeDrawer)closeDrawer();return;}
     const name=nameFromTarget(ev.target); if(!name) return;
     ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();showEmployeeProfile(name);
