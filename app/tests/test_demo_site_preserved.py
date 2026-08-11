@@ -123,3 +123,78 @@ def test_operational_paths_are_actually_ignored_by_git():
         assert ignored is should_be_ignored, (
             f"{path}: expected ignored={should_be_ignored}, got {ignored}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 cross-check found several views still carrying their own copy of the
+# demo people, or figures invented from row indexes. These pin the fixes.
+# ---------------------------------------------------------------------------
+FICTIONAL_NAMES = (
+    "김가람", "박나래", "이도연", "최라온", "정마루", "한보람", "윤새봄",
+    "임서윤", "강하늘", "오예린", "송지우", "문채원", "백하린", "권유진",
+    "서지안", "홍다은", "노수빈", "배예나",
+)
+
+# The AI assistant is an explicit mock (labelled MOCK in the UI) and belongs to
+# a later phase; its scripted replies may name people.
+AI_MOCK_MARKERS = ("sendAI", "aiChat", "ai-fab", "askQuick")
+
+
+def test_no_view_carries_its_own_copy_of_the_people():
+    """Every tab must render the one dataset the backend supplies."""
+    offenders = []
+    for number, line in enumerate((REPO_ROOT / "index.html").read_text(encoding="utf-8").splitlines(), 1):
+        if any(marker in line for marker in AI_MOCK_MARKERS):
+            continue
+        found = sorted({name for name in FICTIONAL_NAMES if name in line})
+        if found:
+            offenders.append(f"line {number}: {found}")
+    assert offenders == [], (
+        "index.html hard-codes employee names outside the AI mock: " + "; ".join(offenders)
+    )
+
+
+def test_attendance_marks_are_not_invented_from_row_indexes():
+    """The 근태 tab used to paint 병/휴 by row index for only the first ten
+    people, independent of the real attendance rows."""
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    assert "slice(0,10)" not in html
+    assert "idx===0" not in html
+    assert "function renderAttendance(){renderAttendanceGrid()}" in html
+
+
+def test_every_render_hook_index_calls_actually_exists():
+    """index.html delegates to these; a missing one silently breaks a view.
+
+    The monthly view was lost this way once: `renderMonthly` shared a line with
+    the mock `monthStats` literal and went with it.
+    """
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (REPO_ROOT / "data-source.js").read_text(encoding="utf-8")
+
+    for name in ("renderOps", "renderDaily", "renderWeekly", "renderMonthly",
+                 "renderAttendance", "renderEmployees"):
+        assert f"function {name}(" in html, f"index.html lost {name}()"
+
+    for name in ("periodTitleFor", "dailyAside", "renderAttendanceGrid",
+                 "renderLeave", "renderEmployeeBrief", "renderAttendanceSummary"):
+        assert f"window.{name} =" in script, f"data-source.js does not define {name}()"
+
+    # these three are called from index.html itself
+    for name in ("periodTitleFor", "dailyAside", "renderAttendanceGrid"):
+        assert name in html, f"index.html never calls {name}()"
+
+
+def test_dynamic_containers_exist_for_every_derived_view():
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    for element_id in ("leaveTable", "leaveSummary", "empBrief", "attendanceSummary",
+                       "attendanceIssueCount", "attendanceMonth", "leaveMonth"):
+        assert f'id="{element_id}"' in html, f"missing container #{element_id}"
+
+
+def test_no_template_placeholder_survives_in_a_quoted_string():
+    """`${dailyAside()}` was once inserted into a single-quoted string, so it
+    rendered literally instead of calling the function."""
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    for hook in ("dailyAside", "renderAttendanceGrid"):
+        assert "${" + hook not in html, f"${{{hook}()}} is not interpolated in a quoted string"

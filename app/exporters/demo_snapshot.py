@@ -53,6 +53,8 @@ def build_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "days": view["days"],
         "employees": view["employees"],
         "monthStats": ops.month_stats(conn, DEMO_YEAR, DEMO_MONTH),
+        "leave": ops.leave_cases(conn),
+        "monthGrid": ops.month_grid(conn, DEMO_YEAR, DEMO_MONTH),
         "fingerprint": {"lastImportAt": None, "isStale": True},
     }
 

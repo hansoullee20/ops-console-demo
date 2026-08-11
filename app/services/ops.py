@@ -150,6 +150,99 @@ def week_view(
     }
 
 
+def leave_cases(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Leave and sick-leave cases, with findings surfaced but never applied.
+
+    If a medical certificate covers less than the requested sick leave, that is
+    reported as a finding; neither period is silently altered (§7 Phase 4).
+    """
+    rows = conn.execute(
+        """
+        SELECT l.*, e.name FROM leave_requests l
+          JOIN employees e ON e.id = l.employee_id
+         ORDER BY l.start_date, e.id
+        """
+    ).fetchall()
+    cases = []
+    for row in rows:
+        finding = None
+        if row["cert_end_date"] and row["cert_end_date"] < row["end_date"]:
+            finding = "증빙 기간이 신청 기간보다 짧습니다"
+        cases.append(
+            {
+                "employee": row["name"],
+                "zone": conn.execute(
+                    "SELECT zone FROM employees WHERE id = ?", (row["employee_id"],)
+                ).fetchone()["zone"],
+                "leaveType": row["leave_type"],
+                "startDate": row["start_date"],
+                "endDate": row["end_date"],
+                "status": row["status"],
+                "workingDayCount": _trim(row["working_day_count"]),
+                "certStartDate": row["cert_start_date"],
+                "certEndDate": row["cert_end_date"],
+                "finding": finding,
+            }
+        )
+    return cases
+
+
+def month_grid(conn: sqlite3.Connection, year: int, month: int) -> dict[str, Any]:
+    """Per-employee marks for every day of the month (the 근태 tab).
+
+    Derived from attendance_days and the site calendar. A day with no record is
+    marked "기록 없음", never as attended and never as absence — missing data is
+    not evidence of either (AI_BUILD_PLAN.md §3).
+    """
+    prefix = f"{year:04d}-{month:02d}-"
+    days_in_month = [31, 29 if _leap(year) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+
+    non_working = {
+        row["calendar_date"]
+        for row in conn.execute(
+            "SELECT calendar_date FROM site_calendar WHERE calendar_date LIKE ? AND is_working = 0",
+            (prefix + "%",),
+        )
+    }
+
+    rows = conn.execute(
+        """
+        SELECT a.employee_id, a.work_date, a.status, a.review_flag
+          FROM attendance_days a WHERE a.work_date LIKE ?
+        """,
+        (prefix + "%",),
+    ).fetchall()
+    by_employee: dict[int, dict[str, dict]] = {}
+    for row in rows:
+        by_employee.setdefault(row["employee_id"], {})[row["work_date"]] = dict(row)
+
+    people = []
+    for person in employees(conn):
+        marks = []
+        issues = 0
+        for day in range(1, days_in_month + 1):
+            iso = f"{prefix}{day:02d}"
+            record = by_employee.get(person["id"], {}).get(iso)
+            if record is None:
+                mark = "—" if iso in non_working else "·"
+            elif record["review_flag"]:
+                mark, issues = "!", issues + 1
+            elif record["status"] in ("leave", "half_day"):
+                mark = "휴"
+            elif record["status"] == "sick_leave":
+                mark = "병"
+            elif record["status"] in ("off", "holiday"):
+                mark = "—"
+            elif record["status"] == "unknown":
+                mark = "?"
+            else:
+                mark = "정"
+            marks.append(mark)
+        people.append({"name": person["name"], "marks": marks, "issues": issues})
+
+    return {"year": year, "month": month, "days": days_in_month, "employees": people}
+
+
 def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, dict[str, int]]:
     """Per-day aggregate for the monthly calendar.
 

@@ -44,6 +44,32 @@ class FingerprintInfo(BaseModel):
     isStale: bool = True
 
 
+class LeaveCase(BaseModel):
+    employee: str
+    zone: str | None = None
+    leaveType: str
+    startDate: str
+    endDate: str
+    status: str
+    workingDayCount: float | None = None
+    certStartDate: str | None = None
+    certEndDate: str | None = None
+    finding: str | None = None
+
+
+class MonthGridRow(BaseModel):
+    name: str
+    marks: list[str] = Field(default_factory=list)
+    issues: int = 0
+
+
+class MonthGrid(BaseModel):
+    year: int
+    month: int
+    days: int
+    employees: list[MonthGridRow] = Field(default_factory=list)
+
+
 class Bootstrap(BaseModel):
     """Everything the operations views need in one round trip."""
 
@@ -54,19 +80,9 @@ class Bootstrap(BaseModel):
     days: list[Day] = Field(default_factory=list)
     employees: list[EmployeeRow] = Field(default_factory=list)
     monthStats: dict[str, dict[str, int]] = Field(default_factory=dict)
+    leave: list[LeaveCase] = Field(default_factory=list)
+    monthGrid: MonthGrid | None = None
     fingerprint: FingerprintInfo
-
-
-class LeaveCase(BaseModel):
-    employee: str
-    leaveType: str
-    startDate: str
-    endDate: str
-    status: str
-    workingDayCount: float | None = None
-    certStartDate: str | None = None
-    certEndDate: str | None = None
-    finding: str | None = None
 
 
 class ReplacementRow(BaseModel):

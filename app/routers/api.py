@@ -70,6 +70,8 @@ def get_bootstrap(
             days=view["days"],
             employees=view["employees"],
             monthStats=ops.month_stats(conn, year, month),
+            leave=ops.leave_cases(conn),
+            monthGrid=ops.month_grid(conn, year, month),
             fingerprint={
                 "lastImportAt": fingerprint["last_import_at"],
                 "isStale": fingerprint["is_stale"],
@@ -165,33 +167,7 @@ def get_attendance(
 def list_leave() -> list[LeaveCase]:
     conn = _connect()
     try:
-        rows = conn.execute(
-            """
-            SELECT l.*, e.name FROM leave_requests l
-              JOIN employees e ON e.id = l.employee_id
-             ORDER BY l.start_date, e.id
-            """
-        ).fetchall()
-        cases = []
-        for row in rows:
-            finding = None
-            if row["cert_end_date"] and row["cert_end_date"] < row["end_date"]:
-                # never silently alter either period — surface it (§7 Phase 4)
-                finding = "증빙 기간이 신청 기간보다 짧습니다"
-            cases.append(
-                LeaveCase(
-                    employee=row["name"],
-                    leaveType=row["leave_type"],
-                    startDate=row["start_date"],
-                    endDate=row["end_date"],
-                    status=row["status"],
-                    workingDayCount=row["working_day_count"],
-                    certStartDate=row["cert_start_date"],
-                    certEndDate=row["cert_end_date"],
-                    finding=finding,
-                )
-            )
-        return cases
+        return [LeaveCase(**case) for case in ops.leave_cases(conn)]
     finally:
         conn.close()
 
