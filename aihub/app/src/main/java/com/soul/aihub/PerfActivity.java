@@ -64,7 +64,7 @@ public class PerfActivity extends MainActivity {
         long cpuDelta = Math.max(0, nowCpu - lastCpuMs);
         double cpuPct = (cpuDelta * 100.0) / wallDelta;
 
-        int pssKb = Debug.getPss();
+        long pssKb = Debug.getPss();
         Runtime rt = Runtime.getRuntime();
         long javaUsedBytes = rt.totalMemory() - rt.freeMemory();
         double javaMb = javaUsedBytes / (1024.0 * 1024.0);
