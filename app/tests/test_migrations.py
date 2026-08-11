@@ -350,3 +350,74 @@ def test_bookkeeping_commits_atomically_with_the_schema(
     with db.connection(db_path) as conn:
         assert "b" not in db.table_names(conn)
         assert migrate.schema_version(conn) == 1
+
+
+def test_migration_managing_its_own_transaction_is_refused(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """A COMMIT inside a migration commits everything before it, so a later
+    failure leaves a partial schema with no schema_migrations row — and the
+    migration then fails forever with "table ... already exists"."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(migrations_dir, "0001_base.sql", "CREATE TABLE base (id INTEGER PRIMARY KEY);")
+    migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    _write_migration(
+        migrations_dir,
+        "0002_selfcommit.sql",
+        "CREATE TABLE early (id INTEGER PRIMARY KEY);\n"
+        "COMMIT;\n"
+        "CREATE TABLE late (id INTEGER PRIMARY KEY);\n"
+        "THIS IS NOT SQL;\n",
+    )
+    with pytest.raises(migrate.MigrationError, match="manages its own transaction"):
+        migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    # refused before running: no partial schema, and the next run is not wedged
+    with db.connection(db_path) as conn:
+        tables = db.table_names(conn)
+        assert "early" not in tables and "late" not in tables
+        assert migrate.schema_version(conn) == 1
+
+
+@pytest.mark.parametrize(
+    "statement",
+    ["BEGIN;", "BEGIN TRANSACTION;", "BEGIN IMMEDIATE TRANSACTION;", "COMMIT;",
+     "END TRANSACTION;", "SAVEPOINT sp1;", "ROLLBACK;", "ROLLBACK TO sp1;"],
+)
+def test_every_transaction_control_form_is_refused(
+    tmp_path: Path, db_path: Path, backups_dir: Path, statement: str
+):
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(
+        migrations_dir, "0001_base.sql", f"CREATE TABLE w (id INTEGER PRIMARY KEY);\n{statement}\n"
+    )
+    with pytest.raises(migrate.MigrationError, match="manages its own transaction"):
+        migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+
+def test_trigger_bodies_are_not_mistaken_for_transaction_control(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """CREATE TRIGGER bodies are delimited by BEGIN ... END; every shipped
+    migration uses them, so the guard must not fire on them."""
+    for migration in migrate.discover_migrations():
+        assert migration.transaction_control_statements() == [], (
+            f"{migration.path.name} falsely flagged: "
+            f"{migration.transaction_control_statements()}"
+        )
+
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(
+        migrations_dir,
+        "0001_trigger.sql",
+        "CREATE TABLE w (id INTEGER PRIMARY KEY, v TEXT);\n"
+        "CREATE TRIGGER trg_w BEFORE DELETE ON w FOR EACH ROW\n"
+        "BEGIN\n"
+        "    SELECT RAISE(ABORT, 'no deletes');\n"
+        "END;\n",
+    )
+    assert migrate.run_migrations(db_path, migrations_dir, backups_dir).applied == [1]

@@ -43,6 +43,27 @@ _DESTRUCTIVE_PATTERNS = (
     re.compile(r"\bDROP\s+INDEX\b", re.IGNORECASE),
 )
 
+# The runner owns the transaction: it wraps each migration in BEGIN ... COMMIT
+# so a failure leaves no partial schema. A migration that issues its own
+# transaction control breaks that guarantee — a COMMIT half-way through commits
+# the statements before it, and a later failure then leaves the database with a
+# partial schema, no schema_migrations row, and a migration that fails forever
+# afterwards with "table ... already exists". There is no legitimate reason for
+# a migration body to do this, so it is refused outright rather than gated
+# behind a marker.
+#
+# These patterns deliberately do NOT match the BEGIN ... END; bodies of CREATE
+# TRIGGER, which every migration in this project uses.
+_TRANSACTION_CONTROL_PATTERNS = (
+    re.compile(r"\bBEGIN\s*;", re.IGNORECASE),
+    re.compile(r"\bBEGIN\s+(DEFERRED\s+|IMMEDIATE\s+|EXCLUSIVE\s+)?TRANSACTION\b", re.IGNORECASE),
+    re.compile(r"\bCOMMIT\b", re.IGNORECASE),
+    re.compile(r"\bEND\s+TRANSACTION\b", re.IGNORECASE),
+    re.compile(r"\bSAVEPOINT\b", re.IGNORECASE),
+    re.compile(r"\bROLLBACK\s*;", re.IGNORECASE),
+    re.compile(r"\bROLLBACK\s+TO\b", re.IGNORECASE),
+)
+
 SCHEMA_MIGRATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
@@ -72,12 +93,21 @@ class Migration:
     def allows_destructive(self) -> bool:
         return ALLOW_DESTRUCTIVE_MARKER in self.sql
 
+    @property
+    def _code(self) -> str:
+        """SQL with line comments stripped, so prose never scans as a statement."""
+        return "\n".join(line.split("--", 1)[0] for line in self.sql.splitlines())
+
     def destructive_statements(self) -> list[str]:
-        # Strip line comments so the marker/doc text is not mistaken for SQL.
-        code = "\n".join(line.split("--", 1)[0] for line in self.sql.splitlines())
         found: list[str] = []
         for pattern in _DESTRUCTIVE_PATTERNS:
-            found.extend(match.group(0) for match in pattern.finditer(code))
+            found.extend(match.group(0) for match in pattern.finditer(self._code))
+        return found
+
+    def transaction_control_statements(self) -> list[str]:
+        found: list[str] = []
+        for pattern in _TRANSACTION_CONTROL_PATTERNS:
+            found.extend(" ".join(m.group(0).split()) for m in pattern.finditer(self._code))
         return found
 
 
@@ -197,6 +227,15 @@ def _validate(migrations: list[Migration], applied: dict[int, sqlite3.Row]) -> N
                 "applied (checksum mismatch); write a new migration instead of editing history"
             )
         if row is None:
+            transaction_control = migration.transaction_control_statements()
+            if transaction_control:
+                raise MigrationError(
+                    f"migration {migration.path.name} manages its own transaction "
+                    f"({', '.join(sorted(set(transaction_control)))}); the runner wraps every "
+                    "migration in a transaction, and taking that over would leave a partial "
+                    "schema behind on failure"
+                )
+
             destructive = migration.destructive_statements()
             if destructive and not migration.allows_destructive:
                 raise MigrationError(
