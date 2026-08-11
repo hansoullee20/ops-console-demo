@@ -31,6 +31,13 @@ def connect(db_path: Path | str | None = None, *, read_only: bool = False) -> sq
 
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # SQLite fires BEFORE DELETE triggers for the implicit delete performed by
+    # INSERT OR REPLACE only when recursive_triggers is ON (it is OFF by
+    # default). Without this, `INSERT OR REPLACE INTO punch_events` silently
+    # destroys the raw punch event it collides with, bypassing the immutability
+    # trigger entirely. Migration 0002 guards the updated_at triggers so they
+    # still terminate with recursion enabled.
+    conn.execute("PRAGMA recursive_triggers = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     if not read_only:
         conn.execute("PRAGMA journal_mode = WAL")
@@ -60,6 +67,10 @@ def transaction(db_path: Path | str | None = None) -> Iterator[sqlite3.Connectio
 
 def foreign_keys_enabled(conn: sqlite3.Connection) -> bool:
     return bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+
+
+def recursive_triggers_enabled(conn: sqlite3.Connection) -> bool:
+    return bool(conn.execute("PRAGMA recursive_triggers").fetchone()[0])
 
 
 def table_names(conn: sqlite3.Connection) -> list[str]:

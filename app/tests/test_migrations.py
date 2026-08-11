@@ -10,6 +10,11 @@ import pytest
 from app import db, migrate
 from app.services.health import REQUIRED_TABLES
 
+# Derived from the shipped migrations rather than hard-coded, so adding a
+# migration does not silently invalidate these assertions.
+SHIPPED_VERSIONS = [m.version for m in migrate.discover_migrations()]
+LATEST_VERSION = max(SHIPPED_VERSIONS)
+
 
 def test_repo_migrations_are_wellformed():
     migrations = migrate.discover_migrations()
@@ -23,8 +28,8 @@ def test_repo_migrations_are_wellformed():
 def test_init_creates_every_required_table(db_path: Path, backups_dir: Path):
     result = migrate.run_migrations(db_path, backups_dir=backups_dir)
 
-    assert result.applied == [1]
-    assert result.schema_version == 1
+    assert result.applied == SHIPPED_VERSIONS
+    assert result.schema_version == LATEST_VERSION
     assert db_path.exists()
 
     with db.connection(db_path) as conn:
@@ -46,19 +51,20 @@ def test_rerun_is_idempotent(db_path: Path, backups_dir: Path):
     second = migrate.run_migrations(db_path, backups_dir=backups_dir)
     third = migrate.run_migrations(db_path, backups_dir=backups_dir)
 
-    assert first.applied == [1]
+    assert first.applied == SHIPPED_VERSIONS
     assert second.applied == []
     assert third.applied == []
-    assert second.already_applied == [1]
-    assert second.schema_version == 1
+    assert second.already_applied == SHIPPED_VERSIONS
+    assert second.schema_version == LATEST_VERSION
 
     with db.connection(db_path) as conn:
         assert db.table_names(conn) == tables_before
         applied_after = dict(migrate.applied_migrations(conn))
 
     # re-running must not rewrite migration history
-    assert applied_after[1]["applied_at"] == applied_before[1]["applied_at"]
-    assert applied_after[1]["checksum"] == applied_before[1]["checksum"]
+    for version in SHIPPED_VERSIONS:
+        assert applied_after[version]["applied_at"] == applied_before[version]["applied_at"]
+        assert applied_after[version]["checksum"] == applied_before[version]["checksum"]
     # nothing pending means nothing to back up
     assert second.backup_path is None
     assert list(backups_dir.iterdir()) == []
@@ -177,11 +183,14 @@ def test_destructive_migration_requires_explicit_marker(
     assert result.applied == [2]
 
 
-def test_shipped_migrations_are_not_destructive():
+def test_shipped_destructive_migrations_carry_the_marker():
+    """Shipped migrations may only contain destructive SQL if they say so."""
     for migration in migrate.discover_migrations():
-        assert not migration.destructive_statements(), (
-            f"{migration.path.name} contains destructive SQL"
-        )
+        if migration.destructive_statements():
+            assert migration.allows_destructive, (
+                f"{migration.path.name} contains destructive SQL without the "
+                f"'-- {migrate.ALLOW_DESTRUCTIVE_MARKER}' marker"
+            )
 
 
 def test_failed_migration_is_atomic(tmp_path: Path, db_path: Path, backups_dir: Path):
@@ -214,7 +223,7 @@ def test_badly_named_migration_file_is_refused(tmp_path: Path):
 
 def test_schema_version_helper(migrated_db: Path):
     with db.connection(migrated_db) as conn:
-        assert migrate.schema_version(conn) == 1
+        assert migrate.schema_version(conn) == LATEST_VERSION
 
 
 def test_connections_enforce_foreign_keys(migrated_db: Path):
@@ -227,3 +236,117 @@ def test_connections_enforce_foreign_keys(migrated_db: Path):
         assert raw.execute("PRAGMA foreign_keys").fetchone()[0] == 0
     finally:
         raw.close()
+
+
+def test_backfilled_migration_below_applied_version_is_refused(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """Two branches each adding a migration, one merged later: applying the
+    lower version afterwards leaves hosts on the same schema_version with
+    different schemas."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(migrations_dir, "0001_a.sql", "CREATE TABLE a (id INTEGER PRIMARY KEY);")
+    _write_migration(migrations_dir, "0003_c.sql", "CREATE TABLE c (id INTEGER PRIMARY KEY);")
+    assert migrate.run_migrations(db_path, migrations_dir, backups_dir).applied == [1, 3]
+
+    _write_migration(migrations_dir, "0002_b.sql", "CREATE TABLE b (id INTEGER PRIMARY KEY);")
+    with pytest.raises(migrate.MigrationError, match="below the applied version"):
+        migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    with db.connection(db_path) as conn:
+        assert "b" not in db.table_names(conn)
+
+    # renumbering above the applied maximum resolves it
+    (migrations_dir / "0002_b.sql").rename(migrations_dir / "0004_b.sql")
+    assert migrate.run_migrations(db_path, migrations_dir, backups_dir).applied == [4]
+
+
+def test_dropping_a_protective_trigger_needs_the_marker(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """The raw-record and audit protections are triggers; removing one is as
+    destructive as dropping a table."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(
+        migrations_dir,
+        "0001_base.sql",
+        "CREATE TABLE w (id INTEGER PRIMARY KEY);\n"
+        "CREATE TRIGGER guard BEFORE DELETE ON w BEGIN SELECT RAISE(ABORT, 'no'); END;\n"
+        "CREATE INDEX idx_w ON w (id);",
+    )
+    migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    for sql in ("DROP TRIGGER guard;", "DROP INDEX idx_w;"):
+        _write_migration(migrations_dir, "0002_unsafe.sql", sql)
+        with pytest.raises(migrate.MigrationError, match="destructive"):
+            migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    with db.connection(db_path) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('trigger','index')")}
+        assert "guard" in names and "idx_w" in names
+
+
+def test_backup_is_consistent_with_an_uncheckpointed_wal(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """The snapshot is taken through SQLite's backup API, so committed data
+    still sitting in the WAL must be present in the backup."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(migrations_dir, "0001_base.sql", "CREATE TABLE w (id INTEGER PRIMARY KEY, v TEXT);")
+    migrate.run_migrations(db_path, migrations_dir, backups_dir)
+
+    live = db.connect(db_path)
+    try:
+        assert live.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        for i in range(500):
+            live.execute("INSERT INTO w (v) VALUES (?)", (f"row{i}",))
+        live.commit()
+        assert db_path.with_suffix(".db-wal").stat().st_size > 0  # uncheckpointed
+
+        _write_migration(migrations_dir, "0002_add.sql", "ALTER TABLE w ADD COLUMN note TEXT;")
+        result = migrate.run_migrations(db_path, migrations_dir, backups_dir)
+    finally:
+        live.close()
+
+    assert result.backup_path is not None
+    with db.connection(result.backup_path) as backup:
+        assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert backup.execute("SELECT COUNT(*) FROM w").fetchone()[0] == 500
+        assert "note" not in {r[1] for r in backup.execute("PRAGMA table_info(w)")}
+
+
+def test_bookkeeping_commits_atomically_with_the_schema(
+    tmp_path: Path, db_path: Path, backups_dir: Path, monkeypatch
+):
+    """If recording the migration fails, its DDL must roll back too — otherwise
+    the next start-up re-runs a migration whose schema already exists."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    _write_migration(migrations_dir, "0001_a.sql", "CREATE TABLE a (id INTEGER PRIMARY KEY);")
+    migrate.run_migrations(db_path, migrations_dir, backups_dir)
+    _write_migration(migrations_dir, "0002_b.sql", "CREATE TABLE b (id INTEGER PRIMARY KEY);")
+
+    class FailsToRecord(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if "INSERT INTO schema_migrations" in sql:
+                raise sqlite3.OperationalError("simulated crash while recording the migration")
+            return super().execute(sql, *args, **kwargs)
+
+    def connect(path=None, *, read_only=False):
+        conn = sqlite3.connect(path, factory=FailsToRecord)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
+
+    monkeypatch.setattr(migrate.db, "connect", connect)
+    with pytest.raises(migrate.MigrationError, match="rolled back"):
+        migrate.run_migrations(db_path, migrations_dir, backups_dir)
+    monkeypatch.undo()
+
+    with db.connection(db_path) as conn:
+        assert "b" not in db.table_names(conn)
+        assert migrate.schema_version(conn) == 1

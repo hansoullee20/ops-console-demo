@@ -12,6 +12,8 @@ from app import config, db, migrate
 from app.main import create_app
 from app.services import health as health_service
 
+LATEST_VERSION = max(m.version for m in migrate.discover_migrations())
+
 
 @pytest.fixture
 def app_client(monkeypatch, migrated_db: Path, tmp_path: Path):
@@ -34,7 +36,7 @@ def test_health_reports_ready_database(app_client):
     assert body["phase"] == 1
     assert body["database"]["reachable"] is True
     assert body["database"]["foreign_keys_enforced"] is True
-    assert body["database"]["schema_version"] == 1
+    assert body["database"]["schema_version"] == LATEST_VERSION
     assert body["database"]["missing_tables"] == []
 
 
@@ -143,9 +145,9 @@ def test_startup_migrates_the_database(monkeypatch, tmp_path: Path):
 
     assert fresh.exists()
     assert body["status"] == "ok"
-    assert body["database"]["schema_version"] == 1
+    assert body["database"]["schema_version"] == LATEST_VERSION
     with db.connection(fresh) as conn:
-        assert migrate.schema_version(conn) == 1
+        assert migrate.schema_version(conn) == LATEST_VERSION
 
 
 def test_phase_1_exposes_no_business_routes():

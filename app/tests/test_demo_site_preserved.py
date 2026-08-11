@@ -8,6 +8,7 @@ database or uploads to GitHub Pages.
 from __future__ import annotations
 
 import re
+import subprocess
 
 from app.config import REPO_ROOT
 
@@ -57,12 +58,46 @@ def test_gitignore_keeps_operational_data_out_of_git():
         assert pattern in gitignore, f"missing .gitignore entry: {pattern}"
 
 
-def test_no_database_file_is_committed():
-    tracked_dbs = [
-        path
-        for path in REPO_ROOT.rglob("*.db")
-        if ".git" not in path.parts and "backups" not in path.parts
-    ]
-    assert tracked_dbs == [] or all(
-        path.parent.name == "data" for path in tracked_dbs
-    ), f"database files outside data/: {tracked_dbs}"
+def test_no_operational_file_is_tracked_by_git():
+    """Ask git what is actually committed. Walking the working tree proves
+    nothing about the repository."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+
+    forbidden = re.compile(
+        r"(\.db|\.db-wal|\.db-shm|\.sqlite3?|\.env|\.xls|\.xlsx|\.pem|\.key|\.p12)$",
+        re.IGNORECASE,
+    )
+    offenders = [p for p in tracked if p and forbidden.search(p)]
+    assert offenders == [], f"operational/secret files are committed: {offenders}"
+
+    # the runtime directories are tracked only as empty placeholders
+    for directory in ("data", "uploads", "backups"):
+        contents = [p for p in tracked if p.startswith(f"{directory}/")]
+        assert contents == [f"{directory}/.gitkeep"], (
+            f"{directory}/ must contain only .gitkeep in git, found: {contents}"
+        )
+
+
+def test_operational_paths_are_actually_ignored_by_git():
+    """.gitignore entries are only worth as much as git's own answer."""
+    probes = {
+        "data/ops_console.db": True,
+        "uploads/employee-photo.jpg": True,
+        "backups/snapshot.db": True,
+        "app/main.py": False,
+        "index.html": False,
+    }
+    for path, should_be_ignored in probes.items():
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", path], cwd=REPO_ROOT, capture_output=True
+        )
+        ignored = result.returncode == 0
+        assert ignored is should_be_ignored, (
+            f"{path}: expected ignored={should_be_ignored}, got {ignored}"
+        )

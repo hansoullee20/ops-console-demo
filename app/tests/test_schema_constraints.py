@@ -9,6 +9,8 @@ import sqlite3
 
 import pytest
 
+from app import db as db_module
+
 
 # ---------------------------------------------------------------------------
 # §2.2 unique attendance row per employee per work date
@@ -554,3 +556,142 @@ def test_timestamps_are_populated_and_maintained(conn, employee):
     after = conn.execute("SELECT created_at, updated_at FROM employees WHERE id = ?", (employee,)).fetchone()
     assert after["created_at"] == row["created_at"]
     assert after["updated_at"] >= row["updated_at"]
+
+
+# ---------------------------------------------------------------------------
+# REGRESSION: INSERT OR REPLACE must not destroy protected rows.
+#
+# SQLite fires BEFORE DELETE triggers for the implicit delete performed by
+# INSERT OR REPLACE only when PRAGMA recursive_triggers is ON, and it is OFF by
+# default. Before app/db.py set it, each of these attacks silently destroyed a
+# raw punch event or rewrote an audit row (§2.3, §2.4, §2.12).
+# ---------------------------------------------------------------------------
+def test_every_connection_enables_recursive_triggers(migrated_db):
+    with db_module.connection(migrated_db) as conn:
+        assert db_module.recursive_triggers_enabled(conn) is True
+    with db_module.connection(migrated_db, read_only=True) as conn:
+        assert db_module.recursive_triggers_enabled(conn) is True
+    with db_module.transaction(migrated_db) as conn:
+        assert db_module.recursive_triggers_enabled(conn) is True
+
+
+def test_replace_cannot_destroy_a_raw_punch_via_dedupe_key(conn, employee):
+    """The exact idiom an idempotent reimport would reach for."""
+    conn.execute(
+        """
+        INSERT INTO punch_events (terminal_slot_code, punch_at, work_date, punch_type,
+                                  raw_payload, dedupe_key, employee_id)
+        VALUES ('001', '2026-08-11T07:55:00', '2026-08-11', '출', 'ORIGINAL', 'k1', ?)
+        """,
+        (employee,),
+    )
+    conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="never be deleted"):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO punch_events (terminal_slot_code, punch_at, work_date,
+                                                 punch_type, raw_payload, dedupe_key)
+            VALUES ('999', '2099-01-01T00:00:00', '2099-01-01', '퇴', 'TAMPERED', 'k1')
+            """
+        )
+    conn.rollback()
+
+    rows = conn.execute("SELECT raw_payload, punch_at FROM punch_events").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["raw_payload"] == "ORIGINAL"
+    assert rows[0]["punch_at"] == "2026-08-11T07:55:00"
+
+
+def test_replace_cannot_destroy_a_raw_punch_via_rowid(conn, employee):
+    punch_id = conn.execute(
+        """
+        INSERT INTO punch_events (terminal_slot_code, punch_at, work_date, punch_type, raw_payload)
+        VALUES ('001', '2026-08-11T07:55:00', '2026-08-11', '출', 'ORIGINAL')
+        """
+    ).lastrowid
+    conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="never be deleted"):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO punch_events (id, terminal_slot_code, punch_at, work_date, punch_type)
+            VALUES (?, '999', '2099-01-01T00:00:00', '2099-01-01', '퇴')
+            """,
+            (punch_id,),
+        )
+    conn.rollback()
+    assert conn.execute("SELECT raw_payload FROM punch_events").fetchone()[0] == "ORIGINAL"
+
+
+def test_replace_cannot_rewrite_the_audit_log(conn):
+    audit_id = conn.execute(
+        "INSERT INTO audit_log (action, entity_type, entity_id, reason) "
+        "VALUES ('attendance.update', 'attendance_days', 1, 'ORIGINAL')"
+    ).lastrowid
+    conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute(
+            "INSERT OR REPLACE INTO audit_log (id, action, entity_type, entity_id, reason) "
+            "VALUES (?, 'attendance.update', 'attendance_days', 1, 'TAMPERED')",
+            (audit_id,),
+        )
+    conn.rollback()
+    assert conn.execute("SELECT reason FROM audit_log").fetchone()[0] == "ORIGINAL"
+
+
+# ---------------------------------------------------------------------------
+# REGRESSION: the updated_at triggers must terminate with recursion enabled.
+# Guarding them on "updated_at changed" would NOT be enough — two updates to
+# one row inside the same millisecond leave the timestamp equal and recurse
+# until SQLite aborts. The guards compare business columns instead.
+# ---------------------------------------------------------------------------
+def test_touch_triggers_do_not_recurse_under_rapid_updates(conn, employee):
+    for i in range(200):
+        conn.execute("UPDATE employees SET zone = ? WHERE id = ?", (f"zone-{i}", employee))
+    conn.commit()
+
+    row = conn.execute("SELECT zone, updated_at FROM employees WHERE id = ?", (employee,)).fetchone()
+    assert row["zone"] == "zone-199"
+    assert row["updated_at"]
+
+
+def test_attendance_revision_bumps_exactly_once_per_update(conn, employee):
+    conn.execute(
+        "INSERT INTO attendance_days (employee_id, work_date, status) VALUES (?, '2026-08-11', 'absent')",
+        (employee,),
+    )
+    conn.commit()
+    for i, status in enumerate(("normal", "late", "early_leave"), start=2):
+        conn.execute(
+            "UPDATE attendance_days SET status = ? WHERE employee_id = ? AND work_date = '2026-08-11'",
+            (status, employee),
+        )
+        conn.commit()
+        assert conn.execute("SELECT revision FROM attendance_days").fetchone()[0] == i
+
+
+def test_no_op_update_does_not_bump_the_revision(conn, employee):
+    """The guard fires on real edits only, which is what stops the recursion."""
+    conn.execute(
+        "INSERT INTO attendance_days (employee_id, work_date, status) VALUES (?, '2026-08-11', 'normal')",
+        (employee,),
+    )
+    conn.commit()
+    conn.execute("UPDATE attendance_days SET status = 'normal' WHERE employee_id = ?", (employee,))
+    conn.commit()
+    assert conn.execute("SELECT revision FROM attendance_days").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Sweep: no relationship may lose history by cascading a delete.
+# ---------------------------------------------------------------------------
+def test_every_foreign_key_restricts_deletes(conn):
+    offenders = []
+    for table in db_module.table_names(conn):
+        for fk in conn.execute(f"PRAGMA foreign_key_list('{table}')"):
+            if fk["on_delete"] != "RESTRICT":
+                offenders.append(f"{table}.{fk['from']} -> {fk['table']} ON DELETE {fk['on_delete']}")
+    assert offenders == [], f"non-RESTRICT foreign keys: {offenders}"
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []

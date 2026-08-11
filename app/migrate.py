@@ -36,6 +36,11 @@ _DESTRUCTIVE_PATTERNS = (
     re.compile(r"\bDROP\s+COLUMN\b", re.IGNORECASE),
     re.compile(r"\bDELETE\s+FROM\b", re.IGNORECASE),
     re.compile(r"\bTRUNCATE\b", re.IGNORECASE),
+    # The raw-record and audit protections are triggers, and uniqueness rules
+    # are indexes: dropping either removes a data-safety guarantee, so it must
+    # be as deliberate as dropping a table.
+    re.compile(r"\bDROP\s+TRIGGER\b", re.IGNORECASE),
+    re.compile(r"\bDROP\s+INDEX\b", re.IGNORECASE),
 )
 
 SCHEMA_MIGRATIONS_DDL = """
@@ -169,6 +174,20 @@ def _validate(migrations: list[Migration], applied: dict[int, sqlite3.Row]) -> N
                 f"database is at migration {version:04d} but no such migration file exists; "
                 "the code is older than the database"
             )
+
+    # A migration whose version sits below what the database has already
+    # applied would run out of order — the usual cause is two branches each
+    # adding a migration and one being merged later. Applying it silently
+    # leaves hosts with the same schema_version but different schemas.
+    highest_applied = max(applied) if applied else 0
+    back_filled = [m.version for m in migrations if m.version not in applied and m.version < highest_applied]
+    if back_filled:
+        raise MigrationError(
+            "migration(s) "
+            + ", ".join(f"{v:04d}" for v in back_filled)
+            + f" are unapplied but sit below the applied version {highest_applied:04d}; "
+            "renumber them above it so migrations apply in a single order on every host"
+        )
 
     for migration in migrations:
         row = applied.get(migration.version)
