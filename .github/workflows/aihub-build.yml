@@ -23,6 +23,26 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Probe Korean Vosk wake vocabulary
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            https://alphacephei.com/vosk/models/vosk-model-small-ko-0.22.zip \
+            -o /tmp/vosk-ko.zip
+          rm -rf /tmp/vosk-ko
+          mkdir -p /tmp/vosk-ko
+          unzip -q /tmp/vosk-ko.zip -d /tmp/vosk-ko
+          WORDS=$(find /tmp/vosk-ko -type f -name words.txt | head -n 1)
+          echo "words file: $WORDS"
+          if [ -z "$WORDS" ]; then
+            echo "No words.txt found"
+            exit 2
+          fi
+          echo "=== exact wake-word vocabulary hits ==="
+          grep -nE '^(옥자|옥자야|헤이|오케이) ' "$WORDS" || true
+          echo "=== words containing 옥자 ==="
+          grep -n '옥자' "$WORDS" | head -n 20 || true
+
       - name: Build debug APK
         run: gradle -p aihub assembleDebug --stacktrace
 
