@@ -1,0 +1,39 @@
+# Operational data never belongs in git (AI_BUILD_PLAN.md §4).
+# The directories are tracked (via .gitkeep) but their contents never are.
+data/*
+uploads/*
+backups/*
+!data/.gitkeep
+!uploads/.gitkeep
+!backups/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# fingerprint terminal exports and other raw source files
+*.XLS
+*.xls
+*.xlsx
+
+# secrets / local configuration
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/
+_site/

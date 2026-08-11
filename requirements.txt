@@ -1,0 +1,9 @@
+# OPS Console backend — Phase 1
+# SQLite comes from the Python standard library; no database server is needed.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# test dependencies
+pytest>=8.0
+httpx>=0.27
