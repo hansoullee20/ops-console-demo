@@ -32,16 +32,22 @@ jobs:
           rm -rf /tmp/vosk-ko
           mkdir -p /tmp/vosk-ko
           unzip -q /tmp/vosk-ko.zip -d /tmp/vosk-ko
-          WORDS=$(find /tmp/vosk-ko -type f -name words.txt | head -n 1)
-          echo "words file: $WORDS"
-          if [ -z "$WORDS" ]; then
-            echo "No words.txt found"
-            exit 2
-          fi
-          echo "=== exact wake-word vocabulary hits ==="
-          grep -nE '^(옥자|옥자야|헤이|오케이) ' "$WORDS" || true
-          echo "=== words containing 옥자 ==="
-          grep -n '옥자' "$WORDS" | head -n 20 || true
+          python -m pip install --quiet vosk
+          MODEL_DIR=$(find /tmp/vosk-ko -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          export MODEL_DIR
+          python - <<'PY'
+          import os
+          from vosk import Model, SetLogLevel
+          SetLogLevel(-1)
+          model = Model(os.environ['MODEL_DIR'])
+          words = ['옥자', '옥자야', '헤이', '오케이', '에이아이', '허브']
+          print('=== Vosk Korean vocabulary probe ===')
+          for word in words:
+              wid = model.vosk_model_find_word(word)
+              print(f'{word}: {wid} ({"YES" if wid >= 0 else "NO"})')
+          if model.vosk_model_find_word('옥자') < 0:
+              raise SystemExit('옥자 is not in the Korean model vocabulary')
+          PY
 
       - name: Build debug APK
         run: gradle -p aihub assembleDebug --stacktrace
