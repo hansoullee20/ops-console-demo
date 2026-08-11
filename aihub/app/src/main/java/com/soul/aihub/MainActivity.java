@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setBackgroundColor(Color.rgb(18, 18, 20));
 
-        titleText = text("AI Hub", 30, Color.WHITE);
+        titleText = text("옥자", 30, Color.WHITE);
         stateText = text("준비 중", 17, Color.LTGRAY);
         transcriptText = text("말해보세요.", 23, Color.WHITE);
         answerText = text("", 20, Color.rgb(190, 220, 255));
@@ -170,20 +170,19 @@ public class MainActivity extends Activity {
     }
 
     private void applyProfileUi() {
+        titleText.setText("옥자");
         if (profile == Profile.GRANDMA) {
-            titleText.setText("옥자");
             profileButton.setText("프로필: 할머니용");
             languageButton.setText("음성: 한국어 고정");
             languageButton.setEnabled(false);
-            transcriptText.setText("'옥자'라고 부르면 듣습니다.");
+            transcriptText.setText("'옥자' 또는 '옥자야'라고 부르면 듣습니다.");
         } else {
-            titleText.setText("AI Hub");
             profileButton.setText("Profile: Personal");
             languageButton.setEnabled(true);
             languageButton.setText(personalLanguage.equals("ko-KR") ? "입력 언어: 한국어" : "Input language: English");
             transcriptText.setText(personalLanguage.equals("ko-KR")
-                    ? "'에이아이 허브'라고 부르면 듣습니다."
-                    : "Say 'AI Hub' to wake me.");
+                    ? "'옥자' 또는 '옥자야'라고 부르면 듣습니다."
+                    : "Say 'Okja' or 'Hey Okja' to wake me.");
         }
         handsFreeButton.setText(handsFree ? "웨이크워드: 켜짐" : "웨이크워드: 꺼짐");
         answerText.setText("");
@@ -195,8 +194,9 @@ public class MainActivity extends Activity {
     }
 
     private String wakePrompt() {
-        if (profile == Profile.GRANDMA) return "대기 중 · '옥자'";
-        return personalLanguage.equals("en-US") ? "Waiting · 'AI Hub'" : "대기 중 · '에이아이 허브'";
+        return recognitionLanguage().equals("en-US")
+                ? "Waiting · 'Okja / Hey Okja'"
+                : "대기 중 · '옥자 / 옥자야'";
     }
 
     private String recognitionLanguage() {
@@ -294,13 +294,12 @@ public class MainActivity extends Activity {
                     .replace(" ", "")
                     .replace("-", "");
 
-            if (profile == Profile.GRANDMA) {
-                if (normalized.contains("옥자")) return true;
-            } else {
-                if (normalized.contains("aihub") ||
-                        normalized.contains("에이아이허브") ||
-                        normalized.contains("에이아이합") ||
-                        normalized.contains("에이아이하브")) return true;
+            if (normalized.contains("옥자") ||
+                    normalized.contains("옥짜") ||
+                    normalized.contains("okja") ||
+                    normalized.contains("heyokja") ||
+                    normalized.contains("okayokja")) {
+                return true;
             }
         }
         return false;
