@@ -90,7 +90,14 @@
         '<div class="k">파일</div><div><input type="file" id="importFile" accept=".xls,.XLS"></div>' +
         '<div class="k">형식</div><div>지문 단말이 내보낸 월별 <b>.XLS</b> 파일</div>' +
       '</div></div>' +
+      // The app cannot reach the terminal: the operator exports the month from
+      // the terminal's own PC program first. Saying so here, because a blank
+      // file picker does not tell anyone where the file is supposed to come from.
       '<p style="color:#6d7682;margin-top:12px;line-height:1.7">' +
+      '<b>파일은 지문 단말 관리 프로그램에서 먼저 내려받아야 합니다.</b> ' +
+      '프로그램에서 해당 월을 조회한 뒤 <b>내보내기(Export)</b> 로 저장한 <b>.XLS</b> 파일을 ' +
+      '여기에서 선택하십시오. 이 앱은 단말에 직접 접속하지 않습니다.</p>' +
+      '<p style="color:#6d7682;margin-top:10px;line-height:1.7">' +
       '먼저 <b>미리보기</b>만 실행합니다. 이 단계에서는 근태 데이터가 전혀 바뀌지 않으며, ' +
       '무엇이 들어오는지 확인한 뒤에만 적용됩니다.</p>',
       '<button class="btn" onclick="closeDrawer()">취소</button>' +
