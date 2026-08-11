@@ -38,13 +38,28 @@ jobs:
           p.write_text(s,encoding='utf-8')
           PY
 
+      # The published artifact is an explicit allowlist of the public demo files.
+      # Uploading the whole repository would publish the backend, and anything
+      # that ever lands in data/ uploads/ backups/, to the public internet
+      # (AI_BUILD_PLAN.md §4: no public SQLite, no public backend).
+      - name: Stage public demo files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _site
+          mkdir -p _site
+          for f in index.html profile.css profile.js .nojekyll; do
+            cp "$f" "_site/$f"
+          done
+          ls -la _site
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
