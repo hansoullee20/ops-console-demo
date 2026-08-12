@@ -21,7 +21,9 @@ def stable_bucket(value: str, modulo: int = 10000) -> int:
 
 
 def assign_split(row: dict) -> str:
-    # Explicit engine/voice holdouts always win.
+    # Explicit engine/voice holdouts always win. A speaker/engine test split must
+    # never be created implicitly, because that can put the same voice/engine in
+    # train and a named holdout split and falsely look like valid generalization.
     role = row.get("holdout_role", "").strip()
     if role == "engine":
         return "test_engine"
@@ -32,13 +34,13 @@ def assign_split(row: dict) -> str:
     if role == "household":
         return "test_household"
     # Group by base audio or script so derivatives never cross ordinary splits.
+    # Non-holdout synthetic data is only train/validation. Speaker/engine tests
+    # are assigned explicitly at corpus-planning time.
     group = row.get("base_audio_id") or row.get("script_id") or row.get("split_group") or row["clip_id"]
     b = stable_bucket(group)
     if b < 8000:
         return "train"
-    if b < 9000:
-        return "validation"
-    return "test_speaker"
+    return "validation"
 
 
 def wav_qc(path: Path) -> tuple[dict, list[str]]:
