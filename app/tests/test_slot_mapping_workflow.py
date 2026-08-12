@@ -134,3 +134,58 @@ def test_historical_employee_is_returned_with_status_and_end_date(operational):
     employee=next(e for e in slot_mappings.list_mappings(conn)["employees"] if e["id"]==departed)
     conn.close()
     assert employee["status"]=="terminated" and employee["end_date"]=="2025-12-31"
+
+def _apply_august_mapping_fixture(path,tmp_path,employee_id,days=(1,10)):
+    conn=db.connect(path)
+    mapping_id=slot_mappings.create_mapping(conn,slot_code="001",employee_id=employee_id,effective_from="2026-01-01")
+    conn.commit(); conn.close()
+    punches={day:["07:00","16:00"] for day in days}
+    source=build_export(tmp_path/"close.xls",year=2026,month=8,slots=[SlotSpec("001","가상 슬롯",punches)])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads")
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"backups")
+    return mapping_id,preview.import_run_id,source
+
+def test_close_rejects_end_date_that_excludes_active_imported_punch(operational,tmp_path):
+    path,a,_=operational
+    mapping_id,_,_=_apply_august_mapping_fixture(path,tmp_path,a,days=(1,))
+    conn=db.connect(path)
+    audit_before=conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='terminal_slot.close'").fetchone()[0]
+    with pytest.raises(slot_mappings.MappingError,match="먼저.*되돌리"):
+        slot_mappings.close_mapping(conn,mapping_id,"2026-07-31")
+    row=conn.execute("SELECT effective_to FROM terminal_slots WHERE id=?",(mapping_id,)).fetchone()
+    audit_after=conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='terminal_slot.close'").fetchone()[0]
+    conn.close()
+    assert row["effective_to"] is None
+    assert audit_after==audit_before
+
+def test_close_allows_last_active_punch_date_and_writes_audit(operational,tmp_path):
+    path,a,_=operational
+    mapping_id,_,_=_apply_august_mapping_fixture(path,tmp_path,a)
+    conn=db.connect(path)
+    slot_mappings.close_mapping(conn,mapping_id,"2026-08-10")
+    conn.commit()
+    assert conn.execute("SELECT effective_to FROM terminal_slots WHERE id=?",(mapping_id,)).fetchone()[0]=="2026-08-10"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='terminal_slot.close' AND entity_id=?",(mapping_id,)).fetchone()[0]==1
+    conn.close()
+
+def test_after_rollback_close_can_exclude_old_punches_and_new_mapping_wins(operational,tmp_path):
+    path,a,b=operational
+    mapping_id,run_id,source=_apply_august_mapping_fixture(path,tmp_path,a,days=(1,))
+    xls_pipeline.rollback_import(run_id,"직원 연결 정정",db_path=path)
+    conn=db.connect(path)
+    slot_mappings.close_mapping(conn,mapping_id,"2026-07-31")
+    slot_mappings.create_mapping(conn,slot_code="001",employee_id=b,effective_from="2026-08-01")
+    conn.commit(); conn.close()
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads-2")
+    assert preview.slots[0]["employeeIds"]==[b]
+    assert preview.reactivatable_punches==2
+
+def test_close_mapping_http_rejects_excluding_active_punch_and_allows_boundary(operational,tmp_path):
+    path,a,_=operational
+    mapping_id,_,_=_apply_august_mapping_fixture(path,tmp_path,a)
+    with TestClient(create_app()) as client:
+        rejected=client.post(f"/api/v1/terminal-slots/{mapping_id}/close",json={"effectiveTo":"2026-07-31"})
+        allowed=client.post(f"/api/v1/terminal-slots/{mapping_id}/close",json={"effectiveTo":"2026-08-10"})
+    assert rejected.status_code==409
+    assert "먼저" in rejected.json()["detail"]
+    assert allowed.status_code==200

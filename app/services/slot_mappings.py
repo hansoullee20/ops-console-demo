@@ -118,6 +118,21 @@ def close_mapping(
         raise MappingError("이미 종료일이 있는 연결입니다.")
     if effective_to < row["effective_from"]:
         raise MappingError("종료일은 시작일보다 빠를 수 없습니다.")
+    excluded_active_punch = conn.execute(
+        """SELECT 1 FROM punch_events
+            WHERE terminal_id = ? AND terminal_slot_code = ? AND employee_id = ?
+              AND work_date >= ? AND work_date > ?
+              AND rolled_back_at IS NULL
+            LIMIT 1""",
+        (
+            row["terminal_id"], row["slot_code"], row["employee_id"],
+            row["effective_from"], effective_to,
+        ),
+    ).fetchone()
+    if excluded_active_punch:
+        raise MappingError(
+            "이미 반영된 지문이 이 연결을 사용합니다. 먼저 해당 가져오기를 되돌리십시오."
+        )
     before = dict(row)
     conn.execute("UPDATE terminal_slots SET effective_to = ? WHERE id = ?", (effective_to, mapping_id))
     after = dict(conn.execute("SELECT * FROM terminal_slots WHERE id = ?", (mapping_id,)).fetchone())
