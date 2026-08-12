@@ -150,11 +150,13 @@ Acceptable evidence:
 - [ ] **G2.2 Intentional-wake marker exists** — P0 / AI-ENG  
   DoD: intentional wake attempts can be timestamped with speaker, phrase, distance, voice level and environment.
 
-- [ ] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG  
+- [x] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG
   DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.
+  Evidence: `aihub/wakeword/v4_ring_buffer_logger.py` + `test_v4_ring_buffer_logger.py`; evaluator CI run #7 / `31651625304` passed; Android `WakeDiagnosticRingBuffer.java` is wired into the live `AudioRecord` loop and accepted/near-threshold decision path by commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354`; pre-commit debug APK build passed in run `31652333689`.
 
-- [ ] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG  
+- [x] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG
   DoD: user can mark a missed activation and preserve the relevant buffered clip.
+  Evidence: commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354` adds the active-detector-only `방금 옥자를 놓쳤어 · 진단 저장` control backed by `markManualMiss()`; ring-buffer unit tests cover manual-miss persistence; run `31652333689` built and uploaded the wired debug APK artifact. Target-device behavioral validation remains a separate later gate.
 
 - [ ] **G2.5 Offline deterministic replay exists** — P0 / AI-ENG  
   DoD: identical recording can be replayed through v3/v4/other engines with pinned model/threshold/version metadata.
