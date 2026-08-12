@@ -1,0 +1,56 @@
+schema_version: 1
+verified_at: "2026-08-12"
+project: "AI Hub / Okja v4"
+policy:
+  durable_corpus_requires_verified_license: true
+  quarantine_unverified_sources: true
+  original_scripts_preferred: true
+sources:
+  - id: chatterbox_multilingual_v3
+    type: tts_model
+    name: "ResembleAI Chatterbox Multilingual V3"
+    upstream: "https://github.com/resemble-ai/chatterbox"
+    license: "MIT"
+    verified_roles: ["korean_positive", "korean_negative", "english_positive", "english_negative"]
+    languages: ["ko", "en"]
+    notes:
+      - "Upstream README explicitly lists Korean and English among supported multilingual languages."
+      - "If reference-audio conditioning is used, reference audio must have separately verified rights."
+
+  - id: kokoro_82m
+    type: tts_model
+    name: "Kokoro-82M"
+    upstream: "https://huggingface.co/hexgrad/Kokoro-82M"
+    license: "Apache-2.0"
+    verified_roles: ["english_positive", "english_negative", "english_engine_holdout"]
+    languages: ["en-US", "en-GB"]
+    notes:
+      - "Official voice inventory lists multiple American and British English voices."
+      - "Keep complete voice IDs held out from training for generalization tests."
+
+  - id: okja_original_scripts
+    type: text
+    name: "Original Okja conversational scripts"
+    upstream: "repository-authored"
+    license: "project-owned original text"
+    verified_roles: ["korean_positive", "korean_negative", "english_positive", "english_negative", "mention_context", "hard_negative"]
+    languages: ["ko", "en"]
+    notes:
+      - "Primary text source for v4 phase 1."
+      - "Avoids unnecessary third-party text copyright dependencies."
+
+conditional_sources:
+  - id: project_gutenberg
+    type: text
+    status: "conditional"
+    reason: "Project Gutenberg determines copyright status under US law and warns non-US users to verify local law. Not required for phase 1."
+  - id: korean_expired_rights_literature
+    type: text
+    status: "conditional"
+    reason: "Add only work-by-work with exact author/work/source/rights statement and jurisdiction check."
+
+rejected_or_not_approved:
+  - id: commercial_movie_audio
+    reason: "Do not scrape copyrighted movie/TV audio into the durable corpus without explicit reuse rights."
+  - id: unverified_tts_models
+    reason: "Open-source code alone is insufficient; weights, voices/reference audio and output restrictions must also be reviewed."
