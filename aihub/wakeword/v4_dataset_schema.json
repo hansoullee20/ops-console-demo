@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Okja v4 audio clip manifest row",
+  "type": "object",
+  "required": [
+    "clip_id", "audio_path", "language", "label", "text", "script_id",
+    "source_id", "tts_engine", "voice_id", "base_audio_id", "split",
+    "sample_rate_hz", "channels", "duration_ms", "qc_status"
+  ],
+  "properties": {
+    "clip_id": {"type": "string", "minLength": 1},
+    "audio_path": {"type": "string", "minLength": 1},
+    "language": {"enum": ["ko", "en"]},
+    "label": {"enum": ["positive", "negative", "hard_negative", "mention_context"]},
+    "wake_variant": {"type": "string"},
+    "text": {"type": "string", "minLength": 1},
+    "script_id": {"type": "string", "minLength": 1},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_license": {"type": "string"},
+    "tts_engine": {"type": "string", "minLength": 1},
+    "voice_id": {"type": "string", "minLength": 1},
+    "base_audio_id": {"type": "string", "minLength": 1},
+    "augmentation_id": {"type": "string"},
+    "split": {"enum": ["train", "validation", "test_speaker", "test_engine", "test_real", "test_household", "quarantine"]},
+    "sample_rate_hz": {"type": "integer", "minimum": 8000},
+    "channels": {"type": "integer", "minimum": 1, "maximum": 2},
+    "duration_ms": {"type": "integer", "minimum": 1},
+    "peak_abs": {"type": "number", "minimum": 0},
+    "rms": {"type": "number", "minimum": 0},
+    "silence_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+    "qc_status": {"enum": ["pending", "pass", "fail", "review"]},
+    "qc_reasons": {"type": "array", "items": {"type": "string"}},
+    "pronunciation_status": {"enum": ["not_reviewed", "pass", "fail", "unsure"]},
+    "created_by": {"type": "string"}
+  },
+  "additionalProperties": true
+}
