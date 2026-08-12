@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#17324d">
   <title>미화 운영 모바일 · 데모</title>
   <link rel="stylesheet" href="./mobile.css">
+  <link rel="stylesheet" href="./mobile-period.css">
 </head>
 <body>
 <div class="mobile-app">
@@ -16,6 +17,11 @@
 
   <main>
     <section class="mobile-screen active" data-screen="today">
+      <div class="period-switch" role="group" aria-label="운영 기간">
+        <button class="active" data-period="day">일</button><button data-period="week">주</button><button data-period="month">월</button>
+      </div>
+
+      <div class="period-view active" data-period-view="day">
       <div class="date-line"><b>8월 12일 수요일</b><span>마지막 동기화 08:20</span></div>
       <div class="summary-card">
         <div><span>오늘 예정</span><strong>18</strong></div>
@@ -36,6 +42,39 @@
         <button data-person="직원 01"><span class="avatar">01</span><span><b>직원 01</b><small>본관 1층</small></span><em class="status ok">정상</em></button>
         <button data-person="직원 03"><span class="avatar">03</span><span><b>직원 03</b><small>도서관 2층</small></span><em class="status check">확인</em></button>
         <button data-person="직원 07"><span class="avatar">07</span><span><b>직원 07</b><small>공학관 3층</small></span><em class="status absent">결원</em></button>
+      </div>
+      </div>
+
+      <div class="period-view" data-period-view="week">
+        <div class="date-line"><b>8월 10일–16일</b><span>주간 운영 요약</span></div>
+        <div class="week-strip" aria-label="날짜 선택">
+          <button><span>월</span><b>10</b><i class="dot ok-dot"></i></button><button><span>화</span><b>11</b><i class="dot amber-dot"></i></button><button class="selected"><span>수</span><b>12</b><i class="dot red-dot"></i></button><button><span>목</span><b>13</b><i class="dot ok-dot"></i></button><button><span>금</span><b>14</b><i class="dot ok-dot"></i></button><button><span>토</span><b>15</b><i></i></button><button><span>일</span><b>16</b><i></i></button>
+        </div>
+        <div class="summary-card compact-summary"><div><span>근무일</span><strong>5</strong></div><div><span>정상</span><strong>82</strong></div><div><span>확인</span><strong class="warn-text">4</strong></div></div>
+        <div class="section-title"><h2>요일별 현황</h2><span>오늘을 누르면 상세 표시</span></div>
+        <div class="week-list">
+          <button><span><b>월요일 10일</b><small>정상 17 · 휴가 1</small></span><em class="status ok">완료</em></button>
+          <button><span><b>화요일 11일</b><small>정상 16 · 확인 1 · 휴가 1</small></span><em class="status check">확인 1</em></button>
+          <button data-period-day="day"><span><b>수요일 12일 · 오늘</b><small>정상 15 · 확인 3</small></span><em class="status absent">확인 3</em></button>
+          <button><span><b>목요일 13일</b><small>예정 18명</small></span><em class="status future">예정</em></button>
+          <button><span><b>금요일 14일</b><small>예정 18명</small></span><em class="status future">예정</em></button>
+        </div>
+      </div>
+
+      <div class="period-view" data-period-view="month">
+        <div class="month-head"><button aria-label="이전 달">‹</button><b>2026년 8월</b><button aria-label="다음 달">›</button></div>
+        <div class="month-legend"><span><i class="dot red-dot"></i>확인</span><span><i class="dot blue-dot"></i>휴가</span><span><i class="dot ok-dot"></i>정상</span></div>
+        <div class="calendar-grid" aria-label="2026년 8월 근태 달력">
+          <span class="dow">일</span><span class="dow">월</span><span class="dow">화</span><span class="dow">수</span><span class="dow">목</span><span class="dow">금</span><span class="dow">토</span>
+          <button class="muted">26</button><button class="muted">27</button><button class="muted">28</button><button class="muted">29</button><button class="muted">30</button><button class="muted">31</button><button>1</button>
+          <button>2</button><button class="worked">3<i class="dot ok-dot"></i></button><button class="worked">4<i class="dot ok-dot"></i></button><button class="worked">5<i class="dot blue-dot"></i></button><button class="worked">6<i class="dot ok-dot"></i></button><button class="worked">7<i class="dot amber-dot"></i></button><button>8</button>
+          <button>9</button><button class="worked">10<i class="dot ok-dot"></i></button><button class="worked">11<i class="dot amber-dot"></i></button><button class="today-cell" data-period-day="day">12<i class="dot red-dot"></i><small>3</small></button><button class="future-cell">13</button><button class="future-cell">14</button><button>15</button>
+          <button>16</button><button class="future-cell">17</button><button class="future-cell">18</button><button class="future-cell">19</button><button class="future-cell">20</button><button class="future-cell">21</button><button>22</button>
+          <button>23</button><button class="future-cell">24</button><button class="future-cell">25</button><button class="future-cell">26</button><button class="future-cell">27</button><button class="future-cell">28</button><button>29</button>
+          <button>30</button><button class="future-cell">31</button><button class="muted">1</button><button class="muted">2</button><button class="muted">3</button><button class="muted">4</button><button class="muted">5</button>
+        </div>
+        <div class="month-summary"><div><b>82</b><span>정상 근무</span></div><div><b>4</b><span>확인 필요</span></div><div><b>3</b><span>휴가·병가</span></div></div>
+        <div class="action-card month-action"><h3>8월 12일 · 확인 3건</h3><p>퇴근 지문 없음 1건, 대체 미배정 1건, 휴가 증빙 확인 1건</p><button class="primary-action" data-period-day="day">오늘 상세 보기</button></div>
       </div>
     </section>
 
