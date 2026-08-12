@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "events": {
+    "WAKE_OKJA": {"fields": ["timestamp", "device_id", "wake_variant", "confidence"]},
+    "LISTENING_STARTED": {"fields": ["timestamp", "device_id"]},
+    "COMMAND_ACCEPTED": {"fields": ["timestamp", "device_id", "user_id", "intent"]},
+    "DEVICE_ACTION_STARTED": {"fields": ["timestamp", "device_id", "target", "action"]},
+    "DEVICE_ACTION_DONE": {"fields": ["timestamp", "device_id", "target", "action", "success"]},
+    "PHONE_FIND_STARTED": {"fields": ["timestamp", "requester_user_id", "target_phone_id"]},
+    "FAMILY_ON_THE_WAY": {"fields": ["timestamp", "sender_user_id", "recipient_user_id", "eta_minutes", "message"]},
+    "PERSON_ENTERED": {"fields": ["timestamp", "person_id", "device_id", "confidence", "evidence_sources"]},
+    "PERSON_EXITED": {"fields": ["timestamp", "person_id", "device_id", "confidence", "evidence_sources"]},
+    "PRESENCE_CHANGED": {"fields": ["timestamp", "person_id", "from_state", "to_state", "confidence", "evidence_sources"]},
+    "NO_ACTIVITY_ALERT": {"fields": ["timestamp", "person_id", "quiet_minutes", "baseline_deviation", "confidence"]},
+    "WELLNESS_CHECKIN": {"fields": ["timestamp", "user_id", "prompt_id"]},
+    "SYMPTOM_REPORTED": {"fields": ["timestamp", "user_id", "text", "category", "sharing_policy"]},
+    "FALL_SUSPECTED": {"fields": ["timestamp", "person_id", "confidence", "evidence_sources", "confirmation_state"]},
+    "EMERGENCY_CONFIRM": {"fields": ["timestamp", "person_id", "trigger"]},
+    "EMERGENCY_ACTION": {"fields": ["timestamp", "person_id", "action", "recipients", "status"]}
+  },
+  "presence_states": ["UNKNOWN", "HOME_ACTIVE", "HOME_QUIET", "AWAY_PENDING", "AWAY", "RETURN_PENDING"],
+  "rules": {
+    "presence": "Never emit a high-confidence home/away transition from a single frame or single weak sensor when corroboration is available.",
+    "camera_storage": "Prefer event metadata. Continuous video retention is off by default.",
+    "emergency": "FALL_SUSPECTED alone must not imply unattended emergency calling. Require policy escalation and confirmation logic where feasible."
+  }
+}
