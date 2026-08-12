@@ -18,6 +18,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GITLIKE_SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 TEST_SETS = {"TEST_A", "TEST_B", "TEST_C", "TEST_D"}
 RETENTION_CLASSES = {"benchmark_fixed", "diagnostic_short", "temporary"}
 
@@ -39,14 +40,15 @@ def validate_session(row: dict[str, Any]) -> None:
     required = [
         "schema_version", "benchmark_id", "recording_id", "test_set",
         "device_id", "room_id", "started_at", "duration_ms",
-        "sample_rate_hz", "channels", "audio_sha256",
-        "firmware_version", "app_version", "consent_recorded",
-        "retention_class", "training_eligible",
+        "audio_filename", "sample_rate_hz", "channels", "audio_sha256",
+        "firmware_version", "firmware_git_sha", "app_version", "model_sha",
+        "consent_recorded", "retention_class", "training_eligible",
     ]
     _require(row, required, kind)
     _nonempty(row, [
         "benchmark_id", "recording_id", "device_id", "room_id",
-        "started_at", "firmware_version", "app_version",
+        "started_at", "audio_filename", "firmware_version",
+        "firmware_git_sha", "app_version", "model_sha",
     ], kind)
     if row["schema_version"] != SCHEMA_VERSION:
         raise ValueError(f"{kind}: schema_version must be {SCHEMA_VERSION}")
@@ -54,12 +56,21 @@ def validate_session(row: dict[str, Any]) -> None:
         raise ValueError(f"{kind}: invalid test_set {row['test_set']!r}")
     if not isinstance(row["duration_ms"], int) or row["duration_ms"] <= 0:
         raise ValueError(f"{kind}: duration_ms must be a positive integer")
+    filename = row["audio_filename"]
+    if "/" in filename or "\\" in filename or not filename.endswith(".wav"):
+        raise ValueError(f"{kind}: audio_filename must be a basename ending in .wav")
+    for token_field in ("device_id", "room_id", "recording_id"):
+        if row[token_field] not in filename:
+            raise ValueError(f"{kind}: audio_filename must include {token_field}")
     if not isinstance(row["sample_rate_hz"], int) or row["sample_rate_hz"] < 8000:
         raise ValueError(f"{kind}: sample_rate_hz must be >= 8000")
     if not isinstance(row["channels"], int) or not (1 <= row["channels"] <= 8):
         raise ValueError(f"{kind}: channels must be 1..8")
     if not isinstance(row["audio_sha256"], str) or not SHA256_RE.match(row["audio_sha256"]):
         raise ValueError(f"{kind}: audio_sha256 must be lowercase 64-char SHA-256")
+    for sha_field in ("firmware_git_sha", "model_sha"):
+        if not GITLIKE_SHA_RE.match(row[sha_field]):
+            raise ValueError(f"{kind}: {sha_field} must be 7..64 lowercase hex chars")
     if row["consent_recorded"] is not True:
         raise ValueError(f"{kind}: consent_recorded must be true")
     if row["retention_class"] not in RETENTION_CLASSES:
@@ -116,6 +127,8 @@ def validate_detection(row: dict[str, Any]) -> None:
         raise ValueError(f"{kind}: schema_version must be {SCHEMA_VERSION}")
     if not isinstance(row["timestamp_ms"], (int, float)) or row["timestamp_ms"] < 0:
         raise ValueError(f"{kind}: timestamp_ms must be >= 0")
+    if not GITLIKE_SHA_RE.match(row["model_sha"]):
+        raise ValueError(f"{kind}: model_sha must be 7..64 lowercase hex chars")
     for field in ("threshold", "score"):
         if not isinstance(row[field], (int, float)):
             raise ValueError(f"{kind}: {field} must be numeric")
