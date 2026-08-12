@@ -37,7 +37,7 @@ Generator commit: `f8fae103896ac94c43e9947eb0030101b736a418`
 
 - `옥자 variant A`
   - pronunciation: FAIL
-  - observation: perceptually closer to only `자`; the full `옥자` onset is not clearly heard.
+  - observation: the intended `옥자` is not clearly articulated; perceptually it sounds closer to `ㅡ자`, with the initial vowel/consonant realization of `옥` weakened or lost.
   - naturalness: REVIEW / robotic
   - disposition: QUARANTINE
 - `옥자 variant B`
