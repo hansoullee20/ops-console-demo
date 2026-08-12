@@ -1,0 +1,194 @@
+name: Wire Okja wake diagnostics once
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - '.github/workflows/okja-wire-wake-diagnostics-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Wire diagnostic ring buffer into TemplateWakeActivity
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java')
+          s = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one anchor, found {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+              '    private static final int TEMPLATE_COUNT = 6;\n',
+              '    private static final int TEMPLATE_COUNT = 6;\n'
+              '    private static final double DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER = 1.25;\n'
+              '    private static final String DIAGNOSTIC_MODEL_NAME = "template_mfcc_dtw";\n'
+              '    private static final String DIAGNOSTIC_MODEL_VERSION = "android-v1";\n',
+              'constants',
+          )
+
+          replace_once(
+              '    private Button resetButton;\n\n    private volatile boolean detectorRunning = false;\n',
+              '    private Button resetButton;\n'
+              '    private Button missButton;\n'
+              '    private WakeDiagnosticRingBuffer diagnostics;\n\n'
+              '    private volatile boolean detectorRunning = false;\n',
+              'fields',
+          )
+
+          replace_once(
+              '        resetButton = button("등록 초기화");\n'
+              '        resetButton.setOnClickListener(v -> resetTemplates());\n\n'
+              '        root.addView(title, full());\n',
+              '        resetButton = button("등록 초기화");\n'
+              '        resetButton.setOnClickListener(v -> resetTemplates());\n\n'
+              '        missButton = button("방금 옥자를 놓쳤어 · 진단 저장");\n'
+              '        missButton.setOnClickListener(v -> markManualMiss());\n\n'
+              '        root.addView(title, full());\n',
+              'miss button creation',
+          )
+
+          replace_once(
+              '        root.addView(detectButton, full());\n'
+              '        root.addView(space(10));\n'
+              '        root.addView(resetButton, full());\n',
+              '        root.addView(detectButton, full());\n'
+              '        root.addView(space(10));\n'
+              '        root.addView(missButton, full());\n'
+              '        root.addView(space(10));\n'
+              '        root.addView(resetButton, full());\n',
+              'miss button layout',
+          )
+
+          replace_once(
+              '        resetButton.setEnabled(!recordingTemplate);\n'
+              '        if (enrolled >= 2 && !detectorRunning) {\n',
+              '        resetButton.setEnabled(!recordingTemplate);\n'
+              '        if (missButton != null) missButton.setEnabled(detectorRunning && !recordingTemplate);\n'
+              '        if (enrolled >= 2 && !detectorRunning) {\n',
+              'miss button state',
+          )
+
+          replace_once(
+              '    private void calibrateThreshold() {\n',
+              '    private void markManualMiss() {\n'
+              '        if (!detectorRunning || diagnostics == null) {\n'
+              '            stateText.setText("로컬 감지 중에만 누락 샘플을 저장할 수 있어요");\n'
+              '            return;\n'
+              '        }\n'
+              '        String eventId = diagnostics.markManualMiss("옥자", "manual_button");\n'
+              '        String shortId = eventId.length() > 13 ? eventId.substring(0, 13) : eventId;\n'
+              '        stateText.setText("누락 진단 캡처 중 · " + shortId);\n'
+              '        main.postDelayed(() -> {\n'
+              '            if (detectorRunning) {\n'
+              '                stateText.setText("로컬 대기 중 · 옥자 / 옥자야 / Hey Okja");\n'
+              '            }\n'
+              '        }, 2200);\n'
+              '    }\n\n'
+              '    private void calibrateThreshold() {\n',
+              'manual miss method',
+          )
+
+          replace_once(
+              '    private void startDetector() {\n'
+              '        if (detectorRunning || recordingTemplate || templates.size() < TEMPLATE_COUNT) return;\n'
+              '        detectorRunning = true;\n',
+              '    private void startDetector() {\n'
+              '        if (detectorRunning || recordingTemplate || templates.size() < TEMPLATE_COUNT) return;\n'
+              '        diagnostics = new WakeDiagnosticRingBuffer(new File(getFilesDir(), "wake_diagnostics"));\n'
+              '        detectorRunning = true;\n',
+              'detector start',
+          )
+
+          replace_once(
+              '        detectorThread = null;\n'
+              '        main.post(() -> {\n',
+              '        detectorThread = null;\n'
+              '        WakeDiagnosticRingBuffer d = diagnostics;\n'
+              '        if (d != null) d.flushPending();\n'
+              '        main.post(() -> {\n',
+              'detector stop flush',
+          )
+
+          replace_once(
+              '                int got = readFully(rec, frame);\n'
+              '                if (got <= 0) continue;\n'
+              '                double rms = rms(frame, got);\n',
+              '                int got = readFully(rec, frame);\n'
+              '                if (got <= 0) continue;\n'
+              '                WakeDiagnosticRingBuffer d = diagnostics;\n'
+              '                if (d != null) d.feed(frame, got);\n'
+              '                double rms = rms(frame, got);\n',
+              'pcm feed',
+          )
+
+          replace_once(
+              '        boolean hit = score <= threshold;\n\n'
+              '        main.post(() -> scoreText.setText(String.format(Locale.US,\n',
+              '        boolean hit = score <= threshold;\n\n'
+              '        WakeDiagnosticRingBuffer d = diagnostics;\n'
+              '        if (d != null && (hit || score <= threshold * DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER)) {\n'
+              '            d.markCandidate(score, threshold, hit,\n'
+              '                    DIAGNOSTIC_MODEL_NAME, DIAGNOSTIC_MODEL_VERSION, "");\n'
+              '        }\n\n'
+              '        main.post(() -> scoreText.setText(String.format(Locale.US,\n',
+              'candidate capture',
+          )
+
+          path.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Verify patch shape
+        run: |
+          git diff --check
+          grep -q 'diagnostics.feed(frame, got)' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q 'markManualMiss("옥자", "manual_button")' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q 'DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+
+      - name: Build debug APK before committing
+        run: gradle -p aihub assembleDebug --stacktrace
+
+      - name: Commit verified wiring
+        shell: bash
+        run: |
+          if git diff --quiet -- aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'Okja CI'
+          git config user.email 'okja-ci@users.noreply.github.com'
+          git add aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          git commit -m 'Wire wake diagnostic captures into Android detector'
+          git pull --rebase origin aihub-voice-test
+          git push origin HEAD:aihub-voice-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aihub-wake-diagnostics-wired-debug-apk
+          path: aihub/app/build/outputs/apk/debug/app-debug.apk
