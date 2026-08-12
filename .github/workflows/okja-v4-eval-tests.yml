@@ -1,0 +1,26 @@
+name: Okja v4 Evaluator Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/v4_eval.py'
+      - 'aihub/wakeword/test_v4_eval.py'
+      - '.github/workflows/okja-v4-eval-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  evaluator-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run evaluator unit tests
+        working-directory: aihub/wakeword
+        run: python -m unittest -v test_v4_eval.py
