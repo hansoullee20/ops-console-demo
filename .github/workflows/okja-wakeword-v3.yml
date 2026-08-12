@@ -1,0 +1,225 @@
+name: Train Okja Wakeword v3 Korean Probe
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/generate_melotts_v3_dataset.py'
+      - 'aihub/wakeword/okja_v3_korean_probe.yaml'
+      - '.github/workflows/okja-wakeword-v3.yml'
+  workflow_dispatch:
+
+jobs:
+  generate-speech:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      TOKENIZERS_PARALLELISM: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install MeloTTS CPU environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1 espeak-ng
+
+          echo 'numpy<2' > /tmp/constraints.txt
+          export PIP_CONSTRAINT=/tmp/constraints.txt
+          python -m pip install --upgrade pip wheel 'setuptools<81'
+          git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git /tmp/MeloTTS
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+            'torch==2.8.0' 'torchaudio==2.8.0'
+          python -m pip install -e /tmp/MeloTTS
+          python -m pip install python-mecab-ko python-mecab-ko-dic
+          python -m pip uninstall -y unidic
+
+          python - <<'PY'
+          import nltk
+          for pkg in ('averaged_perceptron_tagger', 'averaged_perceptron_tagger_eng', 'cmudict'):
+              nltk.download(pkg, quiet=False)
+          import unidic_lite
+          print('MeloTTS ready; unidic-lite=', unidic_lite.DICDIR)
+          PY
+
+      - name: Generate focused Korean speech dataset
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v python aihub/wakeword/generate_melotts_v3_dataset.py speech \
+            --output-root wakeword_v3_output \
+            --model-name okja_v3_korean_probe \
+            --positive-train 1024 --positive-test 256 \
+            --negative-train 4096 --negative-test 512 \
+            2>&1 | tee v3_generation.log
+
+          echo '--- generated counts ---'
+          for d in positive_train positive_test negative_train negative_test; do
+            printf '%s ' "$d"
+            find "wakeword_v3_output/okja_v3_korean_probe/$d" -name 'clip_*.wav' | wc -l
+          done
+          du -sh wakeword_v3_output/okja_v3_korean_probe
+
+      - name: Upload speech dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-v3-korean-speech
+          path: |
+            wakeword_v3_output/okja_v3_korean_probe/positive_train/**
+            wakeword_v3_output/okja_v3_korean_probe/positive_test/**
+            wakeword_v3_output/okja_v3_korean_probe/negative_train/**
+            wakeword_v3_output/okja_v3_korean_probe/negative_test/**
+            v3_generation.log
+          if-no-files-found: error
+          retention-days: 3
+
+  train:
+    needs: generate-speech
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONUNBUFFERED: '1'
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      TOKENIZERS_PARALLELISM: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore generated speech
+        uses: actions/download-artifact@v4
+        with:
+          name: okja-v3-korean-speech
+          path: .
+
+      - name: Install LiveKit WakeWord CPU environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng libsndfile1 ffmpeg sox portaudio19-dev
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+            'torch==2.8.0' 'torchaudio==2.8.0'
+          python -m pip install 'livekit-wakeword[train,eval,export]' librosa soundfile
+          livekit-wakeword --help | head -40
+
+      - name: Download LiveKit front-end and validation dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          # v3 remains a runner-sized diagnostic, so the ~16 GB ACAV training
+          # corpus is intentionally skipped. The upstream validation negatives
+          # are still downloaded and remain the independent FPPH test set.
+          livekit-wakeword setup \
+            --config aihub/wakeword/okja_v3_korean_probe.yaml \
+            --skip-acav 2>&1 | tee v3_setup.log
+          df -h
+
+      - name: Generate standalone background clips
+        shell: bash
+        run: |
+          set -o pipefail
+          python aihub/wakeword/generate_melotts_v3_dataset.py background \
+            --background-root wakeword_v3_data/backgrounds \
+            --output-root wakeword_v3_output \
+            --model-name okja_v3_korean_probe \
+            --train 256 --test 64 --seconds 2.0 \
+            2>&1 | tee v3_background.log
+
+          echo '--- raw split counts ---'
+          for d in positive_train positive_test negative_train negative_test background_train background_test; do
+            printf '%s ' "$d"
+            find "wakeword_v3_output/okja_v3_korean_probe/$d" -name 'clip_*.wav' | wc -l
+          done
+
+      - name: Augment and extract features
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v livekit-wakeword augment aihub/wakeword/okja_v3_korean_probe.yaml \
+            2>&1 | tee v3_augment.log
+
+      - name: Train conv-attention classifier
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v livekit-wakeword train aihub/wakeword/okja_v3_korean_probe.yaml \
+            2>&1 | tee v3_train.log
+
+      - name: Export and evaluate ONNX
+        shell: bash
+        run: |
+          set -o pipefail
+          livekit-wakeword export aihub/wakeword/okja_v3_korean_probe.yaml \
+            2>&1 | tee v3_export.log
+          livekit-wakeword eval aihub/wakeword/okja_v3_korean_probe.yaml \
+            2>&1 | tee v3_eval.log
+
+      - name: Classify diagnostic result
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('wakeword_v3_output/okja_v3_korean_probe/okja_v3_korean_probe_eval.json')
+          if not p.exists():
+              print('VERDICT=NO_EVAL')
+              raise SystemExit(0)
+
+          m = json.loads(p.read_text())
+          print(json.dumps(m, indent=2))
+          recall = float(m.get('recall', 0.0))
+          fpph = float(m.get('fpph', 999.0))
+          # A diagnostic pass only means this constrained Korean-only setup has
+          # useful class separation. It is NOT a production acceptance gate.
+          verdict = 'PROMISING' if recall >= 0.60 and fpph <= 0.50 else 'NOT_READY'
+          print(f'VERDICT={verdict} recall={recall:.3f} fpph={fpph:.3f}')
+          PY
+
+      - name: Show v3 results
+        if: always()
+        shell: bash
+        run: |
+          echo '--- model output files ---'
+          find wakeword_v3_output/okja_v3_korean_probe -maxdepth 1 -type f -printf '%f %k KB\n' 2>/dev/null | sort || true
+          echo '--- evaluation tail ---'
+          tail -100 v3_eval.log 2>/dev/null || true
+          echo '--- training tail ---'
+          tail -100 v3_train.log 2>/dev/null || true
+          echo '--- setup warnings ---'
+          grep -Ei 'warning|failed|without general' v3_setup.log v3_train.log 2>/dev/null || true
+          echo '--- disk ---'
+          df -h
+
+      - name: Upload Okja v3 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-wakeword-v3-korean-probe
+          path: |
+            wakeword_v3_output/okja_v3_korean_probe/*.onnx
+            wakeword_v3_output/okja_v3_korean_probe/*.json
+            wakeword_v3_output/okja_v3_korean_probe/*.png
+            wakeword_v3_output/okja_v3_korean_probe/*.pt
+            v3_setup.log
+            v3_background.log
+            v3_augment.log
+            v3_train.log
+            v3_export.log
+            v3_eval.log
+          if-no-files-found: warn
+          retention-days: 7
