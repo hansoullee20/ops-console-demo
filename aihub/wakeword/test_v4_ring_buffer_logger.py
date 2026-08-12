@@ -88,8 +88,10 @@ class RingBufferLoggerTests(unittest.TestCase):
             )
             logger.push_pcm16(list(range(100)))
             self.assertEqual(logger.buffered_samples, 3)
-            self.assertFalse(root.exists())
-            self.assertEqual(list(Path(td).glob("*.wav")), [])
+            # TemporaryDirectory itself exists; the logger must not create any
+            # durable audio/event files until an explicit candidate/miss capture.
+            self.assertEqual(list(root.iterdir()), [])
+            self.assertFalse(logger.events_path.exists())
 
     def test_event_jsonl_has_one_row_per_finalized_capture(self):
         with tempfile.TemporaryDirectory() as td:
