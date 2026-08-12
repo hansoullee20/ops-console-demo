@@ -68,4 +68,3 @@ def test_mapping_write_is_refused_on_demo_database(monkeypatch,migrated_db,tmp_p
     with TestClient(create_app()) as client:
         response=client.post("/api/v1/terminal-slots",json={"slotCode":"099","employeeId":1,"effectiveFrom":"2026-08-01"})
     assert response.status_code==409
-

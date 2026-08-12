@@ -482,7 +482,264 @@ def _build_preview(
             if conflict:
                 findings.append(Finding(
                     "leave_conflict", "review",
-      …3078 tokens truncated…resent": skipped,
+                    "승인된 휴가 기간인데 지문 기록이 있습니다. 어느 쪽도 자동으로 수정하지 않습니다.",
+                    slot_code=slot_code, work_date=work_date, employee=employee,
+                ))
+
+    # Only dates the source actually carried a column for can be reported as
+    # quiet. A date the file never mentioned is simply not covered.
+    zero_dates = punch_review.whole_site_zero_punch_dates(
+        parsed.covered_dates, set(parsed.dates)
+    )
+    for date in zero_dates:
+        findings.append(Finding(
+            "whole_site_zero_punch", "review",
+            "이 날짜에는 전 사업장 기록이 없습니다. 휴무·단말 장애·부분 export 중 무엇인지 "
+            "확인이 필요하며, 전원 결근으로 처리하지 않습니다.",
+            work_date=date,
+        ))
+
+    finding_dicts = [f.as_dict() for f in findings]
+    fingerprint = _preview_fingerprint(
+        digest, slot_rows, new_punches, finding_dicts, reactivatable
+    )
+    token = _confirmation_token(run_id, digest, fingerprint, secrets.token_urlsafe(16))
+
+    return ImportPreview(
+        import_run_id=run_id,
+        source_filename=parsed.source_filename,
+        stored_source_path=str(stored),
+        source_sha256=digest,
+        period_start=parsed.period_start,
+        period_end=parsed.period_end,
+        confirmation_token=token,
+        preview_fingerprint=fingerprint,
+        previewed_at=_now(),
+        slots=slot_rows,
+        findings=finding_dicts,
+        new_punches=new_punches,
+        already_imported=already,
+        reactivatable_punches=reactivatable,
+        zero_punch_dates=zero_dates,
+        covered_dates=parsed.covered_dates,
+    )
+
+
+def refresh_preview(run_id: int, *, db_path: Path | None = None) -> ImportPreview:
+    """Recompute a preserved preview after an administrator changes mappings.
+
+    The source bytes and run identity stay fixed. A new confirmation token is
+    issued from the current authoritative mapping/findings state, invalidating
+    the previously reviewed token.
+    """
+    ensure_import_allowed(db_path)
+    conn = db.connect(db_path or config.DB_PATH)
+    try:
+        row = conn.execute("SELECT * FROM import_runs WHERE id=?", (run_id,)).fetchone()
+        if row is None: raise ImportError_(f"no import run {run_id}")
+        if row["status"] != "previewed": raise ImportError_("only a preview waiting for review can be refreshed")
+        stored = Path(row["stored_source_path"] or "")
+        if not stored.is_file(): raise ImportError_("the preserved source file is missing")
+        digest = _sha256(stored)
+        if digest != row["source_sha256"]: raise ImportError_("the preserved source file changed")
+        parsed = xls_import.parse_workbook(stored, source_filename=row["source_filename"])
+        preview = _build_preview(conn, parsed, run_id, stored, digest, punch_review.DEFAULT_REPEATED_PUNCH_MINUTES)
+        conn.execute("""UPDATE import_runs SET period_start=?,period_end=?,source_row_count=?,findings_json=?,preview_fingerprint=?,confirmation_token=?,preview_json=? WHERE id=?""",
+          (parsed.period_start,parsed.period_end,len(parsed.punches),json.dumps({"findings":preview.findings},ensure_ascii=False),preview.preview_fingerprint,preview.confirmation_token,json.dumps(preview.as_dict(),ensure_ascii=False),run_id))
+        conn.commit(); return preview
+    finally: conn.close()
+
+
+# ---------------------------------------------------------------------------
+# apply
+# ---------------------------------------------------------------------------
+def _snapshot(db_path: Path, backups_dir: Path, label: str) -> Path:
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    target = backups_dir / f"{db_path.stem}-pre-import-{label}-{stamp}.db"
+    source = db.connect(db_path)
+    try:
+        destination = sqlite3.connect(target)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+    return target
+
+
+def apply_import(
+    import_run_id: int,
+    confirmation_token: str,
+    *,
+    db_path: Path | None = None,
+    backups_dir: Path | None = None,
+    threshold_minutes: int = punch_review.DEFAULT_REPEATED_PUNCH_MINUTES,
+    actor_id: str = "operator",
+) -> dict:
+    """Commit a previewed import. Requires the token the preview issued."""
+    ensure_import_allowed(db_path)
+    path = Path(db_path or config.DB_PATH)
+    backups = Path(backups_dir or config.BACKUPS_DIR)
+
+    conn = db.connect(path)
+    try:
+        run = conn.execute("SELECT * FROM import_runs WHERE id = ?", (import_run_id,)).fetchone()
+        if run is None:
+            raise ImportError_(f"no import run {import_run_id}")
+        if run["status"] != "previewed":
+            raise ImportError_(
+                f"import run {import_run_id} is '{run['status']}'; only a previewed run can be applied"
+            )
+        if not secrets.compare_digest(str(run["confirmation_token"] or ""), confirmation_token):
+            raise ImportError_("confirmation token does not match this preview")
+
+        source = Path(run["stored_source_path"])
+        if not source.exists():
+            raise ImportError_(f"preserved source file is missing: {source}")
+        if _sha256(source) != run["source_sha256"]:
+            raise ImportError_(
+                "the preserved source file changed after the preview; review it again"
+            )
+        # Re-read from the preserved original rather than trusting anything
+        # carried over from the preview request.
+        parsed = xls_import.parse_workbook(source, source_filename=run["source_filename"])
+
+        # Recompute the preview against the mapping as it stands *now*. If a
+        # slot was mapped or unmapped since the operator reviewed it, they
+        # confirmed something else.
+        current = _build_preview(
+            conn, parsed, import_run_id, source, run["source_sha256"], threshold_minutes
+        )
+        if current.preview_fingerprint != run["preview_fingerprint"]:
+            raise ImportError_(
+                "the slot mapping or file changed after this preview was reviewed; "
+                "run the preview again before applying"
+            )
+        # Nothing to do is not the same as a rolled-back source. Both insert no
+        # rows, but one of them has events to bring back (§E) and the other
+        # would produce an 'applied' run that changed nothing — a record of work
+        # that never happened. Enforced here, not only in the UI, because the
+        # UI is one caller of this function.
+        if not current.can_apply:
+            if current.blocking:
+                raise ImportError_(
+                    "this preview has blocking findings; resolve them before applying"
+                )
+            raise ImportError_(
+                "nothing to apply: every punch in this file is already imported "
+                "and active. Roll the earlier import back first if you meant to "
+                "redo it."
+            )
+    finally:
+        conn.close()
+
+    snapshot = _snapshot(path, backups, str(import_run_id))
+
+    conn = db.connect(path)
+    try:
+        intervals = _slot_intervals(conn)
+        inserted = skipped = reactivated = 0
+        # Days this run actually put evidence behind, as opposed to days whose
+        # punches were already present. Only the first kind may change hands:
+        # claiming a day this run did not contribute to is what let a rollback
+        # leave attendance standing with no punches under it.
+        contributed: set[tuple[int, str]] = set()
+        touched: set[tuple[int, str]] = set()
+
+        conn.execute("BEGIN")
+        for punch in parsed.punches:
+            mapped = _resolve_slot(intervals, punch.slot_code, punch.work_date) or {}
+            employee_id = mapped.get("employee_id")
+            if not employee_id:
+                review_flag = "unmapped_slot"
+            elif mapped.get("employee_status") != "active":
+                # §F: the raw event carries the flag too, not just the preview.
+                review_flag = "inactive_employee"
+            else:
+                review_flag = None
+            key = dedupe_key(TERMINAL_ID, punch)
+            cursor = conn.execute(
+                """
+                INSERT INTO punch_events
+                    (terminal_id, terminal_slot_code, punch_at, work_date, punch_type,
+                     raw_payload, source_filename, source_sheet, source_row_no,
+                     source_column, source_cell, occurrence_index, cell_position,
+                     source_hash, dedupe_key, import_run_id, active_import_run_id,
+                     employee_id, review_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dedupe_key) DO NOTHING
+                """,
+                (
+                    TERMINAL_ID, punch.slot_code, punch.punch_at, punch.work_date,
+                    punch.punch_type, punch.raw_cell, run["source_filename"],
+                    punch.source_sheet, punch.source_row, punch.source_column,
+                    punch.source_cell, punch.occurrence_index, punch.cell_position,
+                    run["source_sha256"], key, import_run_id, import_run_id,
+                    employee_id, review_flag,
+                ),
+            )
+            if cursor.rowcount:
+                inserted += 1
+                if employee_id:
+                    contributed.add((employee_id, punch.work_date))
+            else:
+                skipped += 1
+                # Re-applying a source that was rolled back reactivates its
+                # events rather than inserting duplicates. The raw columns are
+                # untouched; the rollback marker is cleared and this run becomes
+                # the one responsible for them, so rolling *it* back undoes them.
+                back = conn.execute(
+                    "UPDATE punch_events "
+                    "   SET rolled_back_at = NULL, rolled_back_reason = NULL, "
+                    "       active_import_run_id = ?, employee_id = ?, review_flag = ? "
+                    " WHERE dedupe_key = ? AND rolled_back_at IS NOT NULL",
+                    (import_run_id, employee_id, review_flag, key),
+                ).rowcount
+                reactivated += back
+                if back and employee_id:
+                    contributed.add((employee_id, punch.work_date))
+            if employee_id:
+                touched.add((employee_id, punch.work_date))
+
+        _flag_repeated_punches(conn, import_run_id, threshold_minutes)
+        _record_coverage(conn, import_run_id, parsed)
+        # Re-derive every touched day, but only take responsibility for the ones
+        # this run actually changed.
+        derived = derive_attendance(
+            conn, sorted(touched), import_run_id=import_run_id, owned=contributed
+        )
+
+        conn.execute(
+            """
+            UPDATE import_runs
+               SET status = 'applied', finished_at = ?, punch_event_count = ?,
+                   snapshot_path = ?
+             WHERE id = ?
+            """,
+            (_now(), inserted, str(snapshot), import_run_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id,
+                                   after_json, reason, confirmation_token)
+            VALUES ('import', ?, 'import.apply', 'import_runs', ?, ?, ?, ?)
+            """,
+            (
+                actor_id, import_run_id,
+                json.dumps({"inserted": inserted, "skipped": skipped,
+                            "reactivated": reactivated, "attendance": derived},
+                           ensure_ascii=False),
+                f"{run['source_filename']} 적용",
+                confirmation_token,
+            ),
+        )
+        conn.commit()
+        return {
+            "importRunId": import_run_id,
+            "inserted": inserted,
+            "alreadyPresent": skipped,
             "reactivated": reactivated,
             "attendanceRows": derived,
             "snapshotPath": str(snapshot),
@@ -962,4 +1219,3 @@ def last_applied_import(conn: sqlite3.Connection) -> dict | None:
         " ORDER BY COALESCE(finished_at, updated_at) DESC, id DESC LIMIT 1"
     ).fetchone()
     return dict(row) if row else None
-

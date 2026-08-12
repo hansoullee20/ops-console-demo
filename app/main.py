@@ -108,4 +108,3 @@ def main() -> None:  # pragma: no cover - CLI convenience
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-
