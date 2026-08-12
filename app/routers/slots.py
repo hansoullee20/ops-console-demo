@@ -57,3 +57,4 @@ def close(mapping_id:int,body:MappingClose):
         return {"id":mapping_id,"effectiveTo":body.effectiveTo.isoformat()}
     except slot_mappings.MappingError as exc: raise HTTPException(409,str(exc)) from exc
     finally:conn.close()
+

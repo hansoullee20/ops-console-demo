@@ -379,5 +379,587 @@ def _build_preview(
     for slot in parsed.slots:
         # A slot can change hands inside one month, so resolve it for every date
         # it actually carried punches rather than once for the whole file.
-        dates = sorted({d for (s, d) in by_slot_day if s =ïû¶‰ËkºwµçQ…Ñ”€ô€üˆ°4(€€€€€€€€€€€€¡•µÁ±½å••}¥°İ½É­}‘…Ñ”¤°4(€€€€€€€€¤¹™•Ñ¡½¹” ¤4(€€€€€€€¥˜•á¥ÍÑ¥¹œ…¹•á¥ÍÑ¥¹l‰½¹™¥Éµ•‘}…Ğ‰tè4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(4(€€€€€€€¥˜¹½ĞÑ¥µ•Ìè4(€€€€€€€€€€€€ŒÙ•ÉäÁÕ¹ ‰•¡¥¹Ñ¡¥Ì‘…äİ…ÌÉ½±±•‰…¬¸1•…Ù¥¹œ¥Ğ…Ì4(€€€€€€€€€€€€Œ€¹½Éµ…°œİ½Õ±Í¡½Ü…ÑÑ•¹‘…¹”‰…­•‰ä¹½Ñ¡¥¹œ¸4(€€€€€€€€€€€¥˜•á¥ÍÑ¥¹œ…¹•á¥ÍÑ¥¹l‰Í½ÕÉ”‰t€ôô€‰™¥¹•ÉÁÉ¥¹Ğˆè4(€€€€€€€€€€€€€€€½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€€€€€€€€€‰UAQ…ÑÑ•¹‘…¹•}‘…åÌ€ˆ4(€€€€€€€€€€€€€€€€€€€€ˆ€€MPÍÑ…ÑÕÌ€ô€Õ¹­¹½İ¸œ°…ÑÕ…±}¥¹}…Ğ€ô9U10°…ÑÕ…±}½ÕÑ}…Ğ€ô9U10°€ˆ4(€€€€€€€€€€€€€€€€€€€€ˆ€€€€€€É•Ù¥•İ}™±…œ€ô€¥µÁ½ÉÑ}É½±±•‘}‰…¬œ€ˆ4(€€€€€€€€€€€€€€€€€€€€ˆ]!I¥€ô€üˆ°4(€€€€€€€€€€€€€€€€€€€€¡•á¥ÍÑ¥¹l‰¥‰t°¤°4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€İÉ¥ÑÑ•¸€¬ô€Ä4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(4(€€€€€€€ÍÑ…ÑÕÌ€ô€‰¹½Éµ…°ˆ¥˜±•¸¡Ñ¥µ•Ì¤€øô€È•±Í”€‰Õ¹­¹½İ¸ˆ4(€€€€€€€É•Ù¥•İ}™±…œ€ô9½¹”¥˜±•¸¡Ñ¥µ•Ì¤€øô€È•±Í”€‰¥¹½µÁ±•Ñ•}‘…äˆ4(€€€€€€€½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€ˆˆˆ4(€€€€€€€€€€€%9MIP%9Q<…ÑÑ•¹‘…¹•}‘…åÌ4(€€€€€€€€€€€€€€€€¡•µÁ±½å••}¥°İ½É­}‘…Ñ”°ÍÑ…ÑÕÌ°…ÑÕ…±}¥¹}…Ğ°…ÑÕ…±}½ÕÑ}…Ğ°Í½ÕÉ”°4(€€€€€€€€€€€€€€€€É•Ù¥•İ}™±…œ°±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥¤4(€€€€€€€€€€€Y1UL€ ü°€ü°€ü°€ü°€ü°€™¥¹•ÉÁÉ¥¹Ğœ°€ü°€ü¤4(€€€€€€€€€€€=8=91%P¡•µÁ±½å••}¥°İ½É­}‘…Ñ”¤<UAQMP4(€€€€€€€€€€€€€€€ÍÑ…ÑÕÌ€ô•á±Õ‘•¹ÍÑ…ÑÕÌ°4(€€€€€€€€€€€€€€€…ÑÕ…±}¥¹}…Ğ€ô•á±Õ‘•¹…ÑÕ…±}¥¹}…Ğ°4(€€€€€€€€€€€€€€€…ÑÕ…±}½ÕÑ}…Ğ€ô•á±Õ‘•¹…ÑÕ…±}½ÕÑ}…Ğ°4(€€€€€€€€€€€€€€€Í½ÕÉ”€ô€™¥¹•ÉÁÉ¥¹Ğœ°4(€€€€€€€€€€€€€€€€´´™±…œÑ¡”¥µÁ½ÉÑ•ÈÉ…¥Í•¥Ì±•…É•½¹”¥ĞÍÑ½ÁÌ‰•¥¹œ4(€€€€€€€€€€€€€€€€´´ÑÉÕ”è„‘…äÑ¡…Ğİ…Ì¥¹½µÁ±•Ñ”°½Èİ…ÌÉ½±±•‰…¬°µÕÍĞ¹½Ğ4(€€€€€€€€€€€€€€€€´´­••Àİ…É¹¥¹œ…‰½ÕĞ¥Ğ…™Ñ•ÈÑ¡”µ¥ÍÍ¥¹œÁÕ¹ …ÉÉ¥Ù•Ì¸4(€€€€€€€€€€€€€€€€´´¹åÑ¡¥¹œ„¡Õµ…¸ÁÕĞÑ¡•É”¥Ì±•™Ğ…±½¹”¸4(€€€€€€€€€€€€€€€É•Ù¥•İ}™±…œ€ôM4(€€€€€€€€€€€€€€€€€€€]!8…ÑÑ•¹‘…¹•}‘…åÌ¹É•Ù¥•İ}™±…œ%8€ ü°€ü¤Q!8•á±Õ‘•¹É•Ù¥•İ}™±…œ4(€€€€€€€€€€€€€€€€€€€1M=1M¡…ÑÑ•¹‘…¹•}‘…åÌ¹É•Ù¥•İ}™±…œ°•á±Õ‘•¹É•Ù¥•İ}™±…œ¤4(€€€€€€€€€€€€€€€9°4(€€€€€€€€€€€€€€€±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥€ô=1M¡•á±Õ‘•¹±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥°4(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€…ÑÑ•¹‘…¹•}‘…åÌ¹±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥¤4(€€€€€€€€€€€€ˆˆˆ°4(€€€€€€€€€€€€¡•µÁ±½å••}¥°İ½É­}‘…Ñ”°ÍÑ…ÑÕÌ°Ñ¥µ•ÍlÁt°4(€€€€€€€€€€€€Ñ¥µ•Íl´Åt¥˜±•¸¡Ñ¥µ•Ì¤€ø€Ä•±Í”9½¹”°É•Ù¥•İ}™±…œ°4(€€€€€€€€€€€€¥µÁ½ÉÑ}ÉÕ¹}¥¥˜±…¥µÌ•±Í”9½¹”°€©%5A=IQ}IY%]}1L¤°4(€€€€€€€€¤4(€€€€€€€İÉ¥ÑÑ•¸€¬ô€Ä4(€€€É•ÑÕÉ¸İÉ¥ÑÑ•¸4(4(4(Œ€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´4(ŒÉ½±±‰…¬4(Œ€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´4)‘•˜}É½±±‰…­}½¹™±¥ÑÌ 4(€€€½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸°¥µÁ½ÉÑ}ÉÕ¹}¥è¥¹Ğ°™¥¹¥Í¡•‘}…ĞèÍÑÈğ9½¹”4(¤€´øÑÕÁ±•m±¥ÍÑmÑÕÁ±•m¥¹Ğ°ÍÑÉut°±¥ÍÑm¥¹‘¥¹utè4(€€€€ˆˆ‰MÁ±¥Ğ…™™•Ñ•…ÑÑ•¹‘…¹”É½İÌ¥¹Ñ¼€Í…™”Ñ¼É•Ù•ÉĞœ…¹€Ñ½Õ¡•Í¥¹”œ¸4(4(€€€É½Ü¥Ì½¹±äÉ•Ù•ÉÑ•İ¡•¸Ñ¡¥Ì¥µÁ½ÉĞ¥ÌÑ¡”½¹”Ñ¡…ĞÁÉ½‘Õ•¥Ğ…¹4(€€€¹½‰½‘ä¡…Ì¡…¹•¥ĞÍ¥¹”¸¹åÑ¡¥¹œ•±Í”¥ÌÉ•Á½ÉÑ•…Ì„½¹™±¥ĞÉ…Ñ¡•È4(€€€Ñ¡…¸‰•¥¹œÍ¥±•¹Ñ±ä½Ù•ÉİÉ¥ÑÑ•¸ƒŠP„É½±±‰…¬µÕÍĞ¹½ĞÕ¹‘¼Í½µ•‰½‘äÌ4(€€€µ…¹Õ…°½ÉÉ•Ñ¥½¸¸4(€€€€ˆˆˆ4(€€€É½İÌ€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€ˆˆˆ4(€€€€€€€M1P%MQ%9P„¹¥°„¹•µÁ±½å••}¥°„¹İ½É­}‘…Ñ”°„¹½¹™¥Éµ•‘}…Ğ°4(€€€€€€€€€€€€€€„¹±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥°„¹Í½ÕÉ”°”¹¹…µ”4(€€€€€€€€€I=4ÁÕ¹¡}•Ù•¹ÑÌÀ4(€€€€€€€€€)=%8…ÑÑ•¹‘…¹•}‘…åÌ„4(€€€€€€€€€€€=8„¹•µÁ±½å••}¥€ôÀ¹•µÁ±½å••}¥9„¹İ½É­}‘…Ñ”€ôÀ¹İ½É­}‘…Ñ”4(€€€€€€€€€)=%8•µÁ±½å••Ì”=8”¹¥€ô„¹•µÁ±½å••}¥4(€€€€€€€€]!IÀ¹…Ñ¥Ù•}¥µÁ½ÉÑ}ÉÕ¹}¥€ô€ü9À¹•µÁ±½å••}¥%L9=P9U104(€€€€€€€€ˆˆˆ°4(€€€€€€€€¡¥µÁ½ÉÑ}ÉÕ¹}¥°¤°4(€€€€¤¹™•Ñ¡…±° ¤4(4(€€€Í…™”è±¥ÍÑmÑÕÁ±•m¥¹Ğ°ÍÑÉut€ômt4(€€€½¹™±¥ÑÌè±¥ÍÑm¥¹‘¥¹t€ômt4(€€€™½ÈÉ½Ü¥¸É½İÌè4(€€€€€€€¥˜É½İl‰½¹™¥Éµ•‘}…Ğ‰tè4(€€€€€€€€€€€½¹™±¥ÑÌ¹…ÁÁ•¹¡¥¹‘¥¹œ 4(€€€€€€€€€€€€€€€€‰É½±±‰…­}½¹™±¥Ğˆ°€‰É•Ù¥•Üˆ°4(€€€€€€€€€€€€€€€€‹ªÒ®š³²zCªÂ ƒ¶fW²‚W¶VpƒªŞó¶s²z®.#®.¸ƒ®†“®ÂÇ²vĞƒªÂK²vƒ®Bc®>3®š³² ƒ²V+²Vc²*×®.#®.¸ˆ°4(€€€€€€€€€€€€€€€İ½É­}‘…Ñ”õÉ½İl‰İ½É­}‘…Ñ”‰t°•µÁ±½å•”õÉ½İl‰¹…µ”‰t°4(€€€€€€€€€€€€¤¤4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€¥˜É½İl‰±…ÍÑ}¥µÁ½ÉÑ}ÉÕ¹}¥‰t€„ô¥µÁ½ÉÑ}ÉÕ¹}¥è4(€€€€€€€€€€€½¹™±¥ÑÌ¹…ÁÁ•¹¡¥¹‘¥¹œ 4(€€€€€€€€€€€€€€€€‰É½±±‰…­}½¹™±¥Ğˆ°€‰É•Ù¥•Üˆ°4(€€€€€€€€€€€€€€€€‹²vĞ¥µÁ½ÉĞƒªÂ ƒ®3®N€ƒ¶Z'²vĞƒ²V®.g®.#®.£®.“®–à¥µÁ½ÉĞƒ®bC®*Pƒ²"cªâÀƒ²z®‚”¤¸€ˆ4(€€€€€€€€€€€€€€€€‹®†“®ÂÇ²vĞƒªÂK²vƒ®Bc®>3®š³² ƒ²V+²Vc²*×®.#®.¸ˆ°4(€€€€€€€€€€€€€€€İ½É­}‘…Ñ”õÉ½İl‰İ½É­}‘…Ñ”‰t°•µÁ±½å•”õÉ½İl‰¹…µ”‰t°4(€€€€€€€€€€€€¤¤4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€•‘¥Ñ•€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€ˆˆˆ4(€€€€€€€€€€€M1P€ÄI=4…Õ‘¥Ñ}±½œ4(€€€€€€€€€€€€]!I•¹Ñ¥Ñå}ÑåÁ”€ô€…ÑÑ•¹‘…¹•}‘…åÌœ9•¹Ñ¥Ñå}¥€ô€ü4(€€€€€€€€€€€€€€9…Ñ¥½¸€ô€…ÑÑ•¹‘…¹”¹½ÉÉ•Ğœ4(€€€€€€€€€€€€€€9€ ü%L9U10=H½ÕÉÉ•‘}…Ğ€ø€ü¤4(€€€€€€€€€€€€1%5%P€Ä4(€€€€€€€€€€€€ˆˆˆ°4(€€€€€€€€€€€€¡É½İl‰¥‰t°™¥¹¥Í¡•‘}…Ğ°™¥¹¥Í¡•‘}…Ğ¤°4(€€€€€€€€¤¹™•Ñ¡½¹” ¤4(€€€€€€€¥˜•‘¥Ñ•è4(€€€€€€€€€€€½¹™±¥ÑÌ¹…ÁÁ•¹¡¥¹‘¥¹œ 4(€€€€€€€€€€€€€€€€‰É½±±‰…­}½¹™±¥Ğˆ°€‰É•Ù¥•Üˆ°4(€€€€€€€€€€€€€€€€‰¥µÁ½ÉĞƒ²vÓ¶nƒ²"c®>g²ró®†pƒ²"c²‚W®BpƒªŞó¶s²z®.#®.¸ƒ®†“®ÂÇ²vĞƒªÂK²vƒ®Bc®>3®š³² ƒ²V+²Vc²*×®.#®.¸ˆ°4(€€€€€€€€€€€€€€€İ½É­}‘…Ñ”õÉ½İl‰İ½É­}‘…Ñ”‰t°•µÁ±½å•”õÉ½İl‰¹…µ”‰t°4(€€€€€€€€€€€€¤¤4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€Í…™”¹…ÁÁ•¹ ¡É½İl‰•µÁ±½å••}¥‰t°É½İl‰İ½É­}‘…Ñ”‰t¤¤4(€€€É•ÑÕÉ¸Í…™”°½¹™±¥ÑÌ4(4(4)‘•˜É½±±‰…­}¥µÁ½ÉĞ 4(€€€¥µÁ½ÉÑ}ÉÕ¹}¥è¥¹Ğ°4(€€€É•…Í½¸èÍÑÈ°4(€€€€¨°4(€€€‘‰}Á…Ñ èA…Ñ ğ9½¹”€ô9½¹”°4(€€€…Ñ½É}¥èÍÑÈ€ô€‰½Á•É…Ñ½Èˆ°4(¤€´ø‘¥Ğè4(€€€€ˆˆ‰U¹‘¼…¸…ÁÁ±¥•¥µÁ½ÉĞİ¥Ñ¡½ÕĞ‘•±•Ñ¥¹œ„Í¥¹±”É…ÜÁÕ¹ ¸4(4(€€€ƒ
-œÈ¸Ğ¥Ì…‰Í½±ÕÑ”èÉ…Ü•Ù•¹ÑÌ…É”µ…É­•É½±±•‘}‰…­}…Ğ…¹ÍÑ…ä¥¸Ñ¡”4(€€€Ñ…‰±”¸•É¥Ù•…ÑÑ•¹‘…¹”¥ÌÉ•½µÁÕÑ•½¹±ä™½ÈÉ½İÌÑ¡¥Ì¥µÁ½ÉĞÁÉ½‘Õ•4(€€€…¹Ñ¡…Ğ¹½‰½‘ä¡…ÌÑ½Õ¡•Í¥¹”ìÑ¡”É•ÍĞ‰•½µ”É½±±‰…­}½¹™±¥Ğ4(€€€™¥¹‘¥¹Ì™½È„¡Õµ…¸Ñ¼É•Í½±Ù”¸4(€€€€ˆˆˆ4(€€€¥˜¹½ĞÉ•…Í½¸½È¹½ĞÉ•…Í½¸¹ÍÑÉ¥À ¤è4(€€€€€€€É…¥Í”%µÁ½ÉÑÉÉ½É| ‰„É½±±‰…¬µÕÍĞ…ÉÉä„É•…Í½¸™½ÈÑ¡”…Õ‘¥Ğ±½œˆ¤4(4(€€€½¹¸€ô‘ˆ¹½¹¹•Ğ¡A…Ñ ¡‘‰}Á…Ñ ½È½¹™¥œ¹	}AQ ¤¤4(€€€ÑÉäè4(€€€€€€€ÉÕ¸€ô½¹¸¹•á•ÕÑ” ‰M1P€¨I=4¥µÁ½ÉÑ}ÉÕ¹Ì]!I¥€ô€üˆ°€¡¥µÁ½ÉÑ}ÉÕ¹}¥°¤¤¹™•Ñ¡½¹” ¤4(€€€€€€€¥˜ÉÕ¸¥Ì9½¹”è4(€€€€€€€€€€€É…¥Í”%µÁ½ÉÑÉÉ½É|¡˜‰¹¼¥µÁ½ÉĞÉÕ¸í¥µÁ½ÉÑ}ÉÕ¹}¥‘ôˆ¤4(€€€€€€€¥˜ÉÕ¹l‰ÍÑ…ÑÕÌ‰t€„ô€‰…ÁÁ±¥•ˆè4(€€€€€€€€€€€É…¥Í”%µÁ½ÉÑÉÉ½É| 4(€€€€€€€€€€€€€€€˜‰¥µÁ½ÉĞÉÕ¸í¥µÁ½ÉÑ}ÉÕ¹}¥‘ô¥Ì€íÉÕ¹lÍÑ…ÑÕÌuôœì½¹±ä…¸…ÁÁ±¥•ÉÕ¸…¸‰”É½±±•‰…¬ˆ4(€€€€€€€€€€€€¤4(4(€€€€€€€Í…™”°½¹™±¥ÑÌ€ô}É½±±‰…­}½¹™±¥ÑÌ¡½¹¸°¥µÁ½ÉÑ}ÉÕ¹}¥°ÉÕ¹l‰™¥¹¥Í¡•‘}…Ğ‰t¤4(4(€€€€€€€½¹¸¹•á•ÕÑ” ‰	%8ˆ¤4(€€€€€€€€Œ	ä…Ñ¥Ù•}¥µÁ½ÉÑ}ÉÕ¹}¥°¹½Ğ¥µÁ½ÉÑ}ÉÕ¹}¥è…¸•Ù•¹Ğ™¥ÉÍĞ¥µÁ½ÉÑ•‰ä4(€€€€€€€€ŒÉÕ¸€Ä…¹É•…Ñ¥Ù…Ñ•‰äÉÕ¸€Ì¥ÌÉÕ¸€ÌÌÑ¼Õ¹‘¼¸¥µÁ½ÉÑ}ÉÕ¹}¥¥Ì4(€€€€€€€€Œ¥µµÕÑ…‰±”ÁÉ½Ù•¹…¹”…¹…¹Íİ•ÉÌ„‘¥™™•É•¹ĞÅÕ•ÍÑ¥½¸¸4(€€€€€€€µ…É­•€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€‰UAQÁÕ¹¡}•Ù•¹ÑÌMPÉ½±±•‘}‰…­}…Ğ€ô€ü°É½±±•‘}‰…­}É•…Í½¸€ô€ü€ˆ4(€€€€€€€€€€€€ˆ]!I…Ñ¥Ù•}¥µÁ½ÉÑ}ÉÕ¹}¥€ô€ü9É½±±•‘}‰…­}…Ğ%L9U10ˆ°4(€€€€€€€€€€€€¡}¹½Ü ¤°É•…Í½¸°¥µÁ½ÉÑ}ÉÕ¹}¥¤°4(€€€€€€€€¤¹É½İ½Õ¹Ğ4(€€€€€€€É•‘½¹”€ô‘•É¥Ù•}…ÑÑ•¹‘…¹” 4(€€€€€€€€€€€½¹¸°Í…™”°¥µÁ½ÉÑ}ÉÕ¹}¥õ¥µÁ½ÉÑ}ÉÕ¹}¥°½İ¹•õÍ•Ğ¡Í…™”¤4(€€€€€€€€¤4(4(€€€€€€€½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€‰UAQ¥µÁ½ÉÑ}ÉÕ¹ÌMPÍÑ…ÑÕÌ€ô€É½±±•‘}‰…¬œ°É½±±•‘}‰…­}…Ğ€ô€ü°€ˆ4(€€€€€€€€€€€€ˆ€€€€€€™¥¹‘¥¹Í}©Í½¸€ô€ü]!I¥€ô€üˆ°4(€€€€€€€€€€€€¡}¹½Ü ¤°4(€€€€€€€€€€€€©Í½¸¹‘ÕµÁÌ¡ì‰É½±±‰…­½¹™±¥ÑÌˆèmŒ¹…Í}‘¥Ğ ¤™½ÈŒ¥¸½¹™±¥ÑÍuô°4(€€€€€€€€€€€€€€€€€€€€€€€•¹ÍÕÉ•}…Í¥¤õ…±Í”¤°4(€€€€€€€€€€€€¥µÁ½ÉÑ}ÉÕ¹}¥¤°4(€€€€€€€€¤4(€€€€€€€½¹¸¹•á•ÕÑ” 4(€€€€€€€€€€€€ˆˆˆ4(€€€€€€€€€€€%9MIP%9Q<…Õ‘¥Ñ}±½œ€¡…Ñ½É}ÑåÁ”°…Ñ½É}¥°…Ñ¥½¸°•¹Ñ¥Ñå}ÑåÁ”°•¹Ñ¥Ñå}¥°4(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€…™Ñ•É}©Í½¸°É•…Í½¸¤4(€€€€€€€€€€€Y1UL€ ¥µÁ½ÉĞœ°€ü°€¥µÁ½ÉĞ¹É½±±‰…¬œ°€¥µÁ½ÉÑ}ÉÕ¹Ìœ°€ü°€ü°€ü¤4(€€€€€€€€€€€€ˆˆˆ°4(€€€€€€€€€€€€¡…Ñ½É}¥°¥µÁ½ÉÑ}ÉÕ¹}¥°4(€€€€€€€€€€€€©Í½¸¹‘ÕµÁÌ¡ì‰ÁÕ¹¡•Í5…É­•ˆèµ…É­•°€‰…ÑÑ•¹‘…¹•I•‘½¹”ˆèÉ•‘½¹”°4(€€€€€€€€€€€€€€€€€€€€€€€€€‰½¹™±¥ÑÌˆè±•¸¡½¹™±¥ÑÌ¥ô°•¹ÍÕÉ•}…Í¥¤õ…±Í”¤°4(€€€€€€€€€€€€É•…Í½¸¤°4(€€€€€€€€¤4(€€€€€€€½¹¸¹½µµ¥Ğ ¤4(€€€€€€€É•ÑÕÉ¸ì4(€€€€€€€€€€€€‰¥µÁ½ÉÑIÕ¹%ˆè¥µÁ½ÉÑ}ÉÕ¹}¥°4(€€€€€€€€€€€€‰ÁÕ¹¡•Í5…É­•‘I½±±•‘	…¬ˆèµ…É­•°4(€€€€€€€€€€€€‰…ÑÑ•¹‘…¹•I•½µÁÕÑ•ˆèÉ•‘½¹”°4(€€€€€€€€€€€€‰ÁÕ¹¡•Í•±•Ñ•ˆè€À°4(€€€€€€€€€€€€‰½¹™±¥ÑÌˆèmŒ¹…Í}‘¥Ğ ¤™½ÈŒ¥¸½¹™±¥ÑÍt°4(€€€€€€€ô4(€€€•á•ÁĞá•ÁÑ¥½¸è4(€€€€€€€½¹¸¹É½±±‰…¬ ¤4(€€€€€€€É…¥Í”4(€€€™¥¹…±±äè4(€€€€€€€½¹¸¹±½Í” ¤4(4(4(Œ€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´4(ŒÉ•…µ½‘•±Ì4(Œ4(ŒQ¡”A$É•¹‘•ÉÌÑ¡•Í”ì¹½Ñ¡¥¹œÉ”µÅÕ•É¥•Ì¥µÁ½ÉÑ}ÉÕ¹Ì½¸¥ÑÌ½İ¸¸A¡…Í”€È4(Œ•ÍÑ…‰±¥Í¡•Ñ¡”Á…ÑÑ•É¸İ¥Ñ …ÁÀ½Í•ÉÙ¥•Ì½½ÁÌ¹Áä°İ¡•É”Ñ¡”A$…¹Ñ¡”‘•µ¼4(ŒÍ¹…ÁÍ¡½Ğ•áÁ½ÉÑ•ÈÍ¡…É”½¹”Í•Ğ½˜É•…µ½‘•±ÌÍ¼Ñ¡”Ñİ¼É•¹‘•É¥¹Ì…¹¹½Ğ4(Œ‘É¥™Ğ¸Q¡”Í…µ”É•…Í½¸…ÁÁ±¥•ÌÑ¼…¹ä±…Ñ•È¥¹Ñ•É™…”è„Í•½¹…±±•ÈÑ¡…Ğ4(ŒİÉ¥Ñ•Ì¥ÑÌ½İ¸ME0¥Ì„Í•½¹‘•™¥¹¥Ñ¥½¸½˜İ¡…Ğ…¸¥µÁ½ÉĞ€‰¥Ìˆ¸4(Œ€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´4)‘•˜¥µÁ½ÉÑ}¡¥ÍÑ½Éä¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸°±¥µ¥Ğè¥¹Ğ€ô€ÔÀ¤€´ø±¥ÍÑm‘¥Ñtè4(€€€É½İÌ€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€ˆˆˆ4(€€€€€€€M1PÈ¹¥°È¹Í½ÕÉ•}™¥±•¹…µ”°È¹ÍÑ…ÑÕÌ°È¹Á•É¥½‘}ÍÑ…ÉĞ°È¹Á•É¥½‘}•¹°4(€€€€€€€€€€€€€€È¹ÁÕ¹¡}•Ù•¹Ñ}½Õ¹Ğ°È¹ÍÑ…ÉÑ•‘}…Ğ°È¹™¥¹¥Í¡•‘}…Ğ°È¹É½±±•‘}‰…­}…Ğ°4(€€€€€€€€€€€€€€È¹•ÉÉ½É}µ•ÍÍ…”°4(€€€€€€€€€€€€€€€¡M1P=U9P ¨¤I=4¥µÁ½ÉÑ}ÉÕ¹}‘…åÌ]!I¹¥µÁ½ÉÑ}ÉÕ¹}¥€ôÈ¹¥¤4(€€€€€€€€€€€€€€€€€€L½Ù•É•‘}‘…åÌ4(€€€€€€€€€I=4¥µÁ½ÉÑ}ÉÕ¹ÌÈ4(€€€€€€€€]!IÈ¹Í½ÕÉ•}­¥¹€ô€™¥¹•ÉÁÉ¥¹Ñ}á±Ìœ4(€€€€€€€€=IH	dÈ¹¥M1%5%P€ü4(€€€€€€€€ˆˆˆ°4(€€€€€€€€¡µ…à Ä°µ¥¸¡±¥µ¥Ğ°€ÈÀÀ¤¤°¤°4(€€€€¤¹™•Ñ¡…±° ¤4(€€€É•ÑÕÉ¸l4(€€€€€€€ì4(€€€€€€€€€€€€‰¥ˆèÉ½İl‰¥‰t°4(€€€€€€€€€€€€‰Í½ÕÉ•¥±•¹…µ”ˆèÉ½İl‰Í½ÕÉ•}™¥±•¹…µ”‰t°4(€€€€€€€€€€€€‰ÍÑ…ÑÕÌˆèÉ½İl‰ÍÑ…ÑÕÌ‰t°4(€€€€€€€€€€€€‰Á•É¥½‘MÑ…ÉĞˆèÉ½İl‰Á•É¥½‘}ÍÑ…ÉĞ‰t°4(€€€€€€€€€€€€‰Á•É¥½‘¹ˆèÉ½İl‰Á•É¥½‘}•¹‰t°4(€€€€€€€€€€€€‰ÁÕ¹¡Ù•¹Ñ½Õ¹ĞˆèÉ½İl‰ÁÕ¹¡}•Ù•¹Ñ}½Õ¹Ğ‰t°4(€€€€€€€€€€€€‰ÍÑ…ÉÑ•‘ĞˆèÉ½İl‰ÍÑ…ÉÑ•‘}…Ğ‰t°4(€€€€€€€€€€€€‰™¥¹¥Í¡•‘ĞˆèÉ½İl‰™¥¹¥Í¡•‘}…Ğ‰t°4(€€€€€€€€€€€€‰É½±±•‘	…­ĞˆèÉ½İl‰É½±±•‘}‰…­}…Ğ‰t°4(€€€€€€€€€€€€‰•ÉÉ½É5•ÍÍ…”ˆèÉ½İl‰•ÉÉ½É}µ•ÍÍ…”‰t°4(€€€€€€€€€€€€‰½Ù•É•‘…åÌˆèÉ½İl‰½Ù•É•‘}‘…åÌ‰t°4(€€€€€€€ô4(€€€€€€€™½ÈÉ½Ü¥¸É½İÌ4(€€€t4(4(4)‘•˜¥µÁ½ÉÑ}ÉÕ¹}‘•Ñ…¥°¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸°ÉÕ¹}¥è¥¹Ğ¤€´ø‘¥Ğğ9½¹”è4(€€€É½Ü€ô½¹¸¹•á•ÕÑ” ‰M1P€¨I=4¥µÁ½ÉÑ}ÉÕ¹Ì]!I¥€ô€üˆ°€¡ÉÕ¹}¥°¤¤¹™•Ñ¡½¹” ¤4(€€€¥˜É½Ü¥Ì9½¹”è4(€€€€€€€É•ÑÕÉ¸9½¹”4(€€€‘…åÌ€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€‰M1Pİ½É­}‘…Ñ”°½Ù•É…•}ÍÑ…ÑÕÌ°É…İ}ÁÕ¹¡}½Õ¹ĞI=4¥µÁ½ÉÑ}ÉÕ¹}‘…åÌ€ˆ4(€€€€€€€€ˆ]!I¥µÁ½ÉÑ}ÉÕ¹}¥€ô€ü=IH	dİ½É­}‘…Ñ”ˆ°4(€€€€€€€€¡ÉÕ¹}¥°¤°4(€€€€¤¹™•Ñ¡…±° ¤4(€€€™¥¹‘¥¹Ìè±¥ÍÑm‘¥Ñt€ômt4(€€€¥˜É½İl‰™¥¹‘¥¹Í}©Í½¸‰tè4(€€€€€€€ÑÉäè4(€€€€€€€€€€€™¥¹‘¥¹Ì€ô©Í½¸¹±½…‘Ì¡É½İl‰™¥¹‘¥¹Í}©Í½¸‰t¤¹•Ğ ‰™¥¹‘¥¹Ìˆ°mt¤4(€€€€€€€•á•ÁĞY…±Õ•ÉÉ½Èè€€ŒÁÉ…µ„è¹¼½Ù•È€´‘•™•¹Í¥Ù”4(€€€€€€€€€€€™¥¹‘¥¹Ì€ômt4(€€€É•ÑÕÉ¸ì4(€€€€€€€€‰¥ˆèÉ½İl‰¥‰t°4(€€€€€€€€‰Í½ÕÉ•¥±•¹…µ”ˆèÉ½İl‰Í½ÕÉ•}™¥±•¹…µ”‰t°4(€€€€€€€€‰ÍÑ…ÑÕÌˆèÉ½İl‰ÍÑ…ÑÕÌ‰t°4(€€€€€€€€‰Á•É¥½‘MÑ…ÉĞˆèÉ½İl‰Á•É¥½‘}ÍÑ…ÉĞ‰t°4(€€€€€€€€‰Á•É¥½‘¹ˆèÉ½İl‰Á•É¥½‘}•¹‰t°4(€€€€€€€€‰ÁÕ¹¡Ù•¹Ñ½Õ¹ĞˆèÉ½İl‰ÁÕ¹¡}•Ù•¹Ñ}½Õ¹Ğ‰t°4(€€€€€€€€‰ÍÑ…ÉÑ•‘ĞˆèÉ½İl‰ÍÑ…ÉÑ•‘}…Ğ‰t°4(€€€€€€€€‰™¥¹¥Í¡•‘ĞˆèÉ½İl‰™¥¹¥Í¡•‘}…Ğ‰t°4(€€€€€€€€‰É½±±•‘	…­ĞˆèÉ½İl‰É½±±•‘}‰…­}…Ğ‰t°4(€€€€€€€€‰•ÉÉ½É5•ÍÍ…”ˆèÉ½İl‰•ÉÉ½É}µ•ÍÍ…”‰t°4(€€€€€€€€‰½Ù•É•‘…åÌˆè±•¸¡‘…åÌ¤°4(€€€€€€€€‰Í½ÕÉ•M¡„ÈÔØˆèÉ½İl‰Í½ÕÉ•}Í¡„ÈÔØ‰t°4(€€€€€€€€‰™¥¹‘¥¹Ìˆè™¥¹‘¥¹Ì°4(€€€€€€€€Œ½Ù•É…”™…ÑÌ°­•ÁĞ…Á…ÉĞ™É½´…¹ä…ÑÑ•¹‘…¹”Ù•É‘¥Ğè„4(€€€€€€€€ŒÉ•Á½ÉÑ•‘}é•É¼‘…ä¥Ìİ¡…ĞÑ¡”™¥±”Í…¥°¹½Ğ…¸…‰Í•¹”¸4(€€€€€€€€‰‘…åÌˆèl4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€‰İ½É­…Ñ”ˆè‘…ål‰İ½É­}‘…Ñ”‰t°4(€€€€€€€€€€€€€€€€‰½Ù•É…”ˆè‘…ål‰½Ù•É…•}ÍÑ…ÑÕÌ‰t°4(€€€€€€€€€€€€€€€€‰ÁÕ¹¡•Ìˆè‘…ål‰É…İ}ÁÕ¹¡}½Õ¹Ğ‰t°4(€€€€€€€€€€€ô4(€€€€€€€€€€€™½È‘…ä¥¸‘…åÌ4(€€€€€€€t°4(€€€ô4(4(4)‘•˜ÍÑ½É•‘}ÁÉ•Ù¥•Ü¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸°ÉÕ¹}¥è¥¹Ğ¤€´ø‘¥Ğğ9½¹”è4(€€€€ˆˆ‰Q¡”ÁÉ•Ù¥•ÜÍ¹…ÁÍ¡½Ğ…ÌÑ¡”½Á•É…Ñ½Èİ½Õ±¡…Ù”Í••¸¥Ğ¸4(4(€€€I•ÑÕÉ¹Ì9½¹”İ¡•¸Ñ¡”ÉÕ¸¡…Ì¹½¹”ƒŠP„ÉÕ¸Ñ¡…Ğ™…¥±•Ñ¼Á…ÉÍ”°½È½¹”4(€€€…±É•…‘ä…ÁÁ±¥•¸ÁÁ±å¥¹œ¹•Ù•ÈÑÉÕÍÑÌÑ¡¥Ìè¥ĞÉ”µÉ•…‘ÌÑ¡”ÁÉ•Í•ÉÙ•™¥±”4(€€€…¹É•½µÁÕÑ•Ì……¥¹ÍĞÑ¡”ÕÉÉ•¹ĞÍ±½Ğµ…ÁÁ¥¹œ¸4(€€€€ˆˆˆ4(€€€É½Ü€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€‰M1PÁÉ•Ù¥•İ}©Í½¸I=4¥µÁ½ÉÑ}ÉÕ¹Ì]!I¥€ô€üˆ°€¡ÉÕ¹}¥°¤4(€€€€¤¹™•Ñ¡½¹” ¤4(€€€¥˜É½Ü¥Ì9½¹”½È¹½ĞÉ½İl‰ÁÉ•Ù¥•İ}©Í½¸‰tè4(€€€€€€€É•ÑÕÉ¸9½¹”4(€€€É•ÑÕÉ¸©Í½¸¹±½…‘Ì¡É½İl‰ÁÉ•Ù¥•İ}©Í½¸‰t¤4(4(4)‘•˜ÁÉ•Í•ÉÙ•‘}Í½ÕÉ”¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸°ÉÕ¹}¥è¥¹Ğ¤€´ø‘¥Ğğ9½¹”è4(€€€€ˆˆ‰]¡•É”Ñ¡”Õ¹Ñ½Õ¡•½É¥¥¹…°¥Ì­•ÁĞ¸4(4(€€€Q¡”Á…Ñ °¹½ĞÑ¡”‰åÑ•ÌèÑ¡”™¥±”ÍÑ…åÌ½¸Ñ¡”İ½É¬AÌ‘¥Í¬…¹¥Ì¹•Ù•È4(€€€Í•ÉÙ•Ñ¼„…±±•È¸4(€€€€ˆˆˆ4(€€€É½Ü€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€‰M1PÍÑ½É•‘}Í½ÕÉ•}Á…Ñ °Í½ÕÉ•}™¥±•¹…µ”°Í½ÕÉ•}Í¡„ÈÔØ€ˆ4(€€€€€€€€ˆ€I=4¥µÁ½ÉÑ}ÉÕ¹Ì]!I¥€ô€üˆ°4(€€€€€€€€¡ÉÕ¹}¥°¤°4(€€€€¤¹™•Ñ¡½¹” ¤4(€€€¥˜É½Ü¥Ì9½¹”è4(€€€€€€€É•ÑÕÉ¸9½¹”4(€€€ÍÑ½É•€ôA…Ñ ¡É½İl‰ÍÑ½É•‘}Í½ÕÉ•}Á…Ñ ‰t½È€ˆˆ¤4(€€€É•ÑÕÉ¸ì4(€€€€€€€€‰Í½ÕÉ•¥±•¹…µ”ˆèÉ½İl‰Í½ÕÉ•}™¥±•¹…µ”‰t°4(€€€€€€€€‰ÍÑ½É•‘A…Ñ ˆèÍÑÈ¡ÍÑ½É•¤°4(€€€€€€€€‰•á¥ÍÑÌˆèÍÑ½É•¹¥Í}™¥±” ¤°4(€€€€€€€€‰Í¡„ÈÔØˆèÉ½İl‰Í½ÕÉ•}Í¡„ÈÔØ‰t°4(€€€ô4(4(4)‘•˜Á•¹‘¥¹}¥µÁ½ÉÑÌ¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸¤€´ø±¥ÍÑm‘¥Ñtè4(€€€€ˆˆ‰AÉ•Ù¥•İ•¥µÁ½ÉÑÌİ…¥Ñ¥¹œ™½ÈÍ½µ•‰½‘äÑ¼½¹™¥É´½È‘¥Í…ÉÑ¡•´¸ˆˆˆ4(€€€É½İÌ€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€ˆˆˆ4(€€€€€€€M1P¥°Í½ÕÉ•}™¥±•¹…µ”°Á•É¥½‘}ÍÑ…ÉĞ°Á•É¥½‘}•¹°ÍÑ…ÉÑ•‘}…Ğ°4(€€€€€€€€€€€€€€‘¥Í½Ù•É•‘}‰ä°ÁÉ•Ù¥•İ}©Í½¸4(€€€€€€€€€I=4¥µÁ½ÉÑ}ÉÕ¹Ì4(€€€€€€€€]!IÍÑ…ÑÕÌ€ô€ÁÉ•Ù¥•İ•œ9Í½ÕÉ•}­¥¹€ô€™¥¹•ÉÁÉ¥¹Ñ}á±Ìœ4(€€€€€€€€=IH	d¥M4(€€€€€€€€ˆˆˆ4(€€€€¤¹™•Ñ¡…±° ¤4(€€€½ÕĞ€ômt4(€€€™½ÈÉ½Ü¥¸É½İÌè4(€€€€€€€¹•İ}ÁÕ¹¡•Ì€ô9½¹”(€€€€€€€ÍÑ…Ñ”€ô€‹ªÊ¶€ƒ¶V²jPˆ(€€€€€€€¥˜É½İl‰ÁÉ•Ù¥•İ}©Í½¸‰tè(€€€€€€€€€€€ÑÉäè(€€€€€€€€€€€€€€€Í…Ù•€ô©Í½¸¹±½…‘Ì¡É½İl‰ÁÉ•Ù¥•İ}©Í½¸‰t¤(€€€€€€€€€€€€€€€¹•İ}ÁÕ¹¡•Ì€ôÍ…Ù•¹•Ğ ‰¹•İAÕ¹¡•Ìˆ¤(€€€€€€€€€€€€€€€¥˜…¹ä¡Ì¹•Ğ ‰ÍÑ…ÑÕÌˆ¤€ôô€‰Õ¹µ…ÁÁ•ˆ…¹Ì¹•Ğ ‰ÁÕ¹¡½Õ¹Ğˆ°€À¤€ø€À™½ÈÌ¥¸Í…Ù•¹•Ğ ‰Í±½ÑÌˆ°mt¤¤è(€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ”€ô€‹²²n@ƒ²^ÃªÊÀƒ¶V²jPˆ(€€€€€€€€€€€€€€€•±¥˜Í…Ù•¹•Ğ ‰…¹ÁÁ±äˆ¤è(€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ”€ô€‹®Âc²bƒªÂ®*”ˆ(€€€€€€€€€€€€€€€•±¥˜¹½Ğ¹•İ}ÁÕ¹¡•Ì…¹¹½ĞÍ…Ù•¹•Ğ ‰É•…Ñ¥Ù…Ñ…‰±•AÕ¹¡•Ìˆ¤è(€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ”€ô€‹²vÓ®¾àƒªÂ²‚ã²b ƒ¶23²vğˆ(€€€€€€€€€€€€€€€•±Í”è(€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ”€ô€‹²Â£®.£®B ˆ(€€€€€€€€€€€•á•ÁĞY…±Õ•ÉÉ½Èè€€ŒÁÉ…µ„è¹¼½Ù•È€´‘•™•¹Í¥Ù”4(€€€€€€€€€€€€€€€¹•İ}ÁÕ¹¡•Ì€ô9½¹”4(€€€€€€€½ÕĞ¹…ÁÁ•¹¡ì4(€€€€€€€€€€€€‰¥µÁ½ÉÑIÕ¹%ˆèÉ½İl‰¥‰t°4(€€€€€€€€€€€€‰Í½ÕÉ•¥±•¹…µ”ˆèÉ½İl‰Í½ÕÉ•}™¥±•¹…µ”‰t°4(€€€€€€€€€€€€‰Á•É¥½‘MÑ…ÉĞˆèÉ½İl‰Á•É¥½‘}ÍÑ…ÉĞ‰t°4(€€€€€€€€€€€€‰Á•É¥½‘¹ˆèÉ½İl‰Á•É¥½‘}•¹‰t°4(€€€€€€€€€€€€‰ÍÑ…ÉÑ•‘ĞˆèÉ½İl‰ÍÑ…ÉÑ•‘}…Ğ‰t°4(€€€€€€€€€€€€‰‘¥Í½Ù•É•‘	äˆèÉ½İl‰‘¥Í½Ù•É•‘}‰ä‰t°4(€€€€€€€€€€€€‰¹•İAÕ¹¡•Ìˆè¹•İ}ÁÕ¹¡•Ì°(€€€€€€€€€€€€‰ÍÑ…Ñ”ˆèÍÑ…Ñ”°(€€€€€€€ô¤4(€€€É•ÑÕÉ¸½ÕĞ4(4(4)‘•˜±…ÍÑ}…ÁÁ±¥•‘}¥µÁ½ÉĞ¡½¹¸èÍÅ±¥Ñ”Ì¹½¹¹•Ñ¥½¸¤€´ø‘¥Ğğ9½¹”è4(€€€É½Ü€ô½¹¸¹•á•ÕÑ” 4(€€€€€€€€‰M1P¥°Í½ÕÉ•}™¥±•¹…µ”°Á•É¥½‘}ÍÑ…ÉĞ°Á•É¥½‘}•¹°™¥¹¥Í¡•‘}…Ğ°ÁÕ¹¡}•Ù•¹Ñ}½Õ¹Ğ€ˆ4(€€€€€€€€ˆ€I=4¥µÁ½ÉÑ}ÉÕ¹Ì]!IÍÑ…ÑÕÌ€ô€…ÁÁ±¥•œ9Í½ÕÉ•}­¥¹€ô€™¥¹•ÉÁÉ¥¹Ñ}á±Ìœ€ˆ4(€€€€€€€€ˆ=IH	d=1M¡™¥¹¥Í¡•‘}…Ğ°ÕÁ‘…Ñ•‘}…Ğ¤M°¥M1%5%P€Äˆ4(€€€€¤¹™•Ñ¡½¹” ¤4(€€€É•ÑÕÉ¸‘¥Ğ¡É½Ü¤¥˜É½Ü•±Í”9½¹”4(
+        dates = sorted({d for (s, d) in by_slot_day if s == slot.slot_code})
+        resolved = [_resolve_slot(intervals, slot.slot_code, d) for d in dates]
+        holders = {
+            r["employee_id"]: r for r in resolved if r and r.get("employee_id")
+        }
+        mapped = next(iter(holders.values())) if len(holders) == 1 else None
+        employee = mapped["name"] if mapped else None
+        status = "mapped"
+        if len(holders) > 1:
+            status = "mapping_changed"
+            employee = " / ".join(sorted(r["name"] for r in holders.values()))
+            findings.append(Finding(
+                "slot_changed_hands", "review",
+                f"ìŠ¬ë¡¯ {slot.slot_code}: ì´ ê¸°ê°„ ì•ˆì— ë‹´ë‹¹ìê°€ ë°”ë€ë‹ˆë‹¤({employee}). "
+                "ê° í€ì¹˜ëŠ” ê·¸ ë‚ ì§œì˜ ë‹´ë‹¹ìì—ê²Œ ê·€ì†ë©ë‹ˆë‹¤.",
+                slot_code=slot.slot_code, employee=employee,
+            ))
+        elif slot.punch_count == 0:
+            status = "unused"
+            findings.append(Finding(
+                "unused_slot", "info",
+                f"ìŠ¬ë¡¯ {slot.slot_code}: ì´ ê¸°ê°„ì— ê¸°ë¡ì´ ì—†ìŠµë‹ˆë‹¤. ê²°ê·¼ìœ¼ë¡œ ì²˜ë¦¬í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
+                slot_code=slot.slot_code,
+            ))
+        elif not mapped:
+            status = "unmapped"
+            findings.append(Finding(
+                "unmapped_slot", "review",
+                f"ìŠ¬ë¡¯ {slot.slot_code}({slot.display_name or 'ì´ë¦„ì—†ìŒ'}): ì§ì› ë§¤í•‘ì´ ì—†ìŠµë‹ˆë‹¤. "
+                "ì›ë³¸ ê¸°ë¡ì€ ë³´ì¡´ë˜ë©° ì§ì›ì— ì—°ê²°ë˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
+                slot_code=slot.slot_code,
+            ))
+        elif mapped["employee_status"] != "active":
+            status = "inactive"
+            findings.append(Finding(
+                "inactive_employee", "review",
+                f"ìŠ¬ë¡¯ {slot.slot_code}: ì¬ì§ ìƒíƒœê°€ ì•„ë‹Œ ì§ì›({mapped['employee_status']})ì˜ ê¸°ë¡ì…ë‹ˆë‹¤.",
+                slot_code=slot.slot_code, employee=employee,
+            ))
+
+        slot_rows.append({
+            "slot": slot.slot_code,
+            "terminalName": slot.display_name,
+            "employee": employee,
+            # Identity, not the display name: two people can share a name, and
+            # remapping a slot between them must invalidate a confirmation.
+            "employeeIds": sorted(holders),
+            "status": status,
+            "punchCount": slot.punch_count,
+            "dayCount": slot.day_count,
+        })
+
+    for (slot_code, work_date), punches in sorted(by_slot_day.items()):
+        mapped = _resolve_slot(intervals, slot_code, work_date)
+        employee = mapped["name"] if mapped and mapped.get("employee_id") else None
+        times = [p.punch_time for p in punches]
+        review = punch_review.review_day(times, threshold_minutes)
+
+        for punch in punches:
+            key = dedupe_key(TERMINAL_ID, punch)
+            if key not in existing:
+                new_punches += 1
+            elif existing[key]:
+                reactivatable += 1
+            else:
+                already += 1
+
+        if review["has_repeated_candidate"]:
+            findings.append(Finding(
+                "repeated_punch_candidate", "review",
+                f"{threshold_minutes}ë¶„ ì´ë‚´ ì¬íƒœê·¸ í›„ë³´: {' Â· '.join(times)} â€” ì›ë³¸ì€ ëª¨ë‘ ë³´ì¡´ë©ë‹ˆë‹¤.",
+                slot_code=slot_code, work_date=work_date, employee=employee,
+            ))
+        if review["exact_repeat_count"]:
+            findings.append(Finding(
+                "duplicate_timestamp", "info",
+                f"ë™ì¼ ì‹œê° {review['exact_repeat_count']}ê±´ ë°˜ë³µ: {' Â· '.join(times)} â€” ì „ë¶€ ë³„ë„ ê¸°ë¡ìœ¼ë¡œ ë³´ì¡´ë©ë‹ˆë‹¤.",
+                slot_code=slot_code, work_date=work_date, employee=employee,
+            ))
+        if review["incomplete"]:
+            findings.append(Finding(
+                "incomplete_day", "review",
+                f"í€ì¹˜ê°€ 1ê±´ë¿ì…ë‹ˆë‹¤({times[0]}). ê²°ê·¼ì´ë‚˜ ì •ìƒê·¼ë¬´ë¡œ ë‹¨ì •í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
+                slot_code=slot_code, work_date=work_date, employee=employee,
+            ))
+        if mapped and mapped.get("employee_id"):
+            if mapped["hire_date"] and work_date < mapped["hire_date"]:
+                findings.append(Finding(
+                    "before_hire_date", "review",
+                    f"ì…ì‚¬ì¼({mapped['hire_date']}) ì´ì „ì˜ ê¸°ë¡ì…ë‹ˆë‹¤.",
+                    slot_code=slot_code, work_date=work_date, employee=employee,
+                ))
+            conflict = conn.execute(
+                """
+                SELECT 1 FROM leave_requests
+                 WHERE employee_id = ? AND status = 'approved'
+                   AND start_date <= ? AND end_date >= ?
+                """,
+                (mapped["employee_id"], work_date, work_date),
+            ).fetchone()
+            if conflict:
+                findings.append(Finding(
+                    "leave_conflict", "review",
+      â€¦3078 tokens truncatedâ€¦resent": skipped,
+            "reactivated": reactivated,
+            "attendanceRows": derived,
+            "snapshotPath": str(snapshot),
+        }
+    except Exception:
+        conn.rollback()
+        conn.execute(
+            "UPDATE import_runs SET status = 'failed', error_message = ? WHERE id = ?",
+            ("apply failed and was rolled back", import_run_id),
+        )
+        conn.commit()
+        raise
+    finally:
+        conn.close()
+
+
+def _flag_repeated_punches(
+    conn: sqlite3.Connection, import_run_id: int, threshold_minutes: int
+) -> None:
+    """Annotate re-tag candidates. Never merges or removes anything."""
+    rows = conn.execute(
+        """
+        SELECT id, terminal_slot_code, work_date, punch_at
+          FROM punch_events WHERE active_import_run_id = ? AND rolled_back_at IS NULL
+         ORDER BY terminal_slot_code, work_date, punch_at, id
+        """,
+        (import_run_id,),
+    ).fetchall()
+    by_day: dict[tuple[str, str], list] = {}
+    for row in rows:
+        by_day.setdefault((row["terminal_slot_code"], row["work_date"]), []).append(row)
+
+    for group in by_day.values():
+        times = [row["punch_at"][11:16] for row in group]
+        for index in punch_review.repeated_punch_indexes(times, threshold_minutes):
+            conn.execute(
+                "UPDATE punch_events SET review_flag = 'repeated_punch_candidate' "
+                "WHERE id = ? AND review_flag IS NULL",
+                (group[index]["id"],),
+            )
+
+
+def _record_coverage(conn: sqlite3.Connection, import_run_id: int, parsed) -> None:
+    """Record which dates this file covered, and how many punches each carried.
+
+    This is what makes "the export said 2026-07-17 was empty" different from
+    "August was never imported". Neither is an attendance verdict; the first is
+    a fact about the source that a human still has to explain.
+    """
+    counts: dict[str, int] = {}
+    for punch in parsed.punches:
+        counts[punch.work_date] = counts.get(punch.work_date, 0) + 1
+
+    for work_date in parsed.covered_dates:
+        count = counts.get(work_date, 0)
+        conn.execute(
+            """
+            INSERT INTO import_run_days
+                (import_run_id, work_date, source_date_present, raw_punch_count, coverage_status)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(import_run_id, work_date) DO UPDATE SET
+                raw_punch_count = excluded.raw_punch_count,
+                coverage_status = excluded.coverage_status
+            """,
+            (import_run_id, work_date, count,
+             "has_punches" if count else "reported_zero"),
+        )
+
+
+# Review flags the importer sets on attendance_days. They describe the state of
+# the derivation, so the importer may clear its own when the state changes â€”
+# and nothing else's.
+IMPORT_REVIEW_FLAGS = ("incomplete_day", "import_rolled_back")
+
+
+def derive_attendance(
+    conn: sqlite3.Connection,
+    employee_days: list[tuple[int, str]],
+    *,
+    import_run_id: int | None = None,
+    owned: set[tuple[int, str]] | None = None,
+) -> int:
+    """Derive attendance_days from punches for the given employee-days.
+
+    Rules, all conservative:
+      * two or more punches      -> normal
+      * exactly one punch        -> unknown, flagged incomplete (never absent)
+      * no punches left          -> a fingerprint-derived row is reset to
+                                    unknown, because the evidence behind it is
+                                    gone (this is what a rollback leaves). It is
+                                    never turned into an absence, and rows from
+                                    another source are left alone.
+      * a row a human confirmed  -> never overwritten by an import
+
+    `owned` are the employee-days this run actually put evidence behind. Only
+    those get last_import_run_id, because that column decides which run may
+    later roll the row back. A run that inserted nothing must not take over a
+    day it did not change: re-applying the same file used to do exactly that,
+    and the earlier run's rollback then left ì •ìƒ standing on zero punches.
+
+    Uses ON CONFLICT DO UPDATE. INSERT OR REPLACE would destroy the row's id,
+    created_at, revision history and notes (finding N1).
+    """
+    written = 0
+    for employee_id, work_date in employee_days:
+        claims = owned is None or (employee_id, work_date) in owned
+        times = [
+            row[0][11:16]
+            for row in conn.execute(
+                "SELECT punch_at FROM punch_events "
+                " WHERE employee_id = ? AND work_date = ? AND rolled_back_at IS NULL "
+                " ORDER BY punch_at",
+                (employee_id, work_date),
+            )
+        ]
+        existing = conn.execute(
+            "SELECT id, confirmed_at, source FROM attendance_days "
+            " WHERE employee_id = ? AND work_date = ?",
+            (employee_id, work_date),
+        ).fetchone()
+        if existing and existing["confirmed_at"]:
+            continue
+
+        if not times:
+            # Every punch behind this day was rolled back. Leaving it as
+            # 'normal' would show attendance backed by nothing.
+            if existing and existing["source"] == "fingerprint":
+                conn.execute(
+                    "UPDATE attendance_days "
+                    "   SET status = 'unknown', actual_in_at = NULL, actual_out_at = NULL, "
+                    "       review_flag = 'import_rolled_back' "
+                    " WHERE id = ?",
+                    (existing["id"],),
+                )
+                written += 1
+            continue
+
+        status = "normal" if len(times) >= 2 else "unknown"
+        review_flag = None if len(times) >= 2 else "incomplete_day"
+        conn.execute(
+            """
+            INSERT INTO attendance_days
+                (employee_id, work_date, status, actual_in_at, actual_out_at, source,
+                 review_flag, last_import_run_id)
+            VALUES (?, ?, ?, ?, ?, 'fingerprint', ?, ?)
+            ON CONFLICT(employee_id, work_date) DO UPDATE SET
+                status = excluded.status,
+                actual_in_at = excluded.actual_in_at,
+                actual_out_at = excluded.actual_out_at,
+                source = 'fingerprint',
+                -- A flag the importer raised is cleared once it stops being
+                -- true: a day that was incomplete, or was rolled back, must not
+                -- keep warning about it after the missing punch arrives.
+                -- Anything a human put there is left alone.
+                review_flag = CASE
+                    WHEN attendance_days.review_flag IN (?, ?) THEN excluded.review_flag
+                    ELSE COALESCE(attendance_days.review_flag, excluded.review_flag)
+                END,
+                last_import_run_id = COALESCE(excluded.last_import_run_id,
+                                              attendance_days.last_import_run_id)
+            """,
+            (employee_id, work_date, status, times[0],
+             times[-1] if len(times) > 1 else None, review_flag,
+             import_run_id if claims else None, *IMPORT_REVIEW_FLAGS),
+        )
+        written += 1
+    return written
+
+
+# ---------------------------------------------------------------------------
+# rollback
+# ---------------------------------------------------------------------------
+def _rollback_conflicts(
+    conn: sqlite3.Connection, import_run_id: int, finished_at: str | None
+) -> tuple[list[tuple[int, str]], list[Finding]]:
+    """Split affected attendance rows into 'safe to revert' and 'touched since'.
+
+    A row is only reverted when this import is the one that produced it and
+    nobody has changed it since. Anything else is reported as a conflict rather
+    than being silently overwritten â€” a rollback must not undo somebody's
+    manual correction.
+    """
+    rows = conn.execute(
+        """
+        SELECT DISTINCT a.id, a.employee_id, a.work_date, a.confirmed_at,
+               a.last_import_run_id, a.source, e.name
+          FROM punch_events p
+          JOIN attendance_days a
+            ON a.employee_id = p.employee_id AND a.work_date = p.work_date
+          JOIN employees e ON e.id = a.employee_id
+         WHERE p.active_import_run_id = ? AND p.employee_id IS NOT NULL
+        """,
+        (import_run_id,),
+    ).fetchall()
+
+    safe: list[tuple[int, str]] = []
+    conflicts: list[Finding] = []
+    for row in rows:
+        if row["confirmed_at"]:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "ê´€ë¦¬ìê°€ í™•ì •í•œ ê·¼íƒœì…ë‹ˆë‹¤. ë¡¤ë°±ì´ ê°’ì„ ë˜ëŒë¦¬ì§€ ì•Šì•˜ìŠµë‹ˆë‹¤.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        if row["last_import_run_id"] != import_run_id:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "ì´ import ê°€ ë§Œë“  í–‰ì´ ì•„ë‹™ë‹ˆë‹¤(ë‹¤ë¥¸ import ë˜ëŠ” ìˆ˜ê¸° ì…ë ¥). "
+                "ë¡¤ë°±ì´ ê°’ì„ ë˜ëŒë¦¬ì§€ ì•Šì•˜ìŠµë‹ˆë‹¤.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        edited = conn.execute(
+            """
+            SELECT 1 FROM audit_log
+             WHERE entity_type = 'attendance_days' AND entity_id = ?
+               AND action = 'attendance.correct'
+               AND (? IS NULL OR occurred_at > ?)
+             LIMIT 1
+            """,
+            (row["id"], finished_at, finished_at),
+        ).fetchone()
+        if edited:
+            conflicts.append(Finding(
+                "rollback_conflict", "review",
+                "import ì´í›„ ìˆ˜ë™ìœ¼ë¡œ ìˆ˜ì •ëœ ê·¼íƒœì…ë‹ˆë‹¤. ë¡¤ë°±ì´ ê°’ì„ ë˜ëŒë¦¬ì§€ ì•Šì•˜ìŠµë‹ˆë‹¤.",
+                work_date=row["work_date"], employee=row["name"],
+            ))
+            continue
+        safe.append((row["employee_id"], row["work_date"]))
+    return safe, conflicts
+
+
+def rollback_import(
+    import_run_id: int,
+    reason: str,
+    *,
+    db_path: Path | None = None,
+    actor_id: str = "operator",
+) -> dict:
+    """Undo an applied import without deleting a single raw punch.
+
+    Â§2.4 is absolute: raw events are marked rolled_back_at and stay in the
+    table. Derived attendance is recomputed only for rows this import produced
+    and that nobody has touched since; the rest become rollback_conflict
+    findings for a human to resolve.
+    """
+    if not reason or not reason.strip():
+        raise ImportError_("a rollback must carry a reason for the audit log")
+
+    conn = db.connect(Path(db_path or config.DB_PATH))
+    try:
+        run = conn.execute("SELECT * FROM import_runs WHERE id = ?", (import_run_id,)).fetchone()
+        if run is None:
+            raise ImportError_(f"no import run {import_run_id}")
+        if run["status"] != "applied":
+            raise ImportError_(
+                f"import run {import_run_id} is '{run['status']}'; only an applied run can be rolled back"
+            )
+
+        safe, conflicts = _rollback_conflicts(conn, import_run_id, run["finished_at"])
+
+        conn.execute("BEGIN")
+        # By active_import_run_id, not import_run_id: an event first imported by
+        # run 1 and reactivated by run 3 is run 3's to undo. import_run_id is
+        # immutable provenance and answers a different question.
+        marked = conn.execute(
+            "UPDATE punch_events SET rolled_back_at = ?, rolled_back_reason = ? "
+            " WHERE active_import_run_id = ? AND rolled_back_at IS NULL",
+            (_now(), reason, import_run_id),
+        ).rowcount
+        redone = derive_attendance(
+            conn, safe, import_run_id=import_run_id, owned=set(safe)
+        )
+
+        conn.execute(
+            "UPDATE import_runs SET status = 'rolled_back', rolled_back_at = ?, "
+            "       findings_json = ? WHERE id = ?",
+            (_now(),
+             json.dumps({"rollbackConflicts": [c.as_dict() for c in conflicts]},
+                        ensure_ascii=False),
+             import_run_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id,
+                                   after_json, reason)
+            VALUES ('import', ?, 'import.rollback', 'import_runs', ?, ?, ?)
+            """,
+            (actor_id, import_run_id,
+             json.dumps({"punchesMarked": marked, "attendanceRedone": redone,
+                         "conflicts": len(conflicts)}, ensure_ascii=False),
+             reason),
+        )
+        conn.commit()
+        return {
+            "importRunId": import_run_id,
+            "punchesMarkedRolledBack": marked,
+            "attendanceRecomputed": redone,
+            "punchesDeleted": 0,
+            "conflicts": [c.as_dict() for c in conflicts],
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# read models
+#
+# The API renders these; nothing re-queries import_runs on its own. Phase 2
+# established the pattern with app/services/ops.py, where the API and the demo
+# snapshot exporter share one set of read models so the two renderings cannot
+# drift. The same reason applies to any later interface: a second caller that
+# writes its own SQL is a second definition of what an import "is".
+# ---------------------------------------------------------------------------
+def import_history(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT r.id, r.source_filename, r.status, r.period_start, r.period_end,
+               r.punch_event_count, r.started_at, r.finished_at, r.rolled_back_at,
+               r.error_message,
+               (SELECT COUNT(*) FROM import_run_days d WHERE d.import_run_id = r.id)
+                   AS covered_days
+          FROM import_runs r
+         WHERE r.source_kind = 'fingerprint_xls'
+         ORDER BY r.id DESC LIMIT ?
+        """,
+        (max(1, min(limit, 200)),),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "sourceFilename": row["source_filename"],
+            "status": row["status"],
+            "periodStart": row["period_start"],
+            "periodEnd": row["period_end"],
+            "punchEventCount": row["punch_event_count"],
+            "startedAt": row["started_at"],
+            "finishedAt": row["finished_at"],
+            "rolledBackAt": row["rolled_back_at"],
+            "errorMessage": row["error_message"],
+            "coveredDays": row["covered_days"],
+        }
+        for row in rows
+    ]
+
+
+def import_run_detail(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM import_runs WHERE id = ?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    days = conn.execute(
+        "SELECT work_date, coverage_status, raw_punch_count FROM import_run_days "
+        " WHERE import_run_id = ? ORDER BY work_date",
+        (run_id,),
+    ).fetchall()
+    findings: list[dict] = []
+    if row["findings_json"]:
+        try:
+            findings = json.loads(row["findings_json"]).get("findings", [])
+        except ValueError:  # pragma: no cover - defensive
+            findings = []
+    return {
+        "id": row["id"],
+        "sourceFilename": row["source_filename"],
+        "status": row["status"],
+        "periodStart": row["period_start"],
+        "periodEnd": row["period_end"],
+        "punchEventCount": row["punch_event_count"],
+        "startedAt": row["started_at"],
+        "finishedAt": row["finished_at"],
+        "rolledBackAt": row["rolled_back_at"],
+        "errorMessage": row["error_message"],
+        "coveredDays": len(days),
+        "sourceSha256": row["source_sha256"],
+        "findings": findings,
+        # Coverage facts, kept apart from any attendance verdict: a
+        # reported_zero day is what the file said, not an absence.
+        "days": [
+            {
+                "workDate": day["work_date"],
+                "coverage": day["coverage_status"],
+                "punches": day["raw_punch_count"],
+            }
+            for day in days
+        ],
+    }
+
+
+def stored_preview(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    """The preview snapshot as the operator would have seen it.
+
+    Returns None when the run has none â€” a run that failed to parse, or one
+    already applied. Applying never trusts this: it re-reads the preserved file
+    and recomputes against the current slot mapping.
+    """
+    row = conn.execute(
+        "SELECT preview_json FROM import_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    if row is None or not row["preview_json"]:
+        return None
+    return json.loads(row["preview_json"])
+
+
+def preserved_source(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    """Where the untouched original is kept.
+
+    The path, not the bytes: the file stays on the work PC's disk and is never
+    served to a caller.
+    """
+    row = conn.execute(
+        "SELECT stored_source_path, source_filename, source_sha256 "
+        "  FROM import_runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    stored = Path(row["stored_source_path"] or "")
+    return {
+        "sourceFilename": row["source_filename"],
+        "storedPath": str(stored),
+        "exists": stored.is_file(),
+        "sha256": row["source_sha256"],
+    }
+
+
+def pending_imports(conn: sqlite3.Connection) -> list[dict]:
+    """Previewed imports waiting for somebody to confirm or discard them."""
+    rows = conn.execute(
+        """
+        SELECT id, source_filename, period_start, period_end, started_at,
+               discovered_by, preview_json
+          FROM import_runs
+         WHERE status = 'previewed' AND source_kind = 'fingerprint_xls'
+         ORDER BY id DESC
+        """
+    ).fetchall()
+    out = []
+    for row in rows:
+        new_punches = None
+        state = "ê²€í†  í•„ìš”"
+        if row["preview_json"]:
+            try:
+                saved = json.loads(row["preview_json"])
+                new_punches = saved.get("newPunches")
+                if any(s.get("status") == "unmapped" and s.get("punchCount", 0) > 0 for s in saved.get("slots", [])):
+                    state = "ì§ì› ì—°ê²° í•„ìš”"
+                elif saved.get("canApply"):
+                    state = "ë°˜ì˜ ê°€ëŠ¥"
+                elif not new_punches and not saved.get("reactivatablePunches"):
+                    state = "ì´ë¯¸ ê°€ì ¸ì˜¨ íŒŒì¼"
+                else:
+                    state = "ì°¨ë‹¨ë¨"
+            except ValueError:  # pragma: no cover - defensive
+                new_punches = None
+        out.append({
+            "importRunId": row["id"],
+            "sourceFilename": row["source_filename"],
+            "periodStart": row["period_start"],
+            "periodEnd": row["period_end"],
+            "startedAt": row["started_at"],
+            "discoveredBy": row["discovered_by"],
+            "newPunches": new_punches,
+            "state": state,
+        })
+    return out
+
+
+def last_applied_import(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute(
+        "SELECT id, source_filename, period_start, period_end, finished_at, punch_event_count "
+        "  FROM import_runs WHERE status = 'applied' AND source_kind = 'fingerprint_xls' "
+        " ORDER BY COALESCE(finished_at, updated_at) DESC, id DESC LIMIT 1"
+    ).fetchone()
+    return dict(row) if row else None
+

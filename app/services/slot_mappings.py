@@ -31,3 +31,4 @@ def close_mapping(conn: sqlite3.Connection, mapping_id:int, effective_to:str) ->
     if row["effective_to"] is not None: raise MappingError("이미 종료된 연결입니다.")
     if effective_to < row["effective_from"]: raise MappingError("종료일은 시작일보다 빠를 수 없습니다.")
     conn.execute("UPDATE terminal_slots SET effective_to=? WHERE id=?",(effective_to,mapping_id))
+

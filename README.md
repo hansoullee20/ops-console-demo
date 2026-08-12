@@ -145,3 +145,4 @@ python -m pytest
   (`id`/`created_at` 유지, `revision` +1, 같은 트랜잭션 `audit_log`).
   `attendance_days`/`leave_balances`/`terminal_slots` 에
   `INSERT OR REPLACE` / `REPLACE INTO` / `UPDATE OR REPLACE` 금지 — 테스트로 강제됨
+

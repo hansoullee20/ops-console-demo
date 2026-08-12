@@ -169,3 +169,4 @@ def test_the_write_surface_is_phase_35_attendance_only():
         f"a write endpoint outside the import flow: {sorted(writable)}"
     )
     assert "/api/v1/attendance" in schema      # still read-only
+

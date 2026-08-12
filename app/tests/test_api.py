@@ -187,3 +187,4 @@ def test_api_reports_unavailable_when_the_database_is_missing(monkeypatch, tmp_p
 
     with TestClient(create_app()) as c:
         assert c.get("/api/v1/bootstrap").status_code == 503
+

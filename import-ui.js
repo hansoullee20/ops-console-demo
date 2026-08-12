@@ -37,3 +37,4 @@ window.OPS_IMPORT_ROLLBACK=function(id){var reason=prompt('되돌리는 이유�
 window.OPS_OPEN_IMPORT_HISTORY=function(){send(API).then(function(runs){drawer('원본기록 · 가져오기 이력','',runs.map(function(r){return '<div class="box"><b>'+esc(r.sourceFilename)+'</b> · '+esc(r.status)+(r.status==='applied'?'<button class="btn" onclick="OPS_IMPORT_ROLLBACK('+r.id+')">되돌리기</button>':'')+'</div>'}).join(''))}).catch(function(e){fail('이력을 불러오지 못했습니다.',e.message)})};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refreshPending);else refreshPending();
 })();
+
