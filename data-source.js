@@ -336,6 +336,10 @@
   }
 
   function bootOperational() {
+    var aiButton = document.querySelector('.ai-fab');
+    var aiPanel = document.getElementById('aiWrap');
+    if (aiButton) aiButton.hidden = true;
+    if (aiPanel) aiPanel.hidden = true;
     showLoading();
     fetch(API_BASE + '/bootstrap', { headers: { Accept: 'application/json' } })
       .then(function (res) {

@@ -188,6 +188,16 @@ def get_preview(run_id: int) -> dict:
         conn.close()
 
 
+@router.post("/{run_id}/refresh", summary="Refresh preview after slot mappings change")
+def refresh_preview(run_id: int) -> dict:
+    try:
+        return xls_pipeline.refresh_preview(run_id).as_dict()
+    except xls_pipeline.ImportError_ as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except xls_import.XlsImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("", response_model=list[ImportRunSummary], summary="Import history")
 def list_runs(limit: int = 50) -> list[ImportRunSummary]:
     conn = _connect()

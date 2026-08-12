@@ -141,11 +141,15 @@ MUTATION_ALLOWLIST = {
     ("post", "/api/v1/imports"),
     ("post", "/api/v1/imports/{run_id}/apply"),
     ("post", "/api/v1/imports/{run_id}/rollback"),
+    ("post", "/api/v1/imports/{run_id}/refresh"),
+    ("post", "/api/v1/terminal-slots"),
+    ("post", "/api/v1/terminal-slots/batch"),
+    ("post", "/api/v1/terminal-slots/{mapping_id}/close"),
 }
 
 
-def test_only_the_import_flow_can_write(client):
-    """Phase 3 opens exactly three write routes, and no more.
+def test_only_phase_35_operational_attendance_can_write(client):
+    """Phase 3.5 adds only preview refresh and slot-mapping writes.
 
     The attendance correction service exists and is tested, but stays off HTTP
     until the UI needs attendance editing. A new mutation endpoint has to be

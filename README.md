@@ -107,7 +107,7 @@ API 는 `/api/v1/bootstrap`, 상태는 `/health` 입니다.
 동작합니다.
 
 ```bash
-OPS_WATCH_DIR="C:\\지문\\export"          # 감시할 폴더
+OPS_WATCH_DIR="C:\\OpsConsole\\AttendanceInbox"  # USB XLS를 복사할 수신 폴더
 OPS_WATCH_INTERVAL_SECONDS=600              # 기본 10분
 python -m app.main
 ```
