@@ -485,6 +485,42 @@ Never expose generic SQL as an AI business tool.
 Never allow AI to edit/delete raw punch_events.
 Keep transport localhost-only or stdio unless explicitly redesigned later.
 
+### Decision (recorded during Phase 3): a confirmation token is not consent
+
+The Phase 3 import proved the distinction, so write it down before Phase 7
+builds on the wrong one.
+
+The confirmation token is a **staleness check**. It binds a confirmation to
+import_run_id + source_sha256 + preview fingerprint, and its only job is to
+refuse an approval that was given before the file or the slot mapping changed.
+It answers "is this still the same thing that was reviewed?".
+
+It does NOT answer "did a person agree to this". Any caller that can read a
+preview can read the token out of it. If an MCP tool takes a token and applies,
+then:
+
+    AI reads preview -> AI reads token -> AI applies
+
+and the human confirmation step has quietly disappeared, while every audit row
+still looks correctly confirmed. That is worse than having no confirmation
+step, because the record claims one happened.
+
+Therefore, when MCP is added:
+
+- Human approval is a **separate, recorded state** in the database, created
+  only by a person acting in the UI. It is not derivable from a preview.
+- Flow: preview -> a person approves in the UI -> approval recorded ->
+  MCP or the service may then apply.
+- `apply_confirmed_import()` must refuse when no approval record exists for
+  that run, regardless of the token it was handed.
+- The audit row records both: which approval authorised the change, and which
+  token proved the reviewed thing had not changed underneath it.
+
+The same rule applies to every WRITE tool in this phase, not just imports.
+
+Phase 3 does not need to change for this; the approval state is added when the
+tool layer is built.
+
 ---
 
 ## PHASE 8A — Claude Code / Dispatch

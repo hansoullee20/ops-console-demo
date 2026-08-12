@@ -137,15 +137,28 @@ def test_api_never_reports_demo_mode(client):
     assert client.get("/api/v1/bootstrap").json()["mode"] == "operational"
 
 
-def test_no_mutation_endpoints_are_exposed(client):
-    """Phase 2 is read-only: the attendance correction service exists and is
-    tested, but is not reachable over HTTP yet."""
+MUTATION_ALLOWLIST = {
+    ("post", "/api/v1/imports"),
+    ("post", "/api/v1/imports/{run_id}/apply"),
+    ("post", "/api/v1/imports/{run_id}/rollback"),
+}
+
+
+def test_only_the_import_flow_can_write(client):
+    """Phase 3 opens exactly three write routes, and no more.
+
+    The attendance correction service exists and is tested, but stays off HTTP
+    until the UI needs attendance editing. A new mutation endpoint has to be
+    added here deliberately.
+    """
     schema = create_app().openapi()["paths"]
-    for path, operations in schema.items():
-        for method in operations:
-            assert method.lower() in {"get", "head", "options"}, (
-                f"{method.upper()} {path} is a mutation endpoint"
-            )
+    exposed = {
+        (method.lower(), path)
+        for path, operations in schema.items()
+        for method in operations
+        if method.lower() not in {"get", "head", "options"}
+    }
+    assert exposed == MUTATION_ALLOWLIST
 
 
 def test_frontend_is_served_by_allowlist_only(client):

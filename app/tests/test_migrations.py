@@ -421,3 +421,68 @@ def test_trigger_bodies_are_not_mistaken_for_transaction_control(
         "END;\n",
     )
     assert migrate.run_migrations(db_path, migrations_dir, backups_dir).applied == [1]
+
+
+def test_0006_converts_an_existing_database_without_losing_a_punch(
+    tmp_path: Path, db_path: Path, backups_dir: Path
+):
+    """The upgrade path for a database that already imported a month.
+
+    Before 0006 the ordinal in a dedupe key was the punch's position in the
+    cell, so a re-export containing one extra earlier punch re-imported every
+    later punch as new. Fixing the rule is not enough — the keys already in the
+    table have to be rewritten too, or the first re-export after the upgrade
+    duplicates the month it was supposed to top up.
+    """
+    import shutil
+
+    earlier = tmp_path / "migrations-0005"
+    earlier.mkdir()
+    for migration in migrate.discover_migrations():
+        if migration.version <= 5:
+            shutil.copy(migration.path, earlier / migration.path.name)
+
+    assert migrate.run_migrations(db_path, earlier, backups_dir).schema_version == 5
+
+    with db.transaction(db_path) as conn:
+        conn.execute(
+            "INSERT INTO employees (employee_code, name, zone, hire_date) "
+            "VALUES ('E1', '테스트', '본관', '2024-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO import_runs (source_filename, source_kind, status) "
+            "VALUES ('m.XLS', 'fingerprint_xls', 'applied')"
+        )
+        # written the way the pre-0006 importer wrote them
+        for position, time in enumerate(["06:40", "06:40", "07:00", "16:00"]):
+            conn.execute(
+                "INSERT INTO punch_events (terminal_id, terminal_slot_code, punch_at,"
+                " work_date, punch_type, dedupe_key, occurrence_index, import_run_id,"
+                " employee_id) VALUES ('default', '001', ?, '2026-07-01', 'unknown', ?, ?, 1, 1)",
+                (f"2026-07-01T{time}:00", f"default|001|2026-07-01|{time}|unknown|{position}",
+                 position),
+            )
+
+    result = migrate.run_migrations(db_path, backups_dir=backups_dir)
+    assert 6 in result.applied
+    assert result.backup_path, "an existing database is backed up before conversion"
+
+    with db.connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT substr(punch_at, 12, 5) AS t, occurrence_index, cell_position,"
+            "       active_import_run_id, dedupe_key FROM punch_events ORDER BY id"
+        ).fetchall()
+
+    assert len(rows) == 4, "no punch may be lost by a migration"
+    # the ordinal now counts repeats: only the two 06:40s are 0 and 1
+    assert [r["occurrence_index"] for r in rows] == [0, 1, 0, 0]
+    # the old meaning is preserved as provenance
+    assert [r["cell_position"] for r in rows] == [0, 1, 2, 3]
+    assert all(r["active_import_run_id"] == 1 for r in rows)
+    # and the keys match what the parser produces now
+    assert [r["dedupe_key"] for r in rows] == [
+        "default|001|2026-07-01|06:40|unknown|0",
+        "default|001|2026-07-01|06:40|unknown|1",
+        "default|001|2026-07-01|07:00|unknown|0",
+        "default|001|2026-07-01|16:00|unknown|0",
+    ]

@@ -33,6 +33,25 @@ PORT = int(os.environ.get("OPS_PORT", "8000"))
 # (AI_BUILD_PLAN.md §3).
 FINGERPRINT_STALE_AFTER_HOURS = int(os.environ.get("OPS_FINGERPRINT_STALE_HOURS", "24"))
 
+# A monthly terminal export is a small file — the real 2026-07 one is under
+# 300 KB. The cap exists so a wrong file (a video, a disk image) fails at once
+# instead of filling the work PC's disk.
+MAX_UPLOAD_BYTES = int(os.environ.get("OPS_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+
+# A demo-seeded database contains 18 invented people. Importing a real terminal
+# export into it would attach real punches to fictional staff and leave a file
+# nobody can tell apart from real operations data. Imports are therefore refused
+# on a database marked data_context=demo. The override exists so the flow can be
+# exercised against the demo seed on purpose, never by accident.
+ALLOW_DEMO_IMPORT = os.environ.get("OPS_ALLOW_DEMO_IMPORT", "").strip() == "1"
+
+# Optional: a folder the terminal's PC program exports into. When set, the
+# backend previews new .XLS files by itself so nobody has to remember to upload
+# one. Applying is never automatic — see app/services/import_watch.py.
+_watch_dir = os.environ.get("OPS_WATCH_DIR", "").strip()
+WATCH_DIR = Path(_watch_dir) if _watch_dir else None
+WATCH_INTERVAL_SECONDS = int(os.environ.get("OPS_WATCH_INTERVAL_SECONDS", "600"))
+
 
 def ensure_runtime_dirs() -> None:
     """Create the writable runtime directories if they do not exist."""
