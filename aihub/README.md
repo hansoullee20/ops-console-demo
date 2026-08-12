@@ -1,105 +1,71 @@
 # AI Hub / Okja Voice Prototype
 
-> Full project state and restart instructions: [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md)
+> **Canonical project state / restart instructions:** [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md)  
+> **Working branch:** `aihub-voice-test`
 
-## Current target
+## Current checkpoint
 
-One Android app / firmware, one wake identity:
-
-```text
-옥자 / Okja
-```
-
-Desired accepted variants include `옥자`, `옥자야`, `Okja`, `Hey Okja`, `Okay Okja`, `헤이 옥자`, and `오케이 옥자`.
-
-Do not interpret the old `GRANDMA` / `PERSONAL` prototype profiles as separate final products. The intended direction is:
+The end-to-end Android assistant path works:
 
 ```text
-Okja wake
-  ↓
-Voice ID: user / grandmother / unknown
-  ↓
-Room/device context
-  ↓
-command policy / model / language
-```
-
-## Working end-to-end path
-
-```text
-Android SpeechRecognizer
-→ wake-phrase prototype
-→ Android command STT
+Android STT
 → localhost TCP 127.0.0.1:8765
 → persistent Claude Agent SDK in Ubuntu PRoot
 → Android TTS
 ```
 
-The wake-phrase prototype has been installed and the user reported that wake detection succeeded.
-
-## Current wake-engine experiment
-
-The final wake backend must be fully free/open-source and local. Porcupine/Eagle were rejected because of vendor AccessKey dependency.
-
-A feasibility probe of `vosk-model-small-ko-0.22` completed successfully. Vocabulary results:
+The product/wake identity is unified as:
 
 ```text
-옥자     YES
-옥자야   NO
-헤이     YES
-오케이   YES
-에이아이 NO
-허브     YES
+옥자 / Okja
 ```
 
-Vosk is **not yet integrated into the Android app**. The next task is to add an experimental local Vosk wake backend while keeping the existing Android `SpeechRecognizer` wake path as a control/fallback, then compare wake rate, false positives, TV activations, CPU, RAM, and latency.
+The final wake backend must be local and fully free/open-source.
 
-## Bridge
+### Latest wake-word result
 
-Repo files:
+LiveKit WakeWord v2 training/export pipeline completed successfully in GitHub Actions:
 
 ```text
-phone/aihub_bridge.py
-phone/start_bridge.sh
+workflow: .github/workflows/okja-wakeword-v2.yml
+run: 31563550569
+head SHA: 7bd3965f8a8f4cb0cb579e1b6bfe8650897377ec
+pipeline: SUCCESS
+ONNX export: SUCCESS
 ```
 
-Typical Ubuntu launch:
-
-```bash
-source ~/claude-sdk/bin/activate
-python ~/aihub_bridge.py
-```
-
-Expected listener:
+But the generated v2 model is **not deployable yet**:
 
 ```text
-127.0.0.1:8765
+threshold 0.50
+recall 13.28%
+FPPH 2.66
+validation positives 128
+validation negatives 30,404
+validation duration 16.89 h
 ```
 
-If behavior differs from the repo, check whether the phone's local `~/aihub_bridge.py` is stale.
+Therefore the next task is **diagnose/fix the v2 data/training problem and build a justified v3**, not Android integration of the current ONNX file.
 
-## APK build
-
-GitHub Actions workflow:
+Current wake-word sources:
 
 ```text
-.github/workflows/aihub-build.yml
+wakeword/benchmark_melotts.py
+wakeword/generate_melotts_dataset.py
+wakeword/okja_test_voxcpm.yaml
+wakeword/okja_v2_melotts.yaml
 ```
 
-Build command:
-
-```bash
-gradle -p aihub assembleDebug --stacktrace
-```
-
-Artifact name currently remains:
+Current Android experiment sources include:
 
 ```text
-aihub-dual-profile-debug-apk
+app/src/main/java/com/soul/aihub/MainActivity.java
+app/src/main/java/com/soul/aihub/PerfActivity.java
+app/src/main/java/com/soul/aihub/PerfMeter.java
+app/src/main/java/com/soul/aihub/StableTemplateWakeActivity.java
+app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
 ```
 
-The artifact name is legacy prototype naming and can be changed later.
+## Do not restart from the old Vosk idea
 
-## Next task
-
-Preserve the working wake prototype and build a free/local Vosk A/B wake test for `옥자 / Okja`. Do not shop final hardware until the local wake engine has been measured on the Fold4.
+Vosk was only a feasibility probe. The current engineering line is custom LiveKit WakeWord training with ONNX export. Read [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md) before making changes; it contains the Fold4 environment, Claude bridge setup, wake performance history, fixed measurement protocol, exact v2 artifacts/metrics, unresolved work, and the next-session resume prompt.
