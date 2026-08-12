@@ -144,11 +144,13 @@ Acceptable evidence:
 
 ## G2-A. Benchmark recorder and annotations
 
-- [ ] **G2.1 24-hour household recording spec implemented** — P0 / AI-ENG  
+- [x] **G2.1 24-hour household recording spec implemented** — P0 / AI-ENG
   DoD: file naming, device/room metadata, timestamps, firmware/model SHA and consent/retention fields are defined and validated.
+  Evidence: `v4_benchmark_schema.json` + `v4_benchmark_contract.py` require and validate recording/device/room IDs, timezone-aware start time, duration, WAV basename, audio SHA-256, firmware/app/model provenance, consent, retention and TEST_D immutability/training exclusion; tests pass after commit `3779753d49d8e02f110062a55d72eaf2e3ac8f1a` in verification run `31652866104`.
 
-- [ ] **G2.2 Intentional-wake marker exists** — P0 / AI-ENG  
+- [x] **G2.2 Intentional-wake marker exists** — P0 / AI-ENG
   DoD: intentional wake attempts can be timestamped with speaker, phrase, distance, voice level and environment.
+  Evidence: `v4_benchmark_contract.py mark-wake` writes evaluator-compatible truth JSONL with recording-relative timestamp, speaker, phrase/language, distance, direction, voice level, room/background/condition and mention-context; unit test `test_marker_writes_evaluator_compatible_truth_row` passes in run `31652866104`.
 
 - [x] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG
   DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.
