@@ -10,9 +10,9 @@
       "required": [
         "schema_version", "benchmark_id", "recording_id", "test_set",
         "device_id", "room_id", "started_at", "duration_ms",
-        "sample_rate_hz", "channels", "audio_sha256",
-        "firmware_version", "app_version", "consent_recorded",
-        "retention_class", "training_eligible"
+        "audio_filename", "sample_rate_hz", "channels", "audio_sha256",
+        "firmware_version", "firmware_git_sha", "app_version", "model_sha",
+        "consent_recorded", "retention_class", "training_eligible"
       ],
       "properties": {
         "schema_version": {"const": 1},
@@ -23,12 +23,14 @@
         "room_id": {"type": "string", "minLength": 1},
         "started_at": {"type": "string", "format": "date-time"},
         "duration_ms": {"type": "integer", "minimum": 1},
+        "audio_filename": {"type": "string", "pattern": "^[^/\\\\]+\\.wav$"},
         "sample_rate_hz": {"type": "integer", "minimum": 8000},
         "channels": {"type": "integer", "minimum": 1, "maximum": 8},
         "audio_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "firmware_version": {"type": "string", "minLength": 1},
+        "firmware_git_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
         "app_version": {"type": "string", "minLength": 1},
-        "model_sha": {"type": ["string", "null"]},
+        "model_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
         "consent_recorded": {"const": true},
         "retention_class": {"enum": ["benchmark_fixed", "diagnostic_short", "temporary"]},
         "training_eligible": {"type": "boolean"},
@@ -91,7 +93,7 @@
         "timestamp_ms": {"type": "number", "minimum": 0},
         "model_name": {"type": "string", "minLength": 1},
         "model_version": {"type": "string", "minLength": 1},
-        "model_sha": {"type": "string", "minLength": 1},
+        "model_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
         "threshold": {"type": "number"},
         "score": {"type": "number"},
         "device_id": {"type": "string", "minLength": 1},
