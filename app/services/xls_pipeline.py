@@ -664,9 +664,9 @@ def apply_import(
                 back = conn.execute(
                     "UPDATE punch_events "
                     "   SET rolled_back_at = NULL, rolled_back_reason = NULL, "
-                    "       active_import_run_id = ? "
+                    "       active_import_run_id = ?, employee_id = ?, review_flag = ? "
                     " WHERE dedupe_key = ? AND rolled_back_at IS NOT NULL",
-                    (import_run_id, key),
+                    (import_run_id, employee_id, review_flag, key),
                 ).rowcount
                 reactivated += back
                 if back and employee_id:

@@ -56,6 +56,73 @@ def _apply(preview, seeded: Path, tmp_path: Path):
     )
 
 
+def test_reactivation_uses_the_current_date_scoped_mapping(
+    migrated_db: Path, tmp_path: Path
+):
+    """A rolled-back unmapped punch must become mapped when reactivated.
+
+    Slot mappings are derived state, not immutable punch provenance. Operators
+    commonly import first and repair a missing mapping before retrying.
+    """
+    conn = db.connect(migrated_db)
+    try:
+        conn.execute(
+            "UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'"
+        )
+        employee_id = conn.execute(
+            "INSERT INTO employees (employee_code, name, zone, hire_date) "
+            "VALUES ('REMAP-1', 'Fictional Remap', 'Z', '2020-01-01')"
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    export = build_export(
+        tmp_path / "remap.xls",
+        slots=[SlotSpec("001", "Fictional Slot", {1: ["07:00", "16:00"]})],
+    )
+    first = _preview(export, migrated_db, tmp_path)
+    _apply(first, migrated_db, tmp_path)
+    xls_pipeline.rollback_import(first.import_run_id, "repair mapping", db_path=migrated_db)
+
+    conn = db.connect(migrated_db)
+    try:
+        conn.execute(
+            "INSERT INTO terminal_slots "
+            "(terminal_id, slot_code, employee_id, effective_from, status) "
+            "VALUES ('default', '001', ?, '2026-01-01', 'mapped')",
+            (employee_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    second = _preview(export, migrated_db, tmp_path)
+    assert second.reactivatable_punches == 2
+    result = _apply(second, migrated_db, tmp_path)
+    assert result["reactivated"] == 2
+    assert result["attendanceRows"] == 1
+
+    conn = db.connect(migrated_db)
+    try:
+        punches = conn.execute(
+            "SELECT employee_id, review_flag FROM punch_events ORDER BY id"
+        ).fetchall()
+        attendance = conn.execute(
+            "SELECT employee_id, status FROM attendance_days"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert [(row["employee_id"], row["review_flag"]) for row in punches] == [
+        (employee_id, None),
+        (employee_id, None),
+    ]
+    assert (attendance["employee_id"], attendance["status"]) == (
+        employee_id,
+        "normal",
+    )
+
+
 # ---------------------------------------------------------------------------
 # parsing
 # ---------------------------------------------------------------------------
