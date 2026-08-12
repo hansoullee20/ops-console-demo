@@ -1,4 +1,4 @@
-# AI Hub / Okja — Product UI Information Architecture v0.2
+# AI Hub / Okja — Product UI Information Architecture v0.3
 
 Date: 2026-08-12
 Status: structure before visual styling
@@ -50,9 +50,12 @@ Candidate actions:
 - 가족 / 전화
 - TV
 - 오늘 일정 / 약
+- 내 휴대폰 찾기
 - 건강 이야기
 - 도움 요청
 - 설정 (de-emphasized; may require long press or secondary screen)
+
+**Phone finding is a senior feature too, not personal-only.** It should be available by voice and as a large touch action. Default behavior can ring the registered phone, with a simple cancel state and clear failure message if the phone is offline/unreachable.
 
 ### TV / media flow
 TV should not expose a complicated app launcher. Selecting TV opens a few large, personalized choices such as:
@@ -64,6 +67,16 @@ TV should not expose a complicated app launcher. Selecting TV opens a few large,
 - simply turn on the TV / resume the last source.
 
 The exact services and titles are profile-driven and should not be hard-coded product-wide.
+
+### Home-device control roadmap
+Initial device control scope is deliberately small:
+- TV;
+- air conditioner.
+
+Later expansion candidate:
+- washing machine: connection/status, cycle selection where supported, completion notification, and simple error/status messaging.
+
+Do not expose unsupported appliance actions until the specific device integration can confirm them reliably.
 
 ### Senior readability constraints to validate
 - large default type, especially time, date and primary action labels;
@@ -127,6 +140,7 @@ Do not make v1 a surveillance/medical system.
 - timestamped user-reported symptom history;
 - medication/event reminders;
 - family calling/messaging;
+- phone finding;
 - emergency UI and emergency-contact configuration;
 - 119 안심콜 setup guidance.
 
@@ -217,6 +231,6 @@ These should follow mockup/usability evaluation, safety validation and real-devi
 5. Senior NIGHT_AMBIENT.
 6. Senior EMERGENCY_CONFIRM/ACTION.
 7. Shared LISTENING / THINKING / RESULT remain part of the product state model.
-8. Personal AMBIENT_HOME remains a later parallel mockup.
+8. Personal AMBIENT_HOME and device-control mockup created; same design language with higher information density.
 
 Evaluate senior screens first at realistic viewing distance, not only enlarged on a desktop monitor.
