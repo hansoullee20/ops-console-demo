@@ -357,6 +357,22 @@ def test_import_ui_is_served_and_the_buttons_are_wired(client):
     assert './import-ui.js' in html
 
 
+def test_public_demo_import_entry_points_are_guarded_before_fetch(client):
+    script = client.get("/import-ui.js").text
+    assert "if(demo()&&(/^\\/api\\/v1\\/(imports|terminal-slots)/).test(url))" in script
+    assert "window.OPS_OPEN_IMPORT_HISTORY = function(){if(demo())" in script
+    assert "window.OPS_OPEN_IMPORT = function(){if(demo())" in script
+    assert "window.OPS_OPEN_SLOT_MAPPINGS=function(){if(demo())" in script
+
+
+def test_rollback_ui_surfaces_conflicts_and_refreshes_operational_state(client):
+    script = client.get("/import-ui.js").text
+    assert "r.conflicts||[]" in script
+    assert "완전히 되돌리지 못한 근태" in script
+    assert "attendanceRecomputed" in script
+    assert "refreshPending();if(window.OPS_RELOAD)window.OPS_RELOAD()" in script
+
+
 # ---------------------------------------------------------------------------
 # "no new punches" over HTTP: the same two situations, through the real path
 # an operator uses.

@@ -150,8 +150,8 @@ def test_startup_migrates_the_database(monkeypatch, tmp_path: Path):
         assert migrate.schema_version(conn) == LATEST_VERSION
 
 
-def test_the_write_surface_is_the_import_flow_only():
-    """Phase 3 adds the fingerprint import and nothing else that writes.
+def test_the_write_surface_is_phase_35_attendance_only():
+    """Phase 3.5 adds date-scoped slot mapping beside the import flow.
 
     Attendance correction remains a service, not an endpoint; the exact
     allowlist is pinned in test_api.py.
@@ -165,7 +165,7 @@ def test_the_write_surface_is_the_import_flow_only():
         for method in operations
         if method.lower() not in {"get", "head", "options"}
     }
-    assert writable and all(path.startswith("/api/v1/imports") for path in writable), (
+    assert writable and all(path.startswith(("/api/v1/imports", "/api/v1/terminal-slots")) for path in writable), (
         f"a write endpoint outside the import flow: {sorted(writable)}"
     )
     assert "/api/v1/attendance" in schema      # still read-only

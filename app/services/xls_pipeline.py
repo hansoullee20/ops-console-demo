@@ -97,6 +97,7 @@ class ImportPreview:
     period_end: str
     confirmation_token: str
     preview_fingerprint: str = ""
+    previewed_at: str = ""
     slots: list[dict] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)
     new_punches: int = 0
@@ -116,6 +117,7 @@ class ImportPreview:
         return {
             "importRunId": self.import_run_id,
             "sourceFilename": self.source_filename,
+            "sourceHash": self.source_sha256,
             "periodStart": self.period_start,
             "periodEnd": self.period_end,
             "confirmationToken": self.confirmation_token,
@@ -127,6 +129,7 @@ class ImportPreview:
             "zeroPunchDates": self.zero_punch_dates,
             "coveredDates": self.covered_dates,
             "previewFingerprint": self.preview_fingerprint,
+            "previewedAt": self.previewed_at,
             "canApply": self.can_apply,
         }
 
@@ -184,12 +187,12 @@ def _slot_intervals(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     """
     rows = conn.execute(
         """
-        SELECT t.slot_code, t.status AS slot_status, t.effective_from, t.effective_to,
+        SELECT t.id, t.slot_code, t.status AS slot_status, t.effective_from, t.effective_to,
                e.id AS employee_id, e.name, e.status AS employee_status,
                e.hire_date, e.end_date
           FROM terminal_slots t
           LEFT JOIN employees e ON e.id = t.employee_id
-         WHERE t.terminal_id = ?
+         WHERE t.terminal_id = ? AND t.status = 'mapped'
          ORDER BY t.slot_code, IFNULL(t.effective_from, ''), t.id
         """,
         (TERMINAL_ID,),
@@ -378,6 +381,7 @@ def _build_preview(
         # it actually carried punches rather than once for the whole file.
         dates = sorted({d for (s, d) in by_slot_day if s == slot.slot_code})
         resolved = [_resolve_slot(intervals, slot.slot_code, d) for d in dates]
+        uncovered_dates = [d for d, owner in zip(dates, resolved) if owner is None]
         holders = {
             r["employee_id"]: r for r in resolved if r and r.get("employee_id")
         }
@@ -392,6 +396,14 @@ def _build_preview(
                 f"슬롯 {slot.slot_code}: 이 기간 안에 담당자가 바뀝니다({employee}). "
                 "각 펀치는 그 날짜의 담당자에게 귀속됩니다.",
                 slot_code=slot.slot_code, employee=employee,
+            ))
+        if uncovered_dates and slot.punch_count:
+            status = "partial_unmapped" if holders else "unmapped"
+            findings.append(Finding(
+                "unmapped_punch_dates", "blocking",
+                f"슬롯 {slot.slot_code}: 지문이 있는 날짜 중 직원 연결이 없는 날짜가 있습니다: "
+                f"{', '.join(uncovered_dates)}. 직원을 추측하지 않으며 연결 전에는 반영할 수 없습니다.",
+                slot_code=slot.slot_code,
             ))
         elif slot.punch_count == 0:
             status = "unused"
@@ -426,6 +438,7 @@ def _build_preview(
             "status": status,
             "punchCount": slot.punch_count,
             "dayCount": slot.day_count,
+            "uncoveredDates": uncovered_dates,
         })
 
     for (slot_code, work_date), punches in sorted(by_slot_day.items()):
@@ -511,6 +524,7 @@ def _build_preview(
         period_end=parsed.period_end,
         confirmation_token=token,
         preview_fingerprint=fingerprint,
+        previewed_at=_now(),
         slots=slot_rows,
         findings=finding_dicts,
         new_punches=new_punches,
@@ -519,6 +533,31 @@ def _build_preview(
         zero_punch_dates=zero_dates,
         covered_dates=parsed.covered_dates,
     )
+
+
+def refresh_preview(run_id: int, *, db_path: Path | None = None) -> ImportPreview:
+    """Recompute a preserved preview after an administrator changes mappings.
+
+    The source bytes and run identity stay fixed. A new confirmation token is
+    issued from the current authoritative mapping/findings state, invalidating
+    the previously reviewed token.
+    """
+    ensure_import_allowed(db_path)
+    conn = db.connect(db_path or config.DB_PATH)
+    try:
+        row = conn.execute("SELECT * FROM import_runs WHERE id=?", (run_id,)).fetchone()
+        if row is None: raise ImportError_(f"no import run {run_id}")
+        if row["status"] != "previewed": raise ImportError_("only a preview waiting for review can be refreshed")
+        stored = Path(row["stored_source_path"] or "")
+        if not stored.is_file(): raise ImportError_("the preserved source file is missing")
+        digest = _sha256(stored)
+        if digest != row["source_sha256"]: raise ImportError_("the preserved source file changed")
+        parsed = xls_import.parse_workbook(stored, source_filename=row["source_filename"])
+        preview = _build_preview(conn, parsed, run_id, stored, digest, punch_review.DEFAULT_REPEATED_PUNCH_MINUTES)
+        conn.execute("""UPDATE import_runs SET period_start=?,period_end=?,source_row_count=?,findings_json=?,preview_fingerprint=?,confirmation_token=?,preview_json=? WHERE id=?""",
+          (parsed.period_start,parsed.period_end,len(parsed.punches),json.dumps({"findings":preview.findings},ensure_ascii=False),preview.preview_fingerprint,preview.confirmation_token,json.dumps(preview.as_dict(),ensure_ascii=False),run_id))
+        conn.commit(); return preview
+    finally: conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1155,9 +1194,19 @@ def pending_imports(conn: sqlite3.Connection) -> list[dict]:
     out = []
     for row in rows:
         new_punches = None
+        state = "검토 필요"
         if row["preview_json"]:
             try:
-                new_punches = json.loads(row["preview_json"]).get("newPunches")
+                saved = json.loads(row["preview_json"])
+                new_punches = saved.get("newPunches")
+                if any(s.get("status") == "unmapped" and s.get("punchCount", 0) > 0 for s in saved.get("slots", [])):
+                    state = "직원 연결 필요"
+                elif saved.get("canApply"):
+                    state = "반영 가능"
+                elif not new_punches and not saved.get("reactivatablePunches"):
+                    state = "이미 가져온 파일"
+                else:
+                    state = "차단됨"
             except ValueError:  # pragma: no cover - defensive
                 new_punches = None
         out.append({
@@ -1168,6 +1217,7 @@ def pending_imports(conn: sqlite3.Connection) -> list[dict]:
             "startedAt": row["started_at"],
             "discoveredBy": row["discovered_by"],
             "newPunches": new_punches,
+            "state": state,
         })
     return out
 
