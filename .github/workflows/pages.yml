@@ -1,4 +1,5 @@
 name: Deploy GitHub Pages
+# Publishes the client-ready desktop and mobile demo.
 
 on:
   push:
