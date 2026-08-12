@@ -3,100 +3,159 @@
 **Last updated:** 2026-08-12 (KST)  
 **Repository:** `hansoullee20/ops-console-demo`  
 **Working branch:** `aihub-voice-test`  
-**Primary project directory:** `aihub/`  
-**Start here after a new chat/session:** this file, then `aihub/README.md`, then `aihub/app/src/main/java/com/soul/aihub/MainActivity.java`.
+**Project directory:** `aihub/`  
+**Wake-word work:** `aihub/wakeword/`  
+**Start here in a new session:** read this file first. Do not assume `main` contains the current Okja work.
+
+> **CURRENT CHECKPOINT:** The Okja v2 LiveKit WakeWord training pipeline has completed end-to-end successfully and exported an ONNX model. **The pipeline is working, but the v2 model itself is not good enough to deploy.** At threshold 0.50 its held-out evaluation was Recall **13.28%** and FPPH **2.66**. The next task is model/data diagnosis and a better training iteration, not Android integration of this v2 model.
 
 ---
 
-## 1. What this project is
+## 0. Fast restart / find the project immediately
 
-AI Hub is a DIY, always-on Android smart display / voice assistant intended to become a low-cost family-care hub.
+```bash
+git clone https://github.com/hansoullee20/ops-console-demo.git
+cd ops-console-demo
+git checkout aihub-voice-test
+cat AIHUB_HANDOFF.md
+```
 
-The immediate prototype is running on a Samsung Galaxy Z Fold4. The long-term target is a cheap standalone Android device with approximately a 7-inch display, front camera, microphone, speaker, Wi-Fi, and enough RAM/storage to run the local voice front end plus a persistent Claude session.
+Important paths:
 
-The design goal is **no per-token API billing where practical**. The current cloud reasoning path uses the user's existing Claude Max subscription through Claude Code / Claude Agent SDK, not a conventional metered API key path. Wake-word and speaker-ID components should be **fully free/open-source and local**.
+```text
+AIHUB_HANDOFF.md                         <- canonical handoff
+README.md                                <- branch-root pointer to this project
+aihub/README.md                          <- project-local overview
+aihub/app/                               <- Android prototype
+aihub/phone/                             <- Termux/Ubuntu Claude bridge
+aihub/wakeword/                          <- custom Okja wake-word training
+.github/workflows/aihub-build.yml        <- Android APK build
+.github/workflows/okja-wakeword-v2.yml   <- current v2 wake-word training pipeline
+```
 
-The original rough finished-device cost target is around **KRW 40,000**, but hardware should not be selected until the real minimum RAM/CPU/storage requirements are measured.
+When resuming from GitHub, use branch **`aihub-voice-test`**.
 
 ---
 
-## 2. Current architecture
+## 1. Product goal
+
+Build a DIY, always-on Android smart display / voice assistant / family-care hub named **옥자 / Okja**.
+
+Final concept:
+
+- inexpensive standalone Android hardware, roughly Nest-Hub-like;
+- ~7-inch display, front camera, microphone, speaker, Wi-Fi;
+- local always-listening wake-word front end;
+- cloud reasoning without per-token API billing where practical, using the user's existing Claude Max / ChatGPT subscriptions through official CLI/agent paths;
+- later speaker/Voice ID, room/device context, phone companion, family messaging, emergency alerts, TV/home automation;
+- one app / one firmware, not separate grandmother/personal products.
+
+Original rough completed-unit cost target: about **KRW 40,000**. Do **not** select final hardware until the always-on stack is measured properly on the Fold4 and minimum CPU/RAM/storage are derived from evidence.
+
+---
+
+## 2. Current tested device / environment
+
+Prototype phone:
+
+```text
+Samsung Galaxy Z Fold4
+SM-F936N
+Android 16
+ARM64 / aarch64
+Snapdragon 8+ Gen 1 (SM8475 class)
+~10 GiB RAM visible to Termux
+8 GiB swap visible in test environment
+not rooted
+```
+
+Termux:
+
+```text
+Google Play build: googleplay.2026.06.21
+PREFIX=/data/data/com.termux/files/usr
+termux-api installed
+```
+
+Native Android `SpeechRecognizer` and Android `TextToSpeech` have both been tested for Korean/English interaction.
+
+Storage observations during setup:
+
+```text
+Ubuntu PRoot ~1.7 GB
+Termux PREFIX ~2.5 GB
+```
+
+Provisional hardware envelope — **not frozen**:
+
+```text
+ARM64
+4 GB real RAM preferred
+3 GB only if later measurement proves it sufficient
+2 GB risky
+32 GB storage likely enough
+Android 10/12+ class system
+Wi-Fi + mic + speaker + front camera
+```
+
+Marketplace “virtual RAM” must not be counted as physical RAM.
+
+---
+
+## 3. Working end-to-end assistant architecture
+
+The interaction pipeline already worked end-to-end:
 
 ```text
 Android native SpeechRecognizer
         ↓
-Wake phrase prototype
+command text
         ↓
-Android native SpeechRecognizer (command)
-        ↓
-TCP 127.0.0.1:8765
+length-prefixed TCP on 127.0.0.1:8765
         ↓
 Ubuntu PRoot inside Termux
         ↓
 persistent Claude Agent SDK client
         ↓
-Claude response
+response
         ↓
 Android native TTS
 ```
 
-Current local protocol:
+Wire protocol:
 
-- localhost: `127.0.0.1`
-- port: `8765`
+- host `127.0.0.1`
+- port `8765`
 - 4-byte big-endian payload length
-- UTF-8 JSON payload
+- UTF-8 JSON
 
 Example request:
 
 ```json
-{
-  "profile": "personal",
-  "language": "ko-KR",
-  "text": "오늘 일정 알려줘"
-}
+{"profile":"personal","language":"ko-KR","text":"오늘 일정 알려줘"}
 ```
 
-The same length-prefixed format is used for the UTF-8 response.
+The response uses the same length-prefix framing.
+
+The current product architecture should eventually become:
+
+```text
+local Okja wake word
+→ Voice ID / speaker identity
+→ room/device context
+→ command STT
+→ model/router
+→ action / reply
+→ TTS/UI
+```
 
 ---
 
-## 3. Hardware / test device
+## 4. Claude / Ubuntu PRoot setup that worked
 
-Current prototype device:
+Native Termux installation of Claude Code through npm failed because of a missing native binary, so Ubuntu PRoot was used.
 
-- Samsung Galaxy Z Fold4
-- model: `SM-F936N`
-- Android 16
-- ARM64 / aarch64
-- Snapdragon 8+ Gen 1 class SoC
-- approximately 10 GiB RAM visible to Termux
-- 8 GiB swap visible in the current environment
-- Termux Google Play build: `googleplay.2026.06.21`
-- `$PREFIX=/data/data/com.termux/files/usr`
-- not rooted
-
-Current rough final-device planning target, **not yet frozen**:
-
-- ARM64
-- 4 GB physical RAM preferred for safety
-- 3 GB may be possible only after measurement
-- 2 GB is considered risky
-- 32 GB storage likely sufficient
-- Android 10/12+ class system preferred
-- Wi-Fi, microphone, speaker, front camera
-
-Do not trust marketplace listings that advertise large amounts of "RAM" without confirming physical RAM versus virtual memory expansion.
-
----
-
-## 4. Termux / Ubuntu / Claude setup that worked
-
-### Termux
-
-The Google Play Termux build is being used. `termux-api` is installed inside Termux. A separate Termux:API companion app is not required for this Play build.
-
-### Ubuntu PRoot
+Termux:
 
 ```bash
 pkg install proot-distro -y
@@ -115,21 +174,11 @@ source ~/.bashrc
 claude --version
 ```
 
-Claude Code was installed successfully at approximately:
+Observed Claude Code version during setup: `2.1.227`, installed around `/root/.local/bin/claude`.
 
-```text
-/root/.local/bin/claude
-```
+Claude Max login works interactively.
 
-Observed Claude Code version during setup:
-
-```text
-2.1.227
-```
-
-The user authenticated Claude Code with the existing Claude Max account. Interactive `claude` works.
-
-### Claude Agent SDK persistent environment
+Persistent Agent SDK environment:
 
 ```bash
 python3 -m venv ~/claude-sdk
@@ -138,51 +187,32 @@ python -m pip install -U pip
 python -m pip install claude-agent-sdk
 ```
 
-Observed installed SDK version during testing was around `0.2.135`.
+Observed SDK version during testing: approximately `0.2.135`.
 
-Persistent-client benchmark was much faster than repeatedly launching `claude -p`.
+Important benchmark result: do **not** spawn a fresh `claude -p` for every request.
 
-Observed persistent timings:
-
-```text
-ready
-ONE   2.89 s
-TWO   1.51 s
-THREE 1.46 s
-```
-
-Observed persistent Sonnet app requests later were approximately:
+Observed persistent-client timing:
 
 ```text
-2.69 s
-2.18 s
-average ≈ 2.44 s
+first request ~2.89 s
+next requests ~1.51 s / 1.46 s
+persistent Sonnet later ~2.69 s / 2.18 s (avg ~2.44 s)
 ```
 
-Peak local RSS observed for Claude CLI/session startup was roughly 297–299 MB.
-
-The important conclusion is: **keep the Claude SDK client alive persistently**. Do not use one fresh `claude -p` process per user command.
+Fresh one-shot `claude -p` calls were much slower (~19–34 s). Claude local process/session startup peak RSS observed around 297–299 MB.
 
 ---
 
-## 5. Bridge files and launch path
+## 5. Bridge
 
-Relevant repo files:
+Repo files:
 
 ```text
 aihub/phone/aihub_bridge.py
 aihub/phone/start_bridge.sh
 ```
 
-Typical phone-side sync command used previously:
-
-```bash
-curl -fsSL \
-  "https://raw.githubusercontent.com/hansoullee20/ops-console-demo/aihub-voice-test/aihub/phone/aihub_bridge.py" \
-  -o ~/aihub_bridge.py
-```
-
-Then, inside Ubuntu:
+Typical launch inside Ubuntu:
 
 ```bash
 source ~/claude-sdk/bin/activate
@@ -195,89 +225,60 @@ Expected listener:
 127.0.0.1:8765
 ```
 
-Important: at one point the phone's local `~/aihub_bridge.py` was older than the GitHub version. If language/model behavior looks wrong, **compare the local bridge against the branch version before debugging anything else**.
+Current model/profile concept in the bridge:
+
+```text
+grandma -> Haiku
+personal -> Sonnet
+```
+
+Known problem: the bridge initializes persistent clients before opening the TCP server. A Claude initialization timeout (`Control request timeout: initialize`) can therefore prevent the server from opening at all. Later fix should make initialization lazy/resilient and allow one client to recover independently instead of making the whole bridge unavailable.
+
+Also check whether the phone-side `~/aihub_bridge.py` is stale before debugging prompt/language behavior; this happened once already.
+
+GPT/Codex fallback/router remains a later task. Claude-primary works well enough for current wake-word prototyping.
 
 ---
 
-## 6. Android app / repo layout
+## 6. Android project state
 
-Main project files:
+Current Java source directory contains:
+
+```text
+aihub/app/src/main/java/com/soul/aihub/MainActivity.java
+aihub/app/src/main/java/com/soul/aihub/PerfActivity.java
+aihub/app/src/main/java/com/soul/aihub/PerfMeter.java
+aihub/app/src/main/java/com/soul/aihub/StableTemplateWakeActivity.java
+aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+```
+
+Other main files:
 
 ```text
 aihub/settings.gradle
 aihub/build.gradle
 aihub/app/build.gradle
 aihub/app/src/main/AndroidManifest.xml
-aihub/app/src/main/java/com/soul/aihub/MainActivity.java
-aihub/phone/aihub_bridge.py
-aihub/phone/start_bridge.sh
-aihub/README.md
 .github/workflows/aihub-build.yml
 ```
 
-Android namespace / app ID:
+Namespace/app ID: `com.soul.aihub`.
 
-```text
-com.soul.aihub
-```
+The main Android prototype uses native Android STT/TTS and talks to the local PRoot bridge over localhost.
 
-Current Android build settings include:
-
-```text
-compileSdk 36
-minSdk 26
-targetSdk 36
-```
-
-The app currently uses native Android:
-
-- `SpeechRecognizer`
-- `RecognizerIntent`
-- `TextToSpeech`
-
-The Android app talks to the persistent bridge through localhost TCP.
+Legacy prototype names such as `GRANDMA`, `PERSONAL`, and artifact naming may still appear. Do not interpret them as separate final products.
 
 ---
 
-## 7. What has already been proven working
+## 7. Wake identity / product identity
 
-These are completed proof points, not design assumptions:
-
-1. Native Android Korean STT works.
-2. Native Android English STT works.
-3. Android app can connect to the Ubuntu PRoot bridge over `127.0.0.1:8765`.
-4. Persistent Claude Agent SDK responses work.
-5. Android native TTS speaks the returned response.
-6. Full STT → Claude → TTS round trip has worked in Korean.
-7. Full English recognition path has worked; an earlier wrong-language response was traced to an older local bridge prompt, not the Android STT path.
-8. A hands-free wake-phrase prototype using repeated Android `SpeechRecognizer` has been built and installed.
-9. The user explicitly reported: **"웨이크워드 성공" (wake word succeeded).**
-10. GitHub Actions successfully builds a debug APK from this branch.
-
-A known successful wake-phrase build before the later Vosk probe work was:
-
-```text
-commit: 9696420e605c328ea5224c9ed293f2e135d0b4c9
-message: Add hands-free wake phrase prototype
-workflow run: 31486057087
-artifact name: aihub-dual-profile-debug-apk
-artifact id: 9099159688
-artifact SHA256: be08e97b17e28fe8880524093bc7b4c5c18ae297ccb154de295246fbd14284ee
-```
-
----
-
-## 8. Wake-word decision — current product name is Okja
-
-The wake name has now been unified.
-
-Canonical name:
+Canonical wake identity:
 
 ```text
 옥자 / Okja
 ```
 
-Desired accepted phrases include:
+Desired accepted variants include:
 
 ```text
 옥자
@@ -289,360 +290,397 @@ Okay Okja
 오케이 옥자
 ```
 
-All of these should resolve internally to one wake event, e.g.:
+All should eventually normalize to one logical event such as `WAKE_OKJA`.
+
+Design rule:
 
 ```text
-WAKE_OKJA
-```
-
-Do **not** maintain separate end-user products called "AI Hub" and "옥자". The intended direction is one app / one firmware with user profiles behind the same wake identity.
-
-The UI/project may still contain older labels such as `AI Hub`, `personal`, and `grandma`; these are legacy prototype naming and should not be mistaken for the final product split.
-
----
-
-## 9. User identity and room identity are separate concepts
-
-The intended architecture is:
-
-```text
-Wake word
-  ↓
-Speaker / Voice ID
-  ↓
-Room / device context
-  ↓
-Command risk / permission policy
-  ↓
-Action
-```
-
-Two different identities must not be conflated:
-
-```text
-Device identity = where the device is / which room it controls
+Device identity = where the device is / what room it controls
 User identity   = who is speaking
 ```
 
-Long-term data model:
-
-```text
-Device
-- device_id
-- room
-- connected TV/lights/appliances
-- default volume
-
-User
-- voiceprint
-- name
-- preferred language
-- preferred model
-- TTS speed / text size
-- paired phone
-- contact permissions
-- emergency contacts
-- personalized memory
-
-Policy
-- per-user command permissions
-- allowed actions by Voice ID confidence
-```
-
-Speaker ID must **not** be treated as perfect security. TV/replayed audio can spoof voice. Low-risk questions can proceed on uncertain identity; sensitive actions should require stronger confidence / confirmation. Emergency phrases must not be blocked simply because speaker identification fails.
+Speaker ID is not a security guarantee. TV/replayed audio can spoof a voice. Emergency phrases must not be suppressed solely because speaker identification confidence is low.
 
 ---
 
-## 10. Important product requirements already discussed
+## 8. Wake-engine chronology
 
-These are design requirements, not yet implemented:
+### A. Android SpeechRecognizer wake loop — interaction proof
 
-- User and grandmother may be in the same room.
-- TV/audio may create false wake commands.
-- Device should determine who spoke.
-- User should have a companion phone interface.
-- Grandmother may also have a companion phone interface.
-- Emergency speech on the grandmother device should alert the user's phone.
-- User should be able to send status messages such as "집에 가는 중" / "곧 도착" and have the home device display/read them.
-- Find-my-phone should be possible.
-- Voice calling through a paired phone is desirable.
-- Room context should decide which TV/lights/appliances a command refers to.
-- Later home automation may involve SmartThings / Google Home / MCP-style integrations.
+Repeated Android `SpeechRecognizer` successfully proved the hands-free interaction path. It is a prototype/control, not the desired final low-power wake engine.
 
-Do not implement these automatically unless the user explicitly reprioritizes them. They were captured as future requirements.
+Representative measurements shown in the PERF UI:
+
+```text
+00:26  CPU 6.2%  PSS 65.9 MB  Java 2.6 MB
+11:03  CPU 7.7%  PSS 75.3 MB  Java 4.8 MB
+33:51  CPU 7.9%  PSS 70.2 MB  Java 5.8 MB
+```
+
+Critical caveat: the CPU value was the app process over approximately the latest two-second interval, **not a long-run mean**, and Android's external recognition service CPU may not be included.
+
+### B. Local MFCC + DTW template experiment
+
+`TemplateWakeActivity` removed cloud/STT from the waiting loop and used local audio/VAD/MFCC/DTW. It required enrollment and was therefore not preferred as the final consumer experience, but it proved local wake-style processing could run on the phone.
+
+Observed examples:
+
+```text
+02:26  CPU 9.9%  PSS 101.7 MB  Java 18.8 MB   (after detections)
+15:51  CPU 7.7%  PSS 67.8 MB   Java 7.9 MB
+41:12  CPU 3.3%  PSS 80.0 MB   Java 4.0 MB
+```
+
+The variation is expected because the displayed CPU number was only a recent interval. A single screenshot must not be treated as sustained average load.
+
+### C. Vosk probe
+
+A Korean Vosk vocabulary probe showed `옥자` exists in `vosk-model-small-ko-0.22`, but Vosk was not adopted as the final KWS direction. It was useful only as a feasibility check.
+
+### D. Open-source KWS decision
+
+User requires the final wake engine to be fully free/open-source and local. Porcupine/Eagle/AccessKey-style vendor dependency is rejected.
+
+Candidates considered included:
+
+```text
+LiveKit WakeWord
+microWakeWord
+openWakeWord
+sherpa-onnx
+Vosk
+```
+
+Current training direction: **LiveKit WakeWord** with custom Korean `옥자 / 옥자야 / Hey Okja` data and ONNX export.
 
 ---
 
-## 11. Current wake-word engineering decision: fully free / open-source only
+## 9. Measurement protocol — do not repeat the earlier mistake
 
-The user explicitly rejected Porcupine / Eagle because the desired solution should be fully free/open-source with no vendor AccessKey dependency.
+A major process error was discovered: implementation moved faster than the measurement design, and two-second CPU snapshots were overinterpreted. Going forward, define the measurement protocol before drawing conclusions.
 
-Candidates discussed:
-
-- LiveKit WakeWord
-- Vosk
-- sherpa-onnx
-- openWakeWord
-- microWakeWord
-
-The immediate engineering approach changed from prematurely selecting a custom KWS stack to first validating the cheapest practical Korean path.
-
-### Vosk probe completed
-
-A GitHub Actions probe downloaded:
+For wake-engine comparisons use, at minimum:
 
 ```text
-vosk-model-small-ko-0.22
+same phone
+same screen state / brightness
+same microphone conditions
+>= 10 minutes idle
+
+CPU now
+CPU average over 1 minute
+CPU average over full run
+CPU peak
+PSS average
+PSS peak
+wake attempts
+successful wakes
+misses
+false wakes
+TV/noise false activations
+wake latency
 ```
 
-and checked the model vocabulary through the Vosk model API.
+Run at least **20 real wake attempts** before comparing implementations. Do not choose hardware from one screenshot.
 
-Result:
+`PerfMeter.java` exists, but always verify that it reports the exact metric needed before using the number to make a hardware decision.
+
+---
+
+## 10. LiveKit WakeWord experiments
+
+### v1 / smoke path
+
+An initial free GitHub Actions smoke pipeline using LiveKit WakeWord and multilingual synthetic speech was built primarily to prove that the training/export toolchain could run without paid infrastructure.
+
+Relevant older file:
 
 ```text
-옥자:     YES  (word id 27578)
-옥자야:   NO
-헤이:     YES  (word id 45969)
-오케이:   YES  (word id 26115)
-에이아이: NO
-허브:     YES  (word id 43859)
+aihub/wakeword/okja_test_voxcpm.yaml
+.github/workflows/okja-wakeword-smoke.yml
 ```
 
-This is important because the Korean Vosk model can directly recognize the core token `옥자`, and also contains `헤이` and `오케이`.
+This path was too heavy/awkward for rapid iteration and was not treated as a production model.
 
-**However, Vosk has NOT yet been integrated into the Android app.** This was only a vocabulary feasibility probe.
+### MeloTTS experiment and v2 path
 
-The successful probe/build baseline before this handoff was:
+Current source files in `aihub/wakeword/`:
 
 ```text
-commit: 8afffc83d2d6b1b1b780fed190b322e23201a6aa
-message: Probe Korean Vosk vocabulary via API
-workflow run: 31489317608
-job: 93771820948
+benchmark_melotts.py
+generate_melotts_dataset.py
+okja_test_voxcpm.yaml
+okja_v2_melotts.yaml
+```
+
+Current workflow:
+
+```text
+.github/workflows/okja-wakeword-v2.yml
+```
+
+The v2 design uses:
+
+```text
+MeloTTS-generated speech dataset
+→ LiveKit augment / feature extraction
+→ conv_attention classifier, small
+→ train
+→ export ONNX
+→ held-out eval
+```
+
+`okja_v2_melotts.yaml` currently documents:
+
+```text
+target phrases: 옥자, 옥자야, Hey Okja
+model_type: conv_attention
+model_size: small
+steps: 6000
+learning_rate: 0.0001
+target_fp_per_hour: 0.5
+ACAV100M training samples: 0 for this iteration
+```
+
+The workflow intentionally skips the ~16 GB ACAV training corpus for rapid/free iteration, while still using LiveKit validation negatives.
+
+---
+
+## 11. CURRENT CHECKPOINT — v2 pipeline succeeded, model quality failed
+
+The latest completed v2 run that matters for resumption is:
+
+```text
+workflow: Train Okja Wakeword v2
+run ID: 31563550569
+run number: 2
+branch: aihub-voice-test
+head SHA: 7bd3965f8a8f4cb0cb579e1b6bfe8650897377ec
+commit message: Fix NLTK English tagger for Okja v2
+status: completed
 conclusion: success
 ```
 
-The workflow's temporary Vosk probe step downloads an ~82.8 MB Korean model and installs Python Vosk on the GitHub runner. That is useful for validation but should **not** remain as permanent CI overhead once the wake-word decision is finalized.
+Jobs:
+
+```text
+generate-speech  job 94010640908  SUCCESS
+train            job 94011579771  SUCCESS
+```
+
+The successful run proved all of these stages execute end-to-end on free GitHub-hosted CPU runners:
+
+```text
+install MeloTTS CPU environment
+→ generate synthetic positive/negative speech
+→ upload/restore speech dataset
+→ install LiveKit WakeWord CPU environment
+→ setup compact dependencies
+→ generate background clips
+→ augment + feature extraction
+→ train conv-attention model
+→ export ONNX
+→ evaluate
+→ upload results
+```
+
+Artifacts from that run:
+
+```text
+okja-wakeword-v2
+artifact ID: 9128914528
+size: 312,450 bytes
+sha256: a2ed3ac0712d8734ff2df01eb1422d8aabaec328334b13119ccf88f9549c15cb
+expires: 2026-08-19
+
+okja-v2-speech
+artifact ID: 9128703298
+size: 22,963,109 bytes
+sha256: f12219300c7a98a7dbc0abad2256f9b4164cffaebea4bf214451dc52fef4b0b3
+expires: 2026-08-15
+```
+
+The model artifact was downloaded and inspected. It contains:
+
+```text
+okja_v2_melotts.onnx             99,190 bytes
+okja_v2_melotts.pt               81,315 bytes
+okja_v2_melotts_det.png          98,002 bytes
+okja_v2_melotts_eval.json           310 bytes
+okja_v2_melotts_metrics.json       3,613 bytes
+v2_augment.log
+v2_background.log
+v2_eval.log
+v2_export.log
+v2_setup.log
+v2_train.log
+```
+
+Held-out evaluation from `v2_eval.log` / `okja_v2_melotts_eval.json`:
+
+```text
+validation positives: 128
+validation negatives: 30,404
+validation duration: 16.89 hours
+threshold: 0.50
+recall: 0.1328125  = 13.28%
+FPPH: 2.6641
+accuracy: 0.5657
+AUT: 0.2089
+```
+
+The trainer also reported an “optimal” threshold of 0.08 with:
+
+```text
+recall: 66.41%
+FPPH: 381.15
+```
+
+That tradeoff is completely unacceptable for an always-on home wake word.
+
+**Interpretation:** the engineering pipeline succeeded; the current v2 classifier did not. Do not install `okja_v2_melotts.onnx` into the Android app and call the wake-word problem solved. Do not simply retrain the identical configuration.
 
 ---
 
-## 12. Current code reality versus desired architecture
+## 12. Immediate next task after this handoff
 
-### Current code
+Start from the v2 failure data, not from the earlier Vosk branch of thought.
 
-`MainActivity.java` still has prototype concepts:
+Recommended next sequence:
 
-```text
-Profile.GRANDMA
-Profile.PERSONAL
-```
+1. Inspect `generate_melotts_dataset.py`, the actual v2 speech splits, augment behavior, and LiveKit feature/class semantics to determine why recall is only ~13% while false positives are still >2/hour.
+2. Check for data-domain mismatch, inadequate speaker/prosody diversity, phrase imbalance, train/test leakage or over-separation, negative weighting/class balance, and whether the external MeloTTS dataset is being consumed exactly as intended by LiveKit.
+3. Preserve the v2 metrics above as the baseline.
+4. Create a v3/data-fix iteration only after identifying the most likely failure mechanism. Do not spend another runner cycle blindly.
+5. Evaluate v3 before Android integration. The project config's own target is `target_fp_per_hour: 0.5`; practical recall also needs to be high enough for repeated real-user tests. Do not define “production ready” from workflow success alone.
+6. Once an ONNX model has acceptable offline metrics, inspect its exact ONNX input/output signature and LiveKit preprocessing/runtime requirements. Android integration must reproduce the same frontend/features; do not merely drop the ONNX file into the app.
+7. Then benchmark the local streaming model on the Fold4 using the fixed measurement protocol and real voices/TV/noise.
+8. Only after that derive minimum hardware and shop for the final cheap tablet/display hardware.
 
-and currently selects older wake phrases by profile, such as:
-
-```text
-GRANDMA → 옥자
-PERSONAL Korean → 에이아이 허브
-PERSONAL English → AI Hub
-```
-
-The current wake detector is repeated Android `SpeechRecognizer` sessions and string matching.
-
-### Desired next architecture
-
-Unify wake identity first:
-
-```text
-옥자 / Okja
-```
-
-Then separate personalization from wake name:
-
-```text
-Okja wake
-   ↓
-Voice ID: user / grandmother / unknown
-   ↓
-Room profile
-   ↓
-Command / permissions / model / language
-```
-
-Do not create separate binaries for grandmother and personal use unless a future constraint forces it.
+This is the correct resume point.
 
 ---
 
-## 13. Why the current Android SpeechRecognizer wake loop is only a prototype
+## 13. Known completed proof points
 
-The repeated `SpeechRecognizer` approach proved the interaction flow, but it is not intended as the final always-on wake engine because:
-
-- it is not designed as a dedicated low-power KWS engine;
-- continuous/background microphone behavior on modern Android is constrained;
-- TV false positives and long-term stability need dedicated measurement;
-- screen-off/background behavior is not yet proven;
-- battery/CPU usage on the eventual cheap device matters.
-
-Do not delete the working prototype until a local alternative wins in an A/B test.
-
----
-
-## 14. Next action — where the previous chat stopped
-
-The previous chat stopped **immediately after the Vosk Korean vocabulary probe succeeded**.
-
-The next high-value engineering task is:
-
-### Build a local free wake-word A/B test without destroying the existing working wake path
-
-Recommended order:
-
-1. Keep the current Android `SpeechRecognizer` wake mode as control / fallback.
-2. Add an experimental local wake backend, starting with Vosk because `옥자` was verified in its Korean vocabulary.
-3. Accept variants by normalization / phrase composition, e.g. `옥자`, `헤이 옥자`, `오케이 옥자`; handle `옥자야` as a recognition/normalization case rather than assuming it exists as one vocabulary token.
-4. Measure on the Fold4:
-   - wake success rate
-   - misses
-   - false positives
-   - TV false activations
-   - time to wake
-   - CPU
-   - RAM
-   - behavior over 20–30 wake attempts
-   - 5–10 full wake → command → Claude → TTS → wake cycles
-5. Compare against the current Android SpeechRecognizer prototype.
-6. Only after a winner is measured, replace the prototype wake loop.
-
-Do not jump directly to hardware shopping yet.
-
----
-
-## 15. Stability tasks after the wake backend is chosen
-
-Once local wake detection is stable:
-
-1. foreground-service / always-on design
-2. screen-off/background test
-3. bridge auto-recovery
-4. app/bridge crash recovery
-5. boot auto-start
-6. low-power measurements
-7. speaker / Voice ID
-8. room/device profiles
-9. phone companion
-10. emergency/family messaging
-11. TV / SmartThings / home automation
-12. GPT/Codex fallback/router if still wanted
-
-Modern Android boot/background microphone restrictions mean boot auto-start should be designed deliberately rather than assumed to work like a desktop daemon.
-
----
-
-## 16. Speaker ID direction
-
-Speaker identification is a separate problem from speech recognition.
-
-The current likely free/local candidate is `sherpa-onnx` speaker identification / verification on ARM64 Android, but this has **not yet been integrated or benchmarked in this project**.
-
-Do not prematurely train a custom grandmother-specific ASR model. First collect real recognition failures. A correction/normalization layer can solve many cases much more cheaply.
-
----
-
-## 17. Claude model / routing direction
-
-The working concept before unifying the end-user product was roughly:
+Already demonstrated in the project:
 
 ```text
-grandmother simple profile → Haiku
-personal profile           → Sonnet
+native Android Korean STT works
+native Android English STT works
+Android -> localhost PRoot TCP connection works
+persistent Claude Agent SDK works
+Claude reply -> Android TTS works
+full STT -> Claude -> TTS roundtrip works
+hands-free Android SpeechRecognizer wake prototype works
+local MFCC/DTW wake experiment works
+GitHub Actions builds Android debug APK
+GitHub Actions can train/export/evaluate LiveKit custom wake-word models
+v2 ONNX export is real and has been inspected
 ```
 
-The more important final architecture is user-driven routing, not separate apps.
-
-Longer term, the user wants:
-
-```text
-Claude primary
-GPT/Codex fallback
-```
-
-Potential fallback conditions:
-
-- Claude unavailable
-- timeout
-- plan/session limit
-- task better handled by GPT/Codex
-
-Do not implement this before the always-on voice path is stable unless the user reprioritizes it.
+Do not redo these proofs unless a code change breaks them.
 
 ---
 
-## 18. Current GitHub Actions setup
+## 14. Known unresolved / future work
 
-Workflow:
-
-```text
-.github/workflows/aihub-build.yml
-```
-
-Workflow name:
+Not yet complete:
 
 ```text
-Build AI Hub test APK
+high-quality registration-free Okja wake model
+Android ONNX streaming integration
+screen-off / long-duration background stability
+foreground-service strategy
+boot auto-start
+bridge lazy init / crash recovery
+speaker / Voice ID
+room/device profiles
+phone companion
+family status messaging
+emergency alert flow
+find/ring phone
+voice calling integration
+TV / SmartThings / home automation
+Claude/GPT/Codex router/fallback
+final hardware selection
 ```
 
-Build command:
-
-```bash
-gradle -p aihub assembleDebug --stacktrace
-```
-
-Artifact name:
-
-```text
-aihub-dual-profile-debug-apk
-```
-
-The artifact name still reflects the old dual-profile prototype and can be renamed later.
-
-As of the Vosk probe run, the APK build itself still succeeded.
+Voice ID and family-care features are requirements/design direction only; do not claim they exist in the current app.
 
 ---
 
-## 19. Known pitfalls / do not repeat
+## 15. Important engineering constraints / decisions
 
-- Do not reinstall Termux from F-Droid/GitHub just to get speech APIs. The current Play build worked.
-- Do not require root.
-- Do not use fresh `claude -p` launches per query; persistent SDK is much faster.
-- Do not assume the phone's local `~/aihub_bridge.py` matches GitHub; sync/check it.
-- Do not assume `옥자야` is one token in Vosk; the probe showed it is not.
-- Do not assume all advertised tablet RAM is physical.
-- Do not buy final hardware before measuring the local wake engine.
-- Do not split the product into separate grandmother/personal binaries merely because the prototype still has two profile buttons.
-- Do not treat Voice ID as authentication-grade security.
-- Do not let failed Voice ID block emergency requests.
-- Do not throw away the current working SpeechRecognizer wake prototype until the local backend beats it.
-
----
-
-## 20. Fast restart instructions for the next ChatGPT / Claude session
-
-Tell the next agent:
+Keep these unless the user explicitly changes them:
 
 ```text
-Repo: hansoullee20/ops-console-demo
-Branch: aihub-voice-test
-Read AIHUB_HANDOFF.md first.
-Then inspect aihub/README.md, MainActivity.java, aihub_bridge.py, and .github/workflows/aihub-build.yml.
-Current product wake identity is 옥자 / Okja.
-The existing SpeechRecognizer wake prototype already works.
-The last completed experiment verified Vosk Korean model vocabulary:
-옥자 YES, 헤이 YES, 오케이 YES, 옥자야 NO.
-Next task is a free/local Vosk wake-word A/B implementation while preserving the current wake backend as fallback.
+1. Wake word/product identity is 옥자 / Okja.
+2. One app/firmware; profiles sit behind the same wake identity.
+3. Wake detection should be local and fully free/open-source.
+4. No Porcupine/Eagle AccessKey dependency.
+5. Prefer no per-token API billing; exploit subscriptions through official agent/CLI paths where allowed.
+6. Final unit should not depend on the home server being online.
+7. Do not buy final hardware until resource requirements are measured.
+8. Speaker ID is contextual identity, not strong authentication.
+9. Emergency handling must not fail closed solely on speaker-ID confidence.
+10. Measure long-run averages/false wakes/misses; never conclude from a single two-second CPU snapshot.
 ```
-
-If exact current code or workflow status matters, read the branch from GitHub rather than relying on chat memory.
 
 ---
 
-## 21. One-line project state
+## 16. Useful historical references
 
-**Working end-to-end Android voice assistant + working prototype wake phrase + persistent Claude bridge are complete; the project is now at the transition from repeated Android STT wake detection to a fully free/local `옥자 / Okja` wake backend, with Vosk Korean vocabulary feasibility just verified.**
+Earlier hands-free wake prototype:
+
+```text
+commit: 9696420e605c328ea5224c9ed293f2e135d0b4c9
+workflow run: 31486057087
+artifact id: 9099159688
+```
+
+PERF fixes / wake experiments include later commits and activities in the current branch; inspect Git history if a regression must be traced.
+
+The branch-root project discovery files were added/refreshed later so a new agent can find this work immediately:
+
+```text
+AIHUB_HANDOFF.md
+README.md
+aihub/README.md
+```
+
+---
+
+## 17. Resume prompt for a fresh ChatGPT / Claude / Codex session
+
+Use this verbatim or close to it:
+
+```text
+Resume the Okja AI Hub project from GitHub repo hansoullee20/ops-console-demo,
+branch aihub-voice-test. Read AIHUB_HANDOFF.md first, then inspect
+aihub/wakeword/okja_v2_melotts.yaml,
+aihub/wakeword/generate_melotts_dataset.py, and
+.github/workflows/okja-wakeword-v2.yml.
+
+The v2 workflow run 31563550569 completed successfully and exported ONNX,
+but offline eval is poor: recall 13.28% and FPPH 2.66 at threshold 0.50.
+Do not integrate that model into Android and do not blindly rerun the same
+training. First diagnose the data/training mismatch using the v2 config and
+metrics, then propose/implement the smallest justified v3 fix.
+```
+
+---
+
+## 18. Rule for the next agent
+
+**Do not confuse “GitHub Action succeeded” with “wake-word model succeeded.”**
+
+At this handoff point:
+
+```text
+PIPELINE: SUCCESS
+ONNX EXPORT: SUCCESS
+OFFLINE MODEL QUALITY: FAIL
+ANDROID INTEGRATION OF TRAINED MODEL: NOT STARTED
+FINAL HARDWARE DECISION: NOT READY
+```
