@@ -1,0 +1,81 @@
+name: Sync Okja G2 diagnostic evidence once
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - '.github/workflows/okja-sync-g2-diagnostics-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Re-run ring-buffer tests
+        working-directory: aihub/wakeword
+        run: python -m unittest -v test_v4_ring_buffer_logger.py
+
+      - name: Verify Android integration anchors
+        run: |
+          grep -q 'd.feed(frame, got)' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q 'd.markCandidate(score, threshold, hit' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q 'markManualMiss("옥자", "manual_button")' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q '방금 옥자를 놓쳤어 · 진단 저장' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+
+      - name: Close only satisfied G2 diagnostic checklist items
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('AIHUB_MASTER_EXECUTION_CHECKLIST.md')
+          s = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '- [ ] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG  \n'
+                  '  DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.\n',
+                  '- [x] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG  \n'
+                  '  DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.  \n'
+                  '  Evidence: `aihub/wakeword/v4_ring_buffer_logger.py` + `test_v4_ring_buffer_logger.py`; evaluator CI run #7 / `31651625304` passed; Android `WakeDiagnosticRingBuffer.java` is wired into the live `AudioRecord` loop and accepted/near-threshold decision path by commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354`; pre-commit debug APK build passed in run `31652333689`.\n'
+              ),
+              (
+                  '- [ ] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG  \n'
+                  '  DoD: user can mark a missed activation and preserve the relevant buffered clip.\n',
+                  '- [x] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG  \n'
+                  '  DoD: user can mark a missed activation and preserve the relevant buffered clip.  \n'
+                  '  Evidence: commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354` adds the active-detector-only `방금 옥자를 놓쳤어 · 진단 저장` control backed by `markManualMiss()`; ring-buffer unit tests cover manual-miss persistence; run `31652333689` built and uploaded the wired debug APK artifact. Target-device behavioral validation remains a separate later gate.\n'
+              ),
+          ]
+
+          for old, new in replacements:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one checklist anchor, found {count}: {old.splitlines()[0]}')
+              s = s.replace(old, new, 1)
+
+          path.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+
+      - name: Commit verified checklist evidence
+        shell: bash
+        run: |
+          git config user.name 'Okja CI'
+          git config user.email 'okja-ci@users.noreply.github.com'
+          git add AIHUB_MASTER_EXECUTION_CHECKLIST.md
+          git commit -m 'Record G2 wake diagnostic evidence'
+          git pull --rebase origin aihub-voice-test
+          git push origin HEAD:aihub-voice-test
