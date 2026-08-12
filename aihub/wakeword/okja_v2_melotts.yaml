@@ -1,0 +1,95 @@
+# Okja v2 experimental classifier.
+# Speech WAVs are generated externally by generate_melotts_dataset.py, so the
+# LiveKit `generate` stage is intentionally skipped.  We still use the normal
+# LiveKit augment -> feature extraction -> train -> export -> eval pipeline.
+
+model_name: okja_v2_melotts
+
+target_phrases:
+  - "옥자"
+  - "옥자야"
+  - "Hey Okja"
+
+# Dummy schema-compatible backend. We do NOT call LiveKit's generate command.
+# `setup --config` will download Piper (~166 MB), but avoids the multi-GB VoxCPM
+# snapshot. This is acceptable for the experiment and keeps upstream unmodified.
+tts_backend: piper_vits
+
+# These generation counts are not consumed because generation is external.
+n_samples: 256
+n_samples_val: 64
+n_background_samples: 128
+n_background_samples_val: 32
+tts_batch_size: 16
+
+# Kept as documentation of the rejection set; the external generator contains
+# the authoritative list. Exact target-containing phrases are deliberately not
+# negatives.
+custom_negative_phrases:
+  - "옥상"
+  - "옥수수"
+  - "독자"
+  - "박자"
+  - "학자"
+  - "저자"
+  - "기자"
+  - "숫자"
+  - "액자"
+  - "왕자"
+  - "상자"
+  - "환자"
+  - "여자"
+  - "부자"
+  - "모자"
+  - "오자"
+  - "가자"
+  - "앉자"
+  - "자자"
+  - "옥희"
+  - "옥순"
+  - "옥경"
+  - "옥분"
+  - "옥진"
+  - "Hey"
+  - "Okay"
+  - "OK Google"
+  - "Hey Google"
+  - "Hey Oscar"
+  - "Hey Olga"
+  - "Hey Alexa"
+  - "Hey Siri"
+
+data_dir: ./wakeword_v2_data
+output_dir: ./wakeword_v2_output
+
+augmentation:
+  clip_duration: 2.0
+  batch_size: 16
+  rounds: 2
+  background_paths: [./wakeword_v2_data/backgrounds]
+  rir_paths: [./wakeword_v2_data/rirs]
+
+# v1 used a tiny flat DNN. v2 moves to LiveKit's temporal conv-attention head.
+model:
+  model_type: conv_attention
+  model_size: small
+
+# Fast enough for a free GitHub CPU runner but large enough to tell whether the
+# classifier architecture + hard negatives actually reduce false wakes.
+steps: 6000
+learning_rate: 0.0001
+weight_decay: 0.01
+label_smoothing: 0.03
+max_negative_weight: 1500
+target_fp_per_hour: 0.5
+
+# ACAV is zero for this quick v2 iteration because the full corpus is ~16 GB.
+# setup still downloads LiveKit's validation negatives so FPPH is measured on
+# general speech. If v2 is promising, v3 will restore ACAV for production.
+batch_n_per_class:
+  positive: 16
+  adversarial_negative: 32
+  ACAV100M_sample: 0
+  background_noise: 16
+
+output_format: onnx
