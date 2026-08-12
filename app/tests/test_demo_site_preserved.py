@@ -15,7 +15,8 @@ from app.config import REPO_ROOT
 # Committed files the public build serves. `demo-data.js` is generated at
 # deploy time and is deliberately not here.
 PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js",
-                "import-ui.js", "mobile.html", "mobile.css", "mobile.js", ".nojekyll")
+                "import-ui.js", "mobile.html", "mobile.css", "mobile-period.css",
+                "mobile.js", ".nojekyll")
 STAGED_FILES = PUBLIC_FILES + ("demo-data.js",)
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pages.yml"
 NEVER_PUBLISHED = ("app", "data", "uploads", "backups", "requirements.txt")
@@ -37,6 +38,8 @@ def test_index_no_longer_carries_its_own_dataset():
     assert "let employees=[];" in html
     assert "let days=[];" in html
     assert "let monthStats={};" in html
+    assert "재직 <b>${employees.length}</b>" in html
+    assert "재직 <b>18</b>" not in html
 
 
 def test_index_references_its_assets_statically():
@@ -199,3 +202,4 @@ def test_no_template_placeholder_survives_in_a_quoted_string():
     html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     for hook in ("dailyAside", "renderAttendanceGrid"):
         assert "${" + hook not in html, f"${{{hook}()}} is not interpolated in a quoted string"
+
