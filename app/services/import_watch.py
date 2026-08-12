@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app import config, db
-from app.services import ops, xls_import, xls_pipeline
+from app.services import xls_import, xls_pipeline
 
 logger = logging.getLogger("ops_console.import_watch")
 
@@ -86,13 +86,6 @@ def _already_seen(conn: sqlite3.Connection, digest: str) -> bool:
     ).fetchone() is not None
 
 
-def _context_allows_import(db_path: Path) -> bool:
-    if config.ALLOW_DEMO_IMPORT:
-        return True
-    with db.connection(db_path, read_only=True) as conn:
-        return ops.data_context(conn)["data_context"] != "demo"
-
-
 class FolderWatcher:
     """Scans a folder on demand; `start()` runs it on an interval in a thread."""
 
@@ -123,9 +116,12 @@ class FolderWatcher:
         if not db_path.exists():
             result.reason = "database not initialised"
             return result
-        if not _context_allows_import(db_path):
-            # Same rule as the upload endpoint: real punches must not land in a
-            # database full of invented people.
+        try:
+            # The service owns this rule; the watcher only reports it. Checking
+            # here as well as in preview_import keeps a whole demo-database
+            # scan from logging one refusal per file.
+            xls_pipeline.ensure_import_allowed(db_path)
+        except xls_pipeline.DemoContextRefused:
             result.reason = "database is demo-seeded; watched imports are refused"
             return result
 
@@ -221,34 +217,3 @@ def build_from_config() -> FolderWatcher | None:
     return FolderWatcher(
         config.WATCH_DIR, interval_seconds=config.WATCH_INTERVAL_SECONDS
     )
-
-
-def pending_runs(conn: sqlite3.Connection) -> list[dict]:
-    """Previewed imports waiting for somebody to confirm or discard them."""
-    rows = conn.execute(
-        """
-        SELECT id, source_filename, period_start, period_end, started_at,
-               discovered_by, preview_json
-          FROM import_runs
-         WHERE status = 'previewed' AND source_kind = 'fingerprint_xls'
-         ORDER BY id DESC
-        """
-    ).fetchall()
-    out = []
-    for row in rows:
-        new_punches = None
-        if row["preview_json"]:
-            try:
-                new_punches = json.loads(row["preview_json"]).get("newPunches")
-            except ValueError:  # pragma: no cover - defensive
-                new_punches = None
-        out.append({
-            "importRunId": row["id"],
-            "sourceFilename": row["source_filename"],
-            "periodStart": row["period_start"],
-            "periodEnd": row["period_end"],
-            "startedAt": row["started_at"],
-            "discoveredBy": row["discovered_by"],
-            "newPunches": new_punches,
-        })
-    return out

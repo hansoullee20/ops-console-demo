@@ -55,6 +55,38 @@ class ImportError_(RuntimeError):
     """The import could not proceed."""
 
 
+class DemoContextRefused(ImportError_):
+    """This database holds the fictional demo dataset; imports are refused."""
+
+
+def ensure_import_allowed(db_path: Path | None = None) -> None:
+    """Refuse to import real records into a database full of invented people.
+
+    This lives in the service layer, not in the HTTP router, because it is a
+    business rule rather than a transport concern. Every interface that can
+    start an import — the API, the folder watcher, and any later tool layer —
+    gets it by calling the same service functions, instead of each remembering
+    to re-check. It used to be implemented separately in two places, which is
+    how a third caller ends up without it.
+    """
+    if config.ALLOW_DEMO_IMPORT:
+        return
+    path = Path(db_path or config.DB_PATH)
+    if not path.exists():
+        return
+    from app.services import ops  # noqa: PLC0415 - avoids an import cycle
+
+    with db.connection(path, read_only=True) as conn:
+        context = ops.data_context(conn)["data_context"]
+    if context == "demo":
+        raise DemoContextRefused(
+            "이 데이터베이스는 데모 시드(data_context=demo)입니다. 실제 지문 기록을 "
+            "가져오면 가상 직원 18명과 섞여 어느 쪽이 실제인지 구분할 수 없게 됩니다. "
+            "운영용 데이터베이스에서 실행하십시오. 데모 시드로 흐름만 확인하려면 "
+            "OPS_ALLOW_DEMO_IMPORT=1 로 백엔드를 실행하십시오."
+        )
+
+
 @dataclass
 class ImportPreview:
     import_run_id: int
@@ -182,6 +214,7 @@ def preview_import(
 
     Writes no punch, attendance, leave or replacement data.
     """
+    ensure_import_allowed(db_path)
     source_path = Path(source_path)
     uploads = Path(uploads_dir) if uploads_dir else config.UPLOADS_DIR
     uploads.mkdir(parents=True, exist_ok=True)
@@ -421,6 +454,7 @@ def apply_import(
     actor_id: str = "operator",
 ) -> dict:
     """Commit a previewed import. Requires the token the preview issued."""
+    ensure_import_allowed(db_path)
     path = Path(db_path or config.DB_PATH)
     backups = Path(backups_dir or config.BACKUPS_DIR)
 
@@ -823,6 +857,157 @@ def rollback_import(
         raise
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# read models
+#
+# The API renders these; nothing re-queries import_runs on its own. Phase 2
+# established the pattern with app/services/ops.py, where the API and the demo
+# snapshot exporter share one set of read models so the two renderings cannot
+# drift. The same reason applies to any later interface: a second caller that
+# writes its own SQL is a second definition of what an import "is".
+# ---------------------------------------------------------------------------
+def import_history(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT r.id, r.source_filename, r.status, r.period_start, r.period_end,
+               r.punch_event_count, r.started_at, r.finished_at, r.rolled_back_at,
+               r.error_message,
+               (SELECT COUNT(*) FROM import_run_days d WHERE d.import_run_id = r.id)
+                   AS covered_days
+          FROM import_runs r
+         WHERE r.source_kind = 'fingerprint_xls'
+         ORDER BY r.id DESC LIMIT ?
+        """,
+        (max(1, min(limit, 200)),),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "sourceFilename": row["source_filename"],
+            "status": row["status"],
+            "periodStart": row["period_start"],
+            "periodEnd": row["period_end"],
+            "punchEventCount": row["punch_event_count"],
+            "startedAt": row["started_at"],
+            "finishedAt": row["finished_at"],
+            "rolledBackAt": row["rolled_back_at"],
+            "errorMessage": row["error_message"],
+            "coveredDays": row["covered_days"],
+        }
+        for row in rows
+    ]
+
+
+def import_run_detail(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM import_runs WHERE id = ?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    days = conn.execute(
+        "SELECT work_date, coverage_status, raw_punch_count FROM import_run_days "
+        " WHERE import_run_id = ? ORDER BY work_date",
+        (run_id,),
+    ).fetchall()
+    findings: list[dict] = []
+    if row["findings_json"]:
+        try:
+            findings = json.loads(row["findings_json"]).get("findings", [])
+        except ValueError:  # pragma: no cover - defensive
+            findings = []
+    return {
+        "id": row["id"],
+        "sourceFilename": row["source_filename"],
+        "status": row["status"],
+        "periodStart": row["period_start"],
+        "periodEnd": row["period_end"],
+        "punchEventCount": row["punch_event_count"],
+        "startedAt": row["started_at"],
+        "finishedAt": row["finished_at"],
+        "rolledBackAt": row["rolled_back_at"],
+        "errorMessage": row["error_message"],
+        "coveredDays": len(days),
+        "sourceSha256": row["source_sha256"],
+        "findings": findings,
+        # Coverage facts, kept apart from any attendance verdict: a
+        # reported_zero day is what the file said, not an absence.
+        "days": [
+            {
+                "workDate": day["work_date"],
+                "coverage": day["coverage_status"],
+                "punches": day["raw_punch_count"],
+            }
+            for day in days
+        ],
+    }
+
+
+def stored_preview(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    """The preview snapshot as the operator would have seen it.
+
+    Returns None when the run has none — a run that failed to parse, or one
+    already applied. Applying never trusts this: it re-reads the preserved file
+    and recomputes against the current slot mapping.
+    """
+    row = conn.execute(
+        "SELECT preview_json FROM import_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    if row is None or not row["preview_json"]:
+        return None
+    return json.loads(row["preview_json"])
+
+
+def preserved_source(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    """Where the untouched original is kept.
+
+    The path, not the bytes: the file stays on the work PC's disk and is never
+    served to a caller.
+    """
+    row = conn.execute(
+        "SELECT stored_source_path, source_filename, source_sha256 "
+        "  FROM import_runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    stored = Path(row["stored_source_path"] or "")
+    return {
+        "sourceFilename": row["source_filename"],
+        "storedPath": str(stored),
+        "exists": stored.is_file(),
+        "sha256": row["source_sha256"],
+    }
+
+
+def pending_imports(conn: sqlite3.Connection) -> list[dict]:
+    """Previewed imports waiting for somebody to confirm or discard them."""
+    rows = conn.execute(
+        """
+        SELECT id, source_filename, period_start, period_end, started_at,
+               discovered_by, preview_json
+          FROM import_runs
+         WHERE status = 'previewed' AND source_kind = 'fingerprint_xls'
+         ORDER BY id DESC
+        """
+    ).fetchall()
+    out = []
+    for row in rows:
+        new_punches = None
+        if row["preview_json"]:
+            try:
+                new_punches = json.loads(row["preview_json"]).get("newPunches")
+            except ValueError:  # pragma: no cover - defensive
+                new_punches = None
+        out.append({
+            "importRunId": row["id"],
+            "sourceFilename": row["source_filename"],
+            "periodStart": row["period_start"],
+            "periodEnd": row["period_end"],
+            "startedAt": row["started_at"],
+            "discoveredBy": row["discovered_by"],
+            "newPunches": new_punches,
+        })
+    return out
 
 
 def last_applied_import(conn: sqlite3.Connection) -> dict | None:

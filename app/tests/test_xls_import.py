@@ -27,7 +27,19 @@ def export(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def seeded(migrated_db: Path) -> Path:
+    """A database with staff and slots in it, marked operational.
+
+    The people are the fictional seed, but the context marker is not: imports
+    are refused on a `data_context=demo` database by the service itself, so a
+    test that imports has to be testing an operational one.
+    """
     seed_demo_database(migrated_db)
+    conn = db.connect(migrated_db)
+    try:
+        conn.execute("UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'")
+        conn.commit()
+    finally:
+        conn.close()
     return migrated_db
 
 
@@ -696,3 +708,78 @@ def test_attendance_records_which_import_derived_it(export, seeded, tmp_path):
             )
         }
     assert runs == {preview.import_run_id}
+
+
+# ---------------------------------------------------------------------------
+# where the rules live
+#
+# The API and the folder watcher are two interfaces onto these functions, and a
+# later tool layer would be a third. A rule that lives in one interface is not
+# a rule — it is a rule that interface happens to apply.
+# ---------------------------------------------------------------------------
+def test_the_service_itself_refuses_a_demo_database(migrated_db: Path, tmp_path: Path, export: Path):
+    """Called directly, with no HTTP anywhere, the demo rule still holds."""
+    seed_demo_database(migrated_db)          # leaves data_context=demo
+
+    with pytest.raises(xls_pipeline.DemoContextRefused):
+        xls_pipeline.preview_import(
+            export, db_path=migrated_db, uploads_dir=tmp_path / "uploads"
+        )
+    with pytest.raises(xls_pipeline.DemoContextRefused):
+        xls_pipeline.apply_import(1, "irrelevant", db_path=migrated_db)
+
+    conn = db.connect(migrated_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM import_runs").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_no_interface_reimplements_the_import_rules():
+    """The router and the watcher must not carry their own copy of a rule.
+
+    This one was real: the demo-database refusal was written twice, in the HTTP
+    router and in the watcher, and was absent from the service both callers go
+    through.
+    """
+    from app.config import REPO_ROOT
+
+    for relative in ("app/routers/imports.py", "app/services/import_watch.py"):
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "data_context" not in source, (
+            f"{relative} decides the demo rule itself; it belongs in xls_pipeline"
+        )
+
+
+def test_the_http_layer_holds_no_sql():
+    """The router translates status codes. It does not know the schema.
+
+    Anything that queries import_runs here is a second definition of what an
+    import is, which is exactly what a later interface would then have to
+    duplicate a third time.
+    """
+    from app.config import REPO_ROOT
+
+    source = (REPO_ROOT / "app" / "routers" / "imports.py").read_text(encoding="utf-8")
+    for marker in ("SELECT ", "INSERT ", "UPDATE ", "DELETE ", "conn.execute("):
+        assert marker not in source, f"raw SQL in the HTTP layer: {marker!r}"
+
+
+def test_the_service_functions_take_no_http_types():
+    """Every import entry point is callable without FastAPI in the process."""
+    import inspect
+
+    for module in (xls_pipeline, xls_import):
+        source = inspect.getsource(module)
+        assert "fastapi" not in source.lower(), f"{module.__name__} imports the web framework"
+
+    for function in (xls_pipeline.preview_import, xls_pipeline.apply_import,
+                     xls_pipeline.rollback_import, xls_pipeline.import_history,
+                     xls_pipeline.import_run_detail, xls_pipeline.stored_preview,
+                     xls_pipeline.pending_imports, xls_pipeline.preserved_source):
+        annotations = inspect.signature(function).parameters
+        for name, parameter in annotations.items():
+            rendered = str(parameter.annotation)
+            assert "Request" not in rendered and "UploadFile" not in rendered, (
+                f"{function.__name__}({name}) takes an HTTP type"
+            )

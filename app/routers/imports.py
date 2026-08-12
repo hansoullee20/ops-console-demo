@@ -21,13 +21,17 @@ Three rules the endpoints exist to enforce:
 * Every apply and rollback writes an audit_log row inside the same transaction
   as the change (done by the service, pinned by tests).
 
-The endpoints only orchestrate; every guarantee lives in
-`app/services/xls_pipeline.py`, which is what the tests exercise directly.
+This module only translates HTTP to and from the service layer: it decides
+status codes and parses multipart uploads, nothing else. Every rule — including
+the refusal to import into a demo-seeded database — lives in
+`app/services/xls_pipeline.py`, so a second interface onto the same functions
+cannot end up with a different set of guarantees. The read shapes come from the
+service too, for the same reason Phase 2 shares `app/services/ops.py` between
+the API and the snapshot exporter.
 """
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -42,7 +46,7 @@ from app.schemas.imports import (
     RollbackRequest,
     RollbackResult,
 )
-from app.services import import_watch, ops, xls_import, xls_pipeline
+from app.services import xls_import, xls_pipeline
 
 router = APIRouter(prefix="/api/v1/imports", tags=["imports"])
 
@@ -56,27 +60,6 @@ def _connect(read_only: bool = True):
             detail="database not initialised; start the backend once to run migrations",
         )
     return db.connect(config.DB_PATH, read_only=read_only)
-
-
-def _guard_context() -> None:
-    """Refuse to import real records into a database full of invented people."""
-    if config.ALLOW_DEMO_IMPORT:
-        return
-    conn = _connect()
-    try:
-        context = ops.data_context(conn)["data_context"]
-    finally:
-        conn.close()
-    if context == "demo":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "이 데이터베이스는 데모 시드(data_context=demo)입니다. 실제 지문 기록을 "
-                "가져오면 가상 직원 18명과 섞여 어느 쪽이 실제인지 구분할 수 없게 됩니다. "
-                "운영용 데이터베이스에서 실행하십시오. 데모 시드로 흐름만 확인하려면 "
-                "OPS_ALLOW_DEMO_IMPORT=1 로 백엔드를 실행하십시오."
-            ),
-        )
 
 
 def _store_upload(upload: UploadFile) -> tuple[Path, str, tempfile.TemporaryDirectory]:
@@ -127,10 +110,11 @@ def create_preview(file: UploadFile = File(...)) -> dict:
     it opens is a record of the attempt — including an attempt that fails to
     parse.
     """
-    _guard_context()
     source, filename, holder = _store_upload(file)
     try:
         preview = xls_pipeline.preview_import(source, original_filename=filename)
+    except xls_pipeline.DemoContextRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except xls_import.XlsDependencyMissing as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except xls_import.XlsImportError as exc:
@@ -143,7 +127,6 @@ def create_preview(file: UploadFile = File(...)) -> dict:
 @router.post("/{run_id}/apply", response_model=ApplyResult,
              summary="Commit a previewed import")
 def apply_run(run_id: int, body: ApplyRequest) -> ApplyResult:
-    _guard_context()
     try:
         result = xls_pipeline.apply_import(run_id, body.confirmationToken)
     except xls_pipeline.ImportError_ as exc:
@@ -172,7 +155,7 @@ def list_pending() -> dict:
     """
     conn = _connect()
     try:
-        runs = import_watch.pending_runs(conn)
+        runs = xls_pipeline.pending_imports(conn)
     finally:
         conn.close()
     return {
@@ -191,17 +174,16 @@ def get_preview(run_id: int) -> dict:
     """
     conn = _connect()
     try:
-        row = conn.execute(
-            "SELECT status, preview_json FROM import_runs WHERE id = ?", (run_id,)
-        ).fetchone()
-        if row is None:
+        run = xls_pipeline.import_run_detail(conn, run_id)
+        if run is None:
             raise HTTPException(status_code=404, detail=f"no import run {run_id}")
-        if not row["preview_json"]:
+        preview = xls_pipeline.stored_preview(conn, run_id)
+        if preview is None:
             raise HTTPException(
                 status_code=409,
-                detail=f"import run {run_id} is '{row['status']}' and has no stored preview",
+                detail=f"import run {run_id} is '{run['status']}' and has no stored preview",
             )
-        return json.loads(row["preview_json"])
+        return preview
     finally:
         conn.close()
 
@@ -210,35 +192,7 @@ def get_preview(run_id: int) -> dict:
 def list_runs(limit: int = 50) -> list[ImportRunSummary]:
     conn = _connect()
     try:
-        rows = conn.execute(
-            """
-            SELECT r.id, r.source_filename, r.status, r.period_start, r.period_end,
-                   r.punch_event_count, r.started_at, r.finished_at, r.rolled_back_at,
-                   r.error_message,
-                   (SELECT COUNT(*) FROM import_run_days d WHERE d.import_run_id = r.id)
-                       AS covered_days
-              FROM import_runs r
-             WHERE r.source_kind = 'fingerprint_xls'
-             ORDER BY r.id DESC LIMIT ?
-            """,
-            (max(1, min(limit, 200)),),
-        ).fetchall()
-        return [
-            ImportRunSummary(
-                id=row["id"],
-                sourceFilename=row["source_filename"],
-                status=row["status"],
-                periodStart=row["period_start"],
-                periodEnd=row["period_end"],
-                punchEventCount=row["punch_event_count"],
-                startedAt=row["started_at"],
-                finishedAt=row["finished_at"],
-                rolledBackAt=row["rolled_back_at"],
-                errorMessage=row["error_message"],
-                coveredDays=row["covered_days"],
-            )
-            for row in rows
-        ]
+        return [ImportRunSummary(**row) for row in xls_pipeline.import_history(conn, limit)]
     finally:
         conn.close()
 
@@ -247,45 +201,10 @@ def list_runs(limit: int = 50) -> list[ImportRunSummary]:
 def get_run(run_id: int) -> ImportRunDetail:
     conn = _connect()
     try:
-        row = conn.execute("SELECT * FROM import_runs WHERE id = ?", (run_id,)).fetchone()
-        if row is None:
+        detail = xls_pipeline.import_run_detail(conn, run_id)
+        if detail is None:
             raise HTTPException(status_code=404, detail=f"no import run {run_id}")
-        days = conn.execute(
-            "SELECT work_date, coverage_status, raw_punch_count FROM import_run_days "
-            " WHERE import_run_id = ? ORDER BY work_date",
-            (run_id,),
-        ).fetchall()
-        findings = []
-        if row["findings_json"]:
-            try:
-                findings = json.loads(row["findings_json"]).get("findings", [])
-            except ValueError:  # pragma: no cover - defensive
-                findings = []
-        return ImportRunDetail(
-            id=row["id"],
-            sourceFilename=row["source_filename"],
-            status=row["status"],
-            periodStart=row["period_start"],
-            periodEnd=row["period_end"],
-            punchEventCount=row["punch_event_count"],
-            startedAt=row["started_at"],
-            finishedAt=row["finished_at"],
-            rolledBackAt=row["rolled_back_at"],
-            errorMessage=row["error_message"],
-            coveredDays=len(days),
-            sourceSha256=row["source_sha256"],
-            findings=findings,
-            # The coverage facts, kept apart from any attendance verdict: a
-            # reported_zero day is what the file said, not an absence.
-            days=[
-                {
-                    "workDate": day["work_date"],
-                    "coverage": day["coverage_status"],
-                    "punches": day["raw_punch_count"],
-                }
-                for day in days
-            ],
-        )
+        return ImportRunDetail(**detail)
     finally:
         conn.close()
 
@@ -296,19 +215,9 @@ def get_run(run_id: int) -> ImportRunDetail:
 def get_source_location(run_id: int) -> dict:
     conn = _connect()
     try:
-        row = conn.execute(
-            "SELECT stored_source_path, source_filename, source_sha256 "
-            "  FROM import_runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
-        if row is None:
+        source = xls_pipeline.preserved_source(conn, run_id)
+        if source is None:
             raise HTTPException(status_code=404, detail=f"no import run {run_id}")
-        stored = Path(row["stored_source_path"] or "")
-        return {
-            "sourceFilename": row["source_filename"],
-            "storedPath": str(stored),
-            "exists": stored.is_file(),
-            "sha256": row["source_sha256"],
-        }
+        return source
     finally:
         conn.close()
