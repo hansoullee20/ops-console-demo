@@ -1,65 +1,105 @@
-# AI Hub Voice Test
+# AI Hub / Okja Voice Prototype
 
-테스트 목표:
+> Full project state and restart instructions: [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md)
 
-`Android SpeechRecognizer → persistent Claude Agent SDK → Android TTS`
+## Current target
 
-## 프로필
+One Android app / firmware, one wake identity:
 
-### 할머니용 — 옥자
-- 표시 이름: `옥자`
-- 입력 언어: `ko-KR` 고정
-- STT: Android 기본 음성인식 서비스, 한국어 locale 강제
-- Claude: `haiku`
-- 응답 스타일: 짧고 쉬운 한국어 존댓말, 음성 청취 우선
+```text
+옥자 / Okja
+```
 
-### 개인용 — AI Hub
-- 표시 이름: `AI Hub`
-- 입력 언어: `ko-KR` / `en-US` 전환
-- Claude: `sonnet`
-- 응답 스타일: 간단한 질문은 짧게, 복잡한 질문은 더 충분히 추론
+Desired accepted variants include `옥자`, `옥자야`, `Okja`, `Hey Okja`, `Okay Okja`, `헤이 옥자`, and `오케이 옥자`.
 
-현재 테스트 APK에서는 프로필과 개인용 입력 언어를 버튼으로 전환한다. 실제 기기 2대를 만들 때는 각 기기에서 프로필을 고정할 예정이다.
+Do not interpret the old `GRANDMA` / `PERSONAL` prototype profiles as separate final products. The intended direction is:
 
-## 폰의 Ubuntu 브리지
+```text
+Okja wake
+  ↓
+Voice ID: user / grandmother / unknown
+  ↓
+Room/device context
+  ↓
+command policy / model / language
+```
 
-기존 `~/claude-sdk` 환경과 Claude Code 로그인이 되어 있다는 전제다.
+## Working end-to-end path
 
-이 저장소의 `phone/aihub_bridge.py`를 Ubuntu의 `/root/aihub_bridge.py`로 복사한 뒤:
+```text
+Android SpeechRecognizer
+→ wake-phrase prototype
+→ Android command STT
+→ localhost TCP 127.0.0.1:8765
+→ persistent Claude Agent SDK in Ubuntu PRoot
+→ Android TTS
+```
+
+The wake-phrase prototype has been installed and the user reported that wake detection succeeded.
+
+## Current wake-engine experiment
+
+The final wake backend must be fully free/open-source and local. Porcupine/Eagle were rejected because of vendor AccessKey dependency.
+
+A feasibility probe of `vosk-model-small-ko-0.22` completed successfully. Vocabulary results:
+
+```text
+옥자     YES
+옥자야   NO
+헤이     YES
+오케이   YES
+에이아이 NO
+허브     YES
+```
+
+Vosk is **not yet integrated into the Android app**. The next task is to add an experimental local Vosk wake backend while keeping the existing Android `SpeechRecognizer` wake path as a control/fallback, then compare wake rate, false positives, TV activations, CPU, RAM, and latency.
+
+## Bridge
+
+Repo files:
+
+```text
+phone/aihub_bridge.py
+phone/start_bridge.sh
+```
+
+Typical Ubuntu launch:
 
 ```bash
 source ~/claude-sdk/bin/activate
 python ~/aihub_bridge.py
 ```
 
-정상이면:
+Expected listener:
 
 ```text
-[AI Hub] Grandma profile ready: 옥자 / ko-KR / haiku
-[AI Hub] Personal profile ready: AI Hub / ko-KR+en-US / sonnet
-[AI Hub] listening on ('127.0.0.1', 8765)
+127.0.0.1:8765
 ```
 
-## APK 빌드
+If behavior differs from the repo, check whether the phone's local `~/aihub_bridge.py` is stale.
 
-GitHub Actions의 `Build AI Hub test APK` workflow가 `aihub/app`을 빌드한다.
+## APK build
 
-Artifact 이름:
+GitHub Actions workflow:
+
+```text
+.github/workflows/aihub-build.yml
+```
+
+Build command:
+
+```bash
+gradle -p aihub assembleDebug --stacktrace
+```
+
+Artifact name currently remains:
 
 ```text
 aihub-dual-profile-debug-apk
 ```
 
-설치 후 마이크 권한을 허용하고 `말하기`를 누른다.
+The artifact name is legacy prototype naming and can be changed later.
 
-## 아직 제외한 기능
+## Next task
 
-- wake word 상시감지
-- 자동 한국어/영어 판별
-- GPT/Codex fallback
-- 카메라
-- 홈 자동화/MCP
-- 부팅 후 자동 실행
-- 저사양 태블릿 RAM/CPU 최적화
-
-먼저 두 프로필의 STT → Claude → TTS 왕복과 실제 지연시간을 검증한다.
+Preserve the working wake prototype and build a free/local Vosk A/B wake test for `옥자 / Okja`. Do not shop final hardware until the local wake engine has been measured on the Fold4.
