@@ -167,7 +167,7 @@ jobs:
       - name: Verify patch shape
         run: |
           git diff --check
-          grep -q 'diagnostics.feed(frame, got)' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
+          grep -q 'd.feed(frame, got)' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
           grep -q 'markManualMiss("옥자", "manual_button")' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
           grep -q 'DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER' aihub/app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
 
