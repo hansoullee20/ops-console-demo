@@ -47,7 +47,13 @@ jobs:
           python -m pip install python-mecab-ko python-mecab-ko-dic
           python -m pip uninstall -y unidic
 
+          # g2p_en on current NLTK requires the language-specific tagger name.
+          # Download both legacy and current resource names plus cmudict so the
+          # English "Hey Okja" path does not fail after Korean synthesis.
           python - <<'PY'
+          import nltk
+          for pkg in ('averaged_perceptron_tagger', 'averaged_perceptron_tagger_eng', 'cmudict'):
+              nltk.download(pkg, quiet=False)
           from melo.api import TTS
           import unidic_lite
           print('MeloTTS ready; unidic-lite=', unidic_lite.DICDIR)
