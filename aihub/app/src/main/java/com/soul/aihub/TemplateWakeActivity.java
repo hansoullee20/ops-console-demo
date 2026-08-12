@@ -44,6 +44,9 @@ public class TemplateWakeActivity extends Activity {
     private static final int MAX_SEGMENT = 48000;  // 3 s
     private static final int MIN_SEGMENT = 5200;   // 325 ms
     private static final int TEMPLATE_COUNT = 6;
+    private static final double DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER = 1.25;
+    private static final String DIAGNOSTIC_MODEL_NAME = "template_mfcc_dtw";
+    private static final String DIAGNOSTIC_MODEL_VERSION = "android-v1";
 
     private static final String[] PROMPTS = {
             "옥자야", "옥자야", "옥자", "옥자", "Hey Okja", "Hey Okja"
@@ -58,6 +61,8 @@ public class TemplateWakeActivity extends Activity {
     private Button enrollButton;
     private Button detectButton;
     private Button resetButton;
+    private Button missButton;
+    private WakeDiagnosticRingBuffer diagnostics;
 
     private volatile boolean detectorRunning = false;
     private volatile boolean recordingTemplate = false;
@@ -120,6 +125,9 @@ public class TemplateWakeActivity extends Activity {
         resetButton = button("등록 초기화");
         resetButton.setOnClickListener(v -> resetTemplates());
 
+        missButton = button("방금 옥자를 놓쳤어 · 진단 저장");
+        missButton.setOnClickListener(v -> markManualMiss());
+
         root.addView(title, full());
         root.addView(space(14));
         root.addView(stateText, full());
@@ -129,6 +137,8 @@ public class TemplateWakeActivity extends Activity {
         root.addView(enrollButton, full());
         root.addView(space(10));
         root.addView(detectButton, full());
+        root.addView(space(10));
+        root.addView(missButton, full());
         root.addView(space(10));
         root.addView(resetButton, full());
         root.addView(space(26));
@@ -291,9 +301,25 @@ public class TemplateWakeActivity extends Activity {
         }
         detectButton.setText(detectorRunning ? "로컬 감지 중지" : "로컬 감지 시작");
         resetButton.setEnabled(!recordingTemplate);
+        if (missButton != null) missButton.setEnabled(detectorRunning && !recordingTemplate);
         if (enrolled >= 2 && !detectorRunning) {
             scoreText.setText(String.format(Locale.US, "자동 임계값 %.2f · 등록 %d개", threshold, enrolled));
         }
+    }
+
+    private void markManualMiss() {
+        if (!detectorRunning || diagnostics == null) {
+            stateText.setText("로컬 감지 중에만 누락 샘플을 저장할 수 있어요");
+            return;
+        }
+        String eventId = diagnostics.markManualMiss("옥자", "manual_button");
+        String shortId = eventId.length() > 13 ? eventId.substring(0, 13) : eventId;
+        stateText.setText("누락 진단 캡처 중 · " + shortId);
+        main.postDelayed(() -> {
+            if (detectorRunning) {
+                stateText.setText("로컬 대기 중 · 옥자 / 옥자야 / Hey Okja");
+            }
+        }, 2200);
     }
 
     private void calibrateThreshold() {
@@ -317,6 +343,7 @@ public class TemplateWakeActivity extends Activity {
 
     private void startDetector() {
         if (detectorRunning || recordingTemplate || templates.size() < TEMPLATE_COUNT) return;
+        diagnostics = new WakeDiagnosticRingBuffer(new File(getFilesDir(), "wake_diagnostics"));
         detectorRunning = true;
         detections = 0;
         cooldownUntil = 0;
@@ -337,6 +364,8 @@ public class TemplateWakeActivity extends Activity {
             try { t.join(500); } catch (InterruptedException ignored) {}
         }
         detectorThread = null;
+        WakeDiagnosticRingBuffer d = diagnostics;
+        if (d != null) d.flushPending();
         main.post(() -> {
             stateText.setText("로컬 감지 중지됨");
             refreshUi();
@@ -365,6 +394,8 @@ public class TemplateWakeActivity extends Activity {
             while (detectorRunning) {
                 int got = readFully(rec, frame);
                 if (got <= 0) continue;
+                WakeDiagnosticRingBuffer d = diagnostics;
+                if (d != null) d.feed(frame, got);
                 double rms = rms(frame, got);
 
                 for (int i = 0; i < got; i++) {
@@ -440,6 +471,12 @@ public class TemplateWakeActivity extends Activity {
         double best = distances.get(0);
         double score = distances.size() >= 2 ? (best * 0.65 + distances.get(1) * 0.35) : best;
         boolean hit = score <= threshold;
+
+        WakeDiagnosticRingBuffer d = diagnostics;
+        if (d != null && (hit || score <= threshold * DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER)) {
+            d.markCandidate(score, threshold, hit,
+                    DIAGNOSTIC_MODEL_NAME, DIAGNOSTIC_MODEL_VERSION, "");
+        }
 
         main.post(() -> scoreText.setText(String.format(Locale.US,
                 "%s · distance %.2f / %.2f · 감지 %d회",
