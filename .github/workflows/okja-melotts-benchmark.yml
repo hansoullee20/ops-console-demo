@@ -1,0 +1,72 @@
+name: Benchmark Okja MeloTTS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/benchmark_melotts.py'
+      - '.github/workflows/okja-melotts-benchmark.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUNBUFFERED: '1'
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1 espeak-ng
+
+      - name: Install MeloTTS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo 'numpy<2' > /tmp/constraints.txt
+          export PIP_CONSTRAINT=/tmp/constraints.txt
+          python -m pip install --upgrade pip setuptools wheel
+          START=$(date +%s)
+          git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git /tmp/MeloTTS
+          python -m pip install -e /tmp/MeloTTS
+          python -m unidic download
+          END=$(date +%s)
+          echo "MELOTTS_INSTALL_SECONDS=$((END-START))" | tee melotts_install.txt
+          python -m pip show melotts torch transformers g2pkk | tee -a melotts_install.txt
+
+      - name: Run Korean wakeword TTS benchmark
+        run: |
+          /usr/bin/time -v python aihub/wakeword/benchmark_melotts.py 2>&1 | tee melotts_benchmark.log
+
+      - name: Show benchmark results
+        if: always()
+        run: |
+          echo '--- install ---'
+          cat melotts_install.txt 2>/dev/null || true
+          echo '--- summary ---'
+          cat melotts_benchmark/summary.txt 2>/dev/null || true
+          echo '--- files ---'
+          find melotts_benchmark -maxdepth 1 -type f -printf '%f %k KB\n' 2>/dev/null | sort || true
+          echo '--- disk ---'
+          df -h
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-melotts-benchmark
+          path: |
+            melotts_install.txt
+            melotts_benchmark.log
+            melotts_benchmark/**
+          if-no-files-found: warn
+          retention-days: 7
