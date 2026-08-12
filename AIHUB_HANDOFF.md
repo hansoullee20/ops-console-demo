@@ -7,7 +7,7 @@
 **Wake-word work:** `aihub/wakeword/`  
 **Start here in a new session:** read this file first. If chat memory conflicts with Git, Git is source of truth.
 
-> **CURRENT CHECKPOINT:** Okja v3 Korean-only LiveKit WakeWord diagnostic completed. The pipeline works, but the current MeloTTS-synthetic approach is **not promising enough to integrate into Android**. At threshold 0.50: Recall **4.69%**, FPPH **0.00**. At the trainer's optimal threshold 0.06: Recall **85.35%**, but **310.03 FPPH**. This confirms poor class separation. Do not tune threshold, add training steps, or integrate v2/v3. Change the data domain / speaker diversity or compare a different local KWS path.
+> **CURRENT CHECKPOINT:** Okja v3 Korean-only LiveKit WakeWord diagnostic completed and failed as a deployable model. We are deliberately NOT jumping straight into another large training run. Work is now split into three coordinated tracks: **(A) v4 wakeword/data**, **(B) reusable test/evaluation infrastructure**, and **(C) final Okja product UI/UX**. A v4 source/license manifest, v4 experiment plan, and owned conversational-script generator have been added. The next implementation phase should build the test infrastructure and tiny synthetic smoke corpus while product UI/UX is designed in parallel. Existing Android SpeechRecognizer remains the working control/fallback.
 
 ---
 
@@ -20,11 +20,13 @@ git checkout aihub-voice-test
 cat AIHUB_HANDOFF.md
 ```
 
-Important paths: `AIHUB_HANDOFF.md`, `aihub/README.md`, `aihub/app/`, `aihub/phone/`, `aihub/wakeword/`, `.github/workflows/aihub-build.yml`, `.github/workflows/okja-wakeword-v2.yml`, `.github/workflows/okja-wakeword-v3.yml`.
+Important paths: `AIHUB_HANDOFF.md`, `AIHUB_V4_TEST_PLAN.md`, `aihub/README.md`, `aihub/app/`, `aihub/phone/`, `aihub/wakeword/`, `.github/workflows/aihub-build.yml`, `.github/workflows/okja-wakeword-v2.yml`, `.github/workflows/okja-wakeword-v3.yml`.
 
 ## 1. Product goal
 
-Build a DIY, always-on Android smart display / voice assistant / family-care hub named **옥자 / Okja**. Target is inexpensive Nest-Hub-like standalone Android hardware with display, front camera, mic, speaker and Wi-Fi; local always-listening wake word; cloud reasoning through existing subscription/official agent paths where practical; later Voice ID, room/device context, companion phone, family messaging, alerts, TV/home automation. One app/firmware, not separate grandmother/personal products.
+Build a DIY, always-on Android smart display / voice assistant / family-care hub named **옥자 / Okja**. Target is inexpensive Nest-Hub-like standalone Android hardware with display, front camera, mic, speaker and Wi-Fi; local always-listening wake word; cloud reasoning through existing subscription/official agent paths where practical; later Voice ID, room/device context, companion phone, family messaging, alerts, TV/home automation.
+
+**One app/firmware, not separate grandmother/personal products.** The same product adapts presentation, permissions and content using speaker/user identity plus room/device identity.
 
 Original rough completed-unit cost target: ~KRW 40,000. Do not select final hardware until the always-on stack is measured on the Fold4.
 
@@ -59,7 +61,7 @@ Bridge files: `aihub/phone/aihub_bridge.py`, `aihub/phone/start_bridge.sh`. Know
 
 ## 4. Android state
 
-Key Java files:
+Key Java files under `aihub/app/src/main/java/com/soul/aihub/`:
 
 ```text
 MainActivity.java
@@ -69,9 +71,9 @@ StableTemplateWakeActivity.java
 TemplateWakeActivity.java
 ```
 
-under `aihub/app/src/main/java/com/soul/aihub/`. Namespace/app ID `com.soul.aihub`.
+Namespace/app ID `com.soul.aihub`.
 
-Existing SpeechRecognizer wake path works. Preserve it as control/fallback while local KWS is researched.
+Existing SpeechRecognizer wake path works. Preserve it as control/fallback while local KWS is researched. Do not destabilize this path for experiments.
 
 ## 5. Wake/product identity
 
@@ -106,7 +108,7 @@ Lower thresholds improved recall but caused massive false positives. v2 is not d
 
 ## 9. LiveKit v3 — Korean-only diagnostic COMPLETE
 
-Purpose: simplify to **`옥자` only**, increase synthetic positive volume and strengthen phrase/general Korean negatives. Diagnostic, not production model.
+Purpose: simplify to `옥자` only, increase synthetic positive volume and strengthen phrase/general Korean negatives. Diagnostic, not production model.
 
 Commits:
 
@@ -121,79 +123,221 @@ Workflow result:
 ```text
 Train Okja Wakeword v3 Korean Probe
 run ID: 31583273747
-head SHA: a128dd9a269e2b99dd7081abcbe9edcc545379e0
 completed / success
 ```
 
-Artifacts:
-
-```text
-okja-wakeword-v3-korean-probe
-artifact ID 9136765226
-390,647 bytes
-sha256 adb1f9ab8ca25971a440b2048eca67a2f137e9f4ae0433919bb572896af3a0d9
-expires 2026-08-19
-
-okja-v3-korean-speech
-artifact ID 9136308340
-182,478,146 bytes
-expires 2026-08-15
-```
-
-### v3 held-out evaluation
+Held-out evaluation:
 
 ```text
 positive: 512
 negative: 31,236
 validation duration: 17.35 h
-threshold .50
-Recall 4.6875%
-FPPH 0.0
-Accuracy 0.5234375
-AUT 0.0826421
+threshold .50: Recall 4.6875%, FPPH 0.0
+trainer optimal threshold .06: Recall 85.3516%, FPPH 310.0269
 ```
 
-Trainer optimal operating point:
+**Verdict: FAIL / NOT PROMISING for Android integration.** The useful-recall region produces catastrophic false positives. Do not tune threshold, add steps, or integrate v2/v3.
+
+## 10. Strategy change after v3
+
+The project deliberately changed from “keep training until validation looks better” to **learn from real product conditions and diversify the synthetic domain before the next serious model run**.
+
+Two complementary data ideas are now part of the plan:
+
+1. **Real household benchmark:** record long ambient sessions (eventually ~24 h, potentially multiple devices/locations), include intentional Okja utterances with rough timestamps, and run candidate models offline over the exact same recordings. This becomes a fixed benchmark for false triggers, misses, score distributions and environmental failure modes.
+2. **Diverse synthetic corpus:** use multiple permissively licensed TTS engines/voices, modern owned conversational scripts, Korean and English wake variants, hard phonetic negatives and controlled acoustic augmentation. Avoid another single-speaker synthetic loop.
+
+A future on-device shadow logger is also useful: rolling PCM buffer, save ~3 s before + ~2 s after triggers, metadata, manual miss capture and event review. However, long external recordings can establish the benchmark before that app exists.
+
+## 11. v4 source/license work already completed
+
+Added on `aihub-voice-test`:
 
 ```text
-threshold .06
-Recall 85.3516%
-FPPH 310.0269
+41a6391  AIHUB_V4_TEST_PLAN.md
+f13ab6f  v4_sources_manifest.yaml
+5e96712  build_v4_scripts.py
 ```
 
-Classifier training completed normally. GitHub runner maximum RSS ~808,912 KB (~790 MiB), classifier training wall time ~1m40s. These are training-runner observations, not Android inference requirements.
+Current conservative source direction:
 
-### v3 verdict
+- Chatterbox Multilingual: Korean + English synthetic source; permissive license verified during source review.
+- MeloTTS: retain only as one source, not the dominant Korean speaker domain.
+- Ppaso-TTS: candidate independent Korean synthetic source; keep license/model provenance recorded in manifest.
+- Kokoro-82M: English speaker/voice diversity for `Okja`, `Hey Okja`, `Okay Okja`.
+- Exclude sources with non-commercial or otherwise incompatible model/output terms from the durable product dataset.
+- Do not assume “open-source code” means model weights, voices and generated output are automatically safe for commercial product training.
 
-**FAIL / NOT PROMISING for Android integration.** Predeclared diagnostic target was Recall >=60% AND FPPH <=0.5. v3 cannot achieve both. At a safe threshold it almost never wakes; at useful recall it false-wakes hundreds of times per hour. Score distributions are poorly separated.
+Text strategy:
 
-This is stronger evidence than “needs more training”: even after simplifying to one Korean word and strengthening synthetic negatives, the normal-threshold recall became worse. Do not spend the next iteration merely increasing steps or changing threshold.
+- **Primary:** scripts written/generated specifically for this project, so we own/control the text corpus and can model modern household conversation directly.
+- Public-domain literature is optional diversity material, not the core corpus. It should only be added after work-specific rights verification.
+- Keep `mention_context` separate from ordinary negatives. Example: “어제 옥자라는 영화를 봤어” contains the actual acoustic keyword and is a product-policy/context test, not a normal negative.
 
-## 10. Next technical decision
+## 12. v4 evaluation philosophy
 
-Change the data/domain assumption before another LiveKit run.
+Do not optimize for a pretty synthetic validation score. The question is whether the acoustic concept generalizes beyond a specific TTS engine/voice.
 
-1. Obtain genuinely diverse Korean positive speech for `옥자`: real recordings and/or a true multi-speaker Korean source. The single-speaker MeloTTS-derived positive domain is the leading suspect.
-2. Put broad real/general-speech negatives into the **training sampler**, not only validation. Restore LiveKit's intended general-speech training data if practical.
-3. Run a small sanity experiment before spending large runner time.
-4. In parallel, compare a simpler Android-ready local baseline (Vosk/open-vocabulary or another KWS path) so LiveKit is not optimized indefinitely without competition.
-5. Only after offline Recall/FPPH is credible should a local model be added beside SpeechRecognizer for Fold4 A/B testing.
+Required evaluation layers:
 
-Recommended next experiment: **real-speaker sanity test**. Collect a small set of `옥자` utterances from multiple real speakers, strictly separate train/test speakers or recordings, and evaluate against broad real speech. If separation improves sharply, synthetic-domain diversity was the main problem. If it still fails badly, stop investing in this LiveKit path and switch KWS engines.
+```text
+TEST A — held-out synthetic speakers
+TEST B — held-out TTS engine
+TEST C — real human Okja utterances
+TEST D — fixed long household recording benchmark
+```
 
-## 11. Do not repeat
+`TEST D` must remain outside training. Future LiveKit versions and alternative KWS engines should compete on the same benchmark.
+
+## 13. THREE ACTIVE WORK TRACKS
+
+### Track A — Wakeword / v4 data + model
+
+Goal: create a genuinely more diverse diagnostic corpus before another expensive training iteration.
+
+Planned sequence:
+
+1. Finalize dataset schema and provenance fields.
+2. Add TTS generation adapters for approved Korean/English engines.
+3. Generate a **tiny** smoke corpus first.
+4. Human-listen to samples by engine/voice/phrase.
+5. Only after QC passes, scale corpus generation.
+6. Train v4 sanity model.
+7. Evaluate against held-out voices/engine, then real recordings and household benchmark.
+8. Compare against at least one alternative local KWS rather than optimizing LiveKit indefinitely.
+
+### Track B — Test / evaluation infrastructure
+
+This must exist before large-scale v4 generation.
+
+Required pieces:
+
+- clip manifest fields: language, text/phrase, class, TTS engine, voice, script ID, source/license provenance, augmentation, parent/base audio ID, split;
+- deterministic train/validation/test splitter;
+- entire-speaker and preferably entire-engine holdout support;
+- leakage checker so derivatives of the same base clip cannot cross splits;
+- automatic WAV/audio QC: readable file, sample rate/channels, duration, silence, clipping, malformed output;
+- pronunciation QC workflow for initial samples;
+- baseline evaluator capable of running **v3 ONNX** on future test corpora before retraining;
+- automatic threshold sweep / Recall / miss / FPPH report;
+- later long-recording evaluator that scans ambient audio and exports timestamped trigger windows/scores;
+- reproducible summary output so v3/v4/alternative KWS can be compared on identical data.
+
+Do not create tens of thousands of TTS clips before the tiny end-to-end smoke pipeline passes.
+
+### Track C — Final product UI/UX
+
+This is now an explicit parallel track, not something to postpone until the model is finished. UI state requirements influence backend events and product architecture.
+
+**Core product principle:** voice-first, touch-second. Okja should feel like an ambient appliance/smart display, not like a generic Android tablet app.
+
+Shared interaction states:
+
+```text
+Ambient / Home
+Listening
+Thinking / Executing
+Answer / Action result
+Manual dashboard
+Microphone off / offline / error states
+```
+
+Microphone/listening state must always be unambiguous.
+
+#### Grandmother / senior presentation
+
+The grandmother experience should be extremely simple and minimal, with no clutter or “cheap tablet UI” feel.
+
+- very large readable typography;
+- high information hierarchy and large touch targets;
+- very few choices per screen;
+- ambient home shows only the most useful information;
+- likely primary content: large clock/date/weather, medication/reminders, family/contact access, simple TV/home actions and urgent help;
+- one screen = one obvious action wherever possible;
+- avoid dense menus, tiny icons and decorative complexity.
+
+#### Personal presentation
+
+Same product and same design language, but denser information can adapt to the user's lifestyle.
+
+Potential ambient/home information:
+
+- today's schedule;
+- tasks/reminders;
+- weather;
+- home/device status;
+- personal phone/device finding;
+- relevant messages/notifications;
+- context-aware cards.
+
+Speaker identity + room/device identity determine what content/actions are shown; they do not create a separate app build.
+
+#### Common wake transition
+
+Regardless of profile, calling Okja should move into a shared simple listening state, followed by thinking/executing and result states. Personalization changes content and permissions, not the fundamental interaction grammar.
+
+#### UI work not yet decided
+
+Do **not** prematurely lock color palette, icon set, animation style or visual branding. First lock information architecture, interaction states, senior readability requirements and personal dashboard priorities. Then create visual mockups.
+
+## 14. Recommended parallel execution from this checkpoint
+
+Two streams can proceed at the same time:
+
+```text
+STREAM 1
+Track A + Track B
+v4 data pipeline + evaluation infrastructure
+        ↓
+tiny end-to-end smoke test
+        ↓
+scaled v4 experiment
+
+STREAM 2
+Track C
+product information architecture
+        ↓
+grandmother home mockup
+personal home mockup
+shared listening/thinking/result mockups
+
+STREAM 1 + STREAM 2
+        ↓
+Android integration / Fold4 shadow testing
+        ↓
+real household benchmark
+        ↓
+model + UX iteration
+```
+
+The test UI and final product UI are different artifacts. Test tooling may expose scores, thresholds, labels, CPU/RAM and event clips. Final product UI should hide that complexity.
+
+## 15. Immediate next actions
+
+1. **Update completed:** this handoff now captures the three-track plan and product UX direction.
+2. Build Track B foundations: manifest/schema, deterministic split/leakage checks, audio QC and reusable evaluator/report structure.
+3. In parallel, define Track C information architecture for grandmother and personal home states before visual styling.
+4. Build a tiny TTS smoke corpus using only approved sources and run QC end-to-end.
+5. Do not launch a large v4 training job until the smoke corpus and evaluation infrastructure pass.
+
+## 16. Do not repeat
 
 - Do not integrate v2/v3 just because ONNX export succeeded.
 - Do not confuse pipeline success with model quality.
 - Do not threshold-tune v3: useful recall costs ~310 FPPH.
 - Do not assume more steps solve a data-domain problem.
 - Do not treat rate/pitch variants of one synthetic voice as real speaker diversity.
+- Do not generate a huge synthetic corpus before split/leakage/audio/pronunciation QC exists.
+- Do not let train/test share derivatives of the same base audio.
+- Do not evaluate only on voices/engines seen during training.
+- Do not let public-domain literature dominate modern conversational negatives.
 - Do not select hardware before sustained Fold4 measurements.
 - Do not count virtual RAM as real RAM.
-- Do not interpret legacy GRANDMA/PERSONAL labels as separate products.
+- Do not interpret grandmother/personal presentation as separate products.
+- Do not make the senior UI dense or menu-heavy.
 - Do not spawn fresh Claude CLI per request.
 - Do not rely on chat memory when Git differs.
 
-## 12. Immediate restart instruction
+## 17. Immediate restart instruction
 
-> Open `hansoullee20/ops-console-demo`, branch `aihub-voice-test`, and read `AIHUB_HANDOFF.md`. v3 Korean-only LiveKit diagnostic is complete and failed quality criteria: Recall 4.69% / FPPH 0 at threshold .50; at threshold .06 Recall 85.35% but FPPH 310.03. Do not integrate v2/v3. Continue by testing genuinely diverse Korean positive data and broad real-speech negatives, while keeping Android SpeechRecognizer as control/fallback.
+> Open `hansoullee20/ops-console-demo`, branch `aihub-voice-test`, and read `AIHUB_HANDOFF.md` first. v3 failed as a deployable wake model. Current work is three parallel tracks: (A) v4 diverse synthetic/real-data wakeword work, (B) reusable test/evaluation infrastructure, and (C) final Okja UI/UX with an ultra-simple large-type senior presentation and a richer personal lifestyle dashboard. Build test infrastructure + tiny smoke corpus before large v4 training, while designing product information architecture in parallel. Preserve Android SpeechRecognizer as the working control/fallback.
