@@ -7,7 +7,7 @@ corpus generation.
 
 Supported smoke engines:
 - kokoro: English only, Apache-2.0 upstream model
-- chatterbox: Korean multilingual source, MIT upstream model
+- chatterbox: Korean/English multilingual, MIT upstream model
 
 Do not treat this corpus as training data until pronunciation has been reviewed.
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import importlib.metadata
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +24,7 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 TARGET_SR = 16000
+SMOKE_SEED = 20260812
 
 KOKORO_ITEMS = [
     ("en", "positive", "Okja", "Okja"),
@@ -38,21 +39,6 @@ CHATTERBOX_ITEMS = [
     ("ko", "negative", "오늘 저녁은 뭐 먹을까?", ""),
     ("ko", "hard_negative", "옥수수 좀 사 와.", ""),
 ]
-
-
-def package_version(name: str) -> str:
-    try:
-        return importlib.metadata.version(name)
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def mono_16k(audio: np.ndarray, sr: int) -> np.ndarray:
@@ -70,13 +56,21 @@ def mono_16k(audio: np.ndarray, sr: int) -> np.ndarray:
     return x.astype(np.float32)
 
 
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def write_manifest(path: Path, rows: list[dict]) -> None:
     fields = [
-        "clip_id", "audio_path", "language", "label", "wake_variant", "text",
-        "script_id", "source_id", "source_license", "tts_engine",
-        "tts_engine_version", "voice_id", "base_audio_id", "augmentation_id",
-        "holdout_role", "split", "sample_rate_hz", "channels", "duration_ms",
-        "file_sha256", "qc_status", "pronunciation_status", "created_by",
+        "clip_id", "audio_path", "audio_sha256", "language", "label", "wake_variant", "text",
+        "script_id", "source_id", "source_license", "tts_engine", "tts_engine_version",
+        "voice_id", "generation_seed", "base_audio_id", "augmentation_id", "holdout_role", "split",
+        "sample_rate_hz", "channels", "duration_ms", "qc_status",
+        "pronunciation_status", "created_by",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -85,27 +79,28 @@ def write_manifest(path: Path, rows: list[dict]) -> None:
 
 
 def add_row(rows: list[dict], outdir: Path, engine: str, engine_version: str,
-            license_name: str, source_id: str, voice: str, idx: int,
-            language: str, label: str, text: str, wake_variant: str,
-            audio: np.ndarray, sr: int) -> None:
+            license_name: str, voice: str, idx: int, language: str, label: str,
+            text: str, wake_variant: str, audio: np.ndarray, sr: int) -> None:
     clip_id = f"smoke_{engine}_{idx:02d}"
     rel = f"audio/{clip_id}.wav"
-    wav_path = outdir / rel
     normalized = mono_16k(audio, sr)
-    sf.write(wav_path, normalized, TARGET_SR, subtype="PCM_16")
+    audio_path = outdir / rel
+    sf.write(audio_path, normalized, TARGET_SR, subtype="PCM_16")
     rows.append({
         "clip_id": clip_id,
         "audio_path": rel,
+        "audio_sha256": sha256_file(audio_path),
         "language": language,
         "label": label,
         "wake_variant": wake_variant,
         "text": text,
         "script_id": f"smoke_script_{engine}_{idx:02d}",
-        "source_id": source_id,
+        "source_id": "kokoro_82m" if engine == "kokoro" else "chatterbox_multilingual",
         "source_license": license_name,
         "tts_engine": engine,
         "tts_engine_version": engine_version,
         "voice_id": voice,
+        "generation_seed": SMOKE_SEED,
         "base_audio_id": clip_id,
         "augmentation_id": "none",
         "holdout_role": "",
@@ -113,7 +108,6 @@ def add_row(rows: list[dict], outdir: Path, engine: str, engine_version: str,
         "sample_rate_hz": TARGET_SR,
         "channels": 1,
         "duration_ms": int(round(len(normalized) * 1000 / TARGET_SR)),
-        "file_sha256": sha256_file(wav_path),
         "qc_status": "pending",
         "pronunciation_status": "not_reviewed",
         "created_by": "v4_tts_smoke.py",
@@ -123,6 +117,7 @@ def add_row(rows: list[dict], outdir: Path, engine: str, engine_version: str,
 def generate_kokoro(outdir: Path, rows: list[dict]) -> None:
     from kokoro import KPipeline
 
+    np.random.seed(SMOKE_SEED)
     engine_version = package_version("kokoro")
     voice = "af_heart"
     pipeline = KPipeline(lang_code="a")
@@ -133,29 +128,25 @@ def generate_kokoro(outdir: Path, rows: list[dict]) -> None:
         if not chunks:
             raise RuntimeError(f"Kokoro produced no audio for: {text}")
         audio = np.concatenate(chunks)
-        add_row(rows, outdir, "kokoro", engine_version, "Apache-2.0",
-                "kokoro_82m", voice, idx, language, label, text,
-                wake_variant, audio, 24000)
+        add_row(rows, outdir, "kokoro", engine_version, "Apache-2.0", voice, idx,
+                language, label, text, wake_variant, audio, 24000)
 
 
 def generate_chatterbox(outdir: Path, rows: list[dict]) -> None:
     import torch
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
+    np.random.seed(SMOKE_SEED)
+    torch.manual_seed(SMOKE_SEED)
     engine_version = package_version("chatterbox-tts")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # PyPI chatterbox-tts 0.1.7 does not expose the newer t3_model argument.
-    # Pin that package in CI and use its default multilingual checkpoint for the
-    # smoke gate; a V3 source install can be evaluated separately after this
-    # reproducible baseline is green.
     model = ChatterboxMultilingualTTS.from_pretrained(device=device)
     voice = "default_unconditioned"
     for idx, (language, label, text, wake_variant) in enumerate(CHATTERBOX_ITEMS, 1):
         wav = model.generate(text, language_id=language)
         audio = wav.detach().cpu().numpy()
-        add_row(rows, outdir, "chatterbox", engine_version, "MIT",
-                "chatterbox_multilingual_pypi", voice, idx, language, label,
-                text, wake_variant, audio, int(model.sr))
+        add_row(rows, outdir, "chatterbox", engine_version, "MIT", voice, idx,
+                language, label, text, wake_variant, audio, int(model.sr))
 
 
 def main() -> None:
