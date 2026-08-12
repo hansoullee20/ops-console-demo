@@ -47,18 +47,27 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0' 'torchaudio==2.8.0'
           python -m pip install -e /tmp/MeloTTS
 
-          # Korean inference uses g2pkk. The bundled unidic-lite is enough for
-          # MeloTTS imports; downloading the separate ~526 MB full UniDic is
-          # unnecessary for this Korean benchmark.
+          # MeloTTS depends on both unidic and unidic-lite. The empty unidic
+          # package wins MeCab's import preference even when its 526 MB full
+          # dictionary was not downloaded. Remove that shim so MeCab falls
+          # back to the bundled unidic-lite dictionary.
+          python -m pip uninstall -y unidic
+
           python - <<'PY'
+          import os
           import pkg_resources
+          import unidic_lite
+          import MeCab
+          print('UNIDIC_LITE_DICDIR=', unidic_lite.DICDIR)
+          print('MECABRC_EXISTS=', os.path.exists(os.path.join(unidic_lite.DICDIR, 'mecabrc')))
+          MeCab.Tagger()
           from melo.api import TTS
           print('MeloTTS import OK')
           PY
 
           END=$(date +%s)
           echo "MELOTTS_INSTALL_SECONDS=$((END-START))" | tee melotts_install.txt
-          python -m pip show melotts torch torchaudio transformers g2pkk setuptools | tee -a melotts_install.txt
+          python -m pip show melotts torch torchaudio transformers g2pkk setuptools unidic-lite | tee -a melotts_install.txt
 
       - name: Run Korean wakeword TTS benchmark
         shell: bash
