@@ -24,11 +24,14 @@ class BenchmarkContractTests(unittest.TestCase):
             "room_id": "livingroom",
             "started_at": "2026-08-13T08:00:00+09:00",
             "duration_ms": 3600000,
+            "audio_filename": "20260813T080000Z__fold4-01__livingroom__livingroom-20260813-001.wav",
             "sample_rate_hz": 16000,
             "channels": 1,
             "audio_sha256": "a" * 64,
-            "firmware_version": "aihub-voice-test@abc123",
+            "firmware_version": "0.1.0",
+            "firmware_git_sha": "abcdef1",
             "app_version": "0.1.0",
+            "model_sha": "1234567",
             "consent_recorded": True,
             "retention_class": "benchmark_fixed",
             "training_eligible": False,
@@ -38,6 +41,9 @@ class BenchmarkContractTests(unittest.TestCase):
         broken = dict(row, training_eligible=True)
         with self.assertRaisesRegex(ValueError, "never be training eligible"):
             validate_session(broken)
+        bad_name = dict(row, audio_filename="capture.wav")
+        with self.assertRaisesRegex(ValueError, "must include device_id"):
+            validate_session(bad_name)
 
     def test_truth_and_detection_validate(self):
         truth = {
@@ -62,7 +68,7 @@ class BenchmarkContractTests(unittest.TestCase):
             "timestamp_ms": 1320.0,
             "model_name": "okja-v4",
             "model_version": "candidate-1",
-            "model_sha": "modelsha",
+            "model_sha": "abcdef1",
             "threshold": 0.5,
             "score": 0.81,
             "device_id": "fold4-01",
