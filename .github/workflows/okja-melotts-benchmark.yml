@@ -34,17 +34,36 @@ jobs:
           set -euxo pipefail
           echo 'numpy<2' > /tmp/constraints.txt
           export PIP_CONSTRAINT=/tmp/constraints.txt
-          python -m pip install --upgrade pip setuptools wheel
+
+          # MeloTTS/librosa 0.9.1 still imports pkg_resources. New setuptools
+          # releases no longer provide it, so keep the last compatible line.
+          python -m pip install --upgrade pip wheel 'setuptools<81'
+
           START=$(date +%s)
           git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git /tmp/MeloTTS
+
+          # This benchmark is CPU-only. Pre-install CPU wheels so pip does not
+          # download several GB of CUDA/NVIDIA packages on every Actions run.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0' 'torchaudio==2.8.0'
           python -m pip install -e /tmp/MeloTTS
-          python -m unidic download
+
+          # Korean inference uses g2pkk. The bundled unidic-lite is enough for
+          # MeloTTS imports; downloading the separate ~526 MB full UniDic is
+          # unnecessary for this Korean benchmark.
+          python - <<'PY'
+          import pkg_resources
+          from melo.api import TTS
+          print('MeloTTS import OK')
+          PY
+
           END=$(date +%s)
           echo "MELOTTS_INSTALL_SECONDS=$((END-START))" | tee melotts_install.txt
-          python -m pip show melotts torch transformers g2pkk | tee -a melotts_install.txt
+          python -m pip show melotts torch torchaudio transformers g2pkk setuptools | tee -a melotts_install.txt
 
       - name: Run Korean wakeword TTS benchmark
+        shell: bash
         run: |
+          set -o pipefail
           /usr/bin/time -v python aihub/wakeword/benchmark_melotts.py 2>&1 | tee melotts_benchmark.log
 
       - name: Show benchmark results
