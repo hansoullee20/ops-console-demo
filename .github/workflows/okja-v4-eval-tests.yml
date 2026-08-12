@@ -10,6 +10,8 @@ on:
       - 'aihub/wakeword/v4_benchmark_contract.py'
       - 'aihub/wakeword/v4_benchmark_schema.json'
       - 'aihub/wakeword/test_v4_benchmark_contract.py'
+      - 'aihub/wakeword/v4_ring_buffer_logger.py'
+      - 'aihub/wakeword/test_v4_ring_buffer_logger.py'
       - '.github/workflows/okja-v4-eval-tests.yml'
 
 permissions:
@@ -24,6 +26,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run evaluator and benchmark-contract unit tests
+      - name: Run evaluator, benchmark-contract, and ring-buffer unit tests
         working-directory: aihub/wakeword
-        run: python -m unittest -v test_v4_eval.py test_v4_benchmark_contract.py
+        run: python -m unittest -v test_v4_eval.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py
