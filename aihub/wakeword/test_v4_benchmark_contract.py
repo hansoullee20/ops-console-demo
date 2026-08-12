@@ -44,6 +44,12 @@ class BenchmarkContractTests(unittest.TestCase):
         bad_name = dict(row, audio_filename="capture.wav")
         with self.assertRaisesRegex(ValueError, "must include device_id"):
             validate_session(bad_name)
+        bad_timestamp = dict(row, started_at="2026-08-13T08:00:00")
+        with self.assertRaisesRegex(ValueError, "timezone offset"):
+            validate_session(bad_timestamp)
+        malformed_timestamp = dict(row, started_at="not-a-time")
+        with self.assertRaisesRegex(ValueError, "ISO-8601"):
+            validate_session(malformed_timestamp)
 
     def test_truth_and_detection_validate(self):
         truth = {

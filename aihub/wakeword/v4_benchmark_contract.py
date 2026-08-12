@@ -35,6 +35,16 @@ def _nonempty(row: dict[str, Any], fields: list[str], kind: str) -> None:
             raise ValueError(f"{kind}: {field} must be a non-empty string")
 
 
+def _validate_datetime(value: str, kind: str, field: str) -> None:
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"{kind}: {field} must be an ISO-8601 date-time") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{kind}: {field} must include a timezone offset")
+
+
 def validate_session(row: dict[str, Any]) -> None:
     kind = "session"
     required = [
@@ -52,6 +62,7 @@ def validate_session(row: dict[str, Any]) -> None:
     ], kind)
     if row["schema_version"] != SCHEMA_VERSION:
         raise ValueError(f"{kind}: schema_version must be {SCHEMA_VERSION}")
+    _validate_datetime(row["started_at"], kind, "started_at")
     if row["test_set"] not in TEST_SETS:
         raise ValueError(f"{kind}: invalid test_set {row['test_set']!r}")
     if not isinstance(row["duration_ms"], int) or row["duration_ms"] <= 0:
