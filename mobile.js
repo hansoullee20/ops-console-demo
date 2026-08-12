@@ -14,6 +14,11 @@
   var content=document.getElementById('sheetContent');
   var toast=document.getElementById('mobileToast');
 
+  function setPeriod(period){
+    document.querySelectorAll('[data-period]').forEach(function(button){button.classList.toggle('active',button.dataset.period===period)});
+    document.querySelectorAll('[data-period-view]').forEach(function(view){view.classList.toggle('active',view.dataset.periodView===period)});
+  }
+
   function esc(v){return String(v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[c]})}
   function go(name){
     screens.forEach(function(s){s.classList.toggle('active',s.dataset.screen===name)});
@@ -43,6 +48,8 @@
   }
   document.addEventListener('click',function(e){
     var nav=e.target.closest('[data-nav]');if(nav){go(nav.dataset.nav);return}
+    var period=e.target.closest('[data-period]');if(period){setPeriod(period.dataset.period);return}
+    var periodDay=e.target.closest('[data-period-day]');if(periodDay){setPeriod('day');window.scrollTo(0,0);return}
     var jump=e.target.closest('[data-go]');if(jump){go(jump.dataset.go);return}
     var person=e.target.closest('[data-person]');if(person){personSheet(person.dataset.person);return}
     var action=e.target.closest('[data-action]');if(action){actionSheet(action.dataset.action);return}
