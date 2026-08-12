@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           rm -rf _site
           mkdir -p _site
-          for f in index.html profile.css profile.js data-source.js import-ui.js demo-data.js mobile.html mobile.css mobile-period.css mobile.js .nojekyll; do
+          for f in index.html profile.css profile.js data-source.js import-ui.js demo-data.js mobile.html mobile.css mobile-period.css mobile-full.css mobile.js .nojekyll; do
             cp "$f" "_site/$f"
           done
           ls -la _site
@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find _site -type f | wc -l)" -eq 11
+          test "$(find _site -type f | wc -l)" -eq 12
           grep -q 'window.OPS_MODE="demo"' _site/index.html
           grep -q 'OPS_DEMO_SNAPSHOT' _site/demo-data.js
           if grep -rqiE 'ops_console\.db|PRIVATE KEY|OPS_TOKEN' _site; then
