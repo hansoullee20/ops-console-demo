@@ -47,15 +47,15 @@ jobs:
               (
                   '- [ ] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG  \n'
                   '  DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.\n',
-                  '- [x] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG  \n'
-                  '  DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.  \n'
+                  '- [x] **G2.3 Candidate ring-buffer logger exists** — P0 / AI-ENG\n'
+                  '  DoD: near-threshold/accepted candidate events save short diagnostic clips and scores without persisting all-day raw audio by default.\n'
                   '  Evidence: `aihub/wakeword/v4_ring_buffer_logger.py` + `test_v4_ring_buffer_logger.py`; evaluator CI run #7 / `31651625304` passed; Android `WakeDiagnosticRingBuffer.java` is wired into the live `AudioRecord` loop and accepted/near-threshold decision path by commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354`; pre-commit debug APK build passed in run `31652333689`.\n'
               ),
               (
                   '- [ ] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG  \n'
                   '  DoD: user can mark a missed activation and preserve the relevant buffered clip.\n',
-                  '- [x] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG  \n'
-                  '  DoD: user can mark a missed activation and preserve the relevant buffered clip.  \n'
+                  '- [x] **G2.4 Manual missed-wake capture exists** — P1 / AI-ENG\n'
+                  '  DoD: user can mark a missed activation and preserve the relevant buffered clip.\n'
                   '  Evidence: commit `e8ffd3978a42b767f01c7c0df5ebe6f6e563a354` adds the active-detector-only `방금 옥자를 놓쳤어 · 진단 저장` control backed by `markManualMiss()`; ring-buffer unit tests cover manual-miss persistence; run `31652333689` built and uploaded the wired debug APK artifact. Target-device behavioral validation remains a separate later gate.\n'
               ),
           ]
