@@ -121,6 +121,22 @@ def week_view(
     dates = _date_range(start_date, 7)
     attendance = _attendance_map(conn, dates)
     punches = _punch_map(conn, dates)
+    leave_conflicts_enabled = data_context(conn)["data_context"] == "operational"
+    for row in conn.execute(
+        """SELECT employee_id,start_date,end_date,leave_type FROM leave_requests
+            WHERE status='approved' AND leave_type!='half_day'
+              AND start_date<=? AND end_date>=?""", (dates[-1], dates[0])
+    ):
+        for iso in dates:
+            key = (row["employee_id"], iso)
+            if leave_conflicts_enabled and row["start_date"] <= iso <= row["end_date"] and punches.get(key):
+                view = dict(attendance.get(key) or {
+                    "employee_id": row["employee_id"], "work_date": iso,
+                    "status": "unknown",
+                })
+                view["review_flag"] = "leave_attendance_conflict"
+                view["review_note"] = "승인 휴가일에 활성 지문이 있습니다."
+                attendance[key] = view
     replacements = _replacement_map(conn, dates)
 
     people = []
@@ -252,7 +268,25 @@ def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, di
     Derived from the same rows the weekly view renders, so the two views agree.
     """
     prefix = f"{year:04d}-{month:02d}-"
+    days_in_month = [31, 29 if _leap(year) else 28, 31, 30, 31, 30,
+                     31, 31, 30, 31, 30, 31][month - 1]
     stats: dict[str, dict[str, int]] = {}
+
+    conflict_keys: set[tuple[int, str]] = set()
+    if data_context(conn)["data_context"] == "operational":
+        conflict_keys = {
+            (row["employee_id"], row["work_date"])
+            for row in conn.execute(
+                """SELECT DISTINCT p.employee_id,p.work_date
+                     FROM punch_events p
+                     JOIN leave_requests l ON l.employee_id=p.employee_id
+                      AND l.status='approved' AND l.leave_type!='half_day'
+                      AND p.work_date BETWEEN l.start_date AND l.end_date
+                    WHERE p.rolled_back_at IS NULL AND p.employee_id IS NOT NULL
+                      AND p.work_date LIKE ?""",
+                (prefix + "%",),
+            )
+        }
 
     def bump(iso: str, key: str) -> None:
         day = str(int(iso[8:10]))
@@ -260,22 +294,30 @@ def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, di
         stats[day][key] = stats[day].get(key, 0) + 1
 
     for row in conn.execute(
-        "SELECT work_date, status, review_flag FROM attendance_days WHERE work_date LIKE ?",
+        "SELECT employee_id, work_date, status, review_flag FROM attendance_days WHERE work_date LIKE ?",
         (prefix + "%",),
     ):
-        if row["review_flag"]:
+        if (row["employee_id"], row["work_date"]) in conflict_keys or row["review_flag"]:
             bump(row["work_date"], "issue")
         elif row["status"] in ("leave", "half_day"):
             bump(row["work_date"], "leave")
         elif row["status"] == "sick_leave":
             bump(row["work_date"], "sick")
 
+    month_start = f"{year:04d}-{month:02d}-01"
+    month_end = f"{year:04d}-{month:02d}-{days_in_month:02d}"
     for row in conn.execute(
-        "SELECT work_date FROM replacement_assignments "
-        "WHERE work_date LIKE ? AND status IN ('assigned', 'completed')",
-        (prefix + "%",),
+        """SELECT COALESCE(start_date,work_date) start_date,
+                  COALESCE(end_date,work_date) end_date
+             FROM replacement_assignments
+            WHERE COALESCE(start_date,work_date)<=?
+              AND COALESCE(end_date,work_date)>=?
+              AND status IN ('assigned','completed')""",
+        (month_end, month_start),
     ):
-        bump(row["work_date"], "replace")
+        start=max(row["start_date"],month_start);end=min(row["end_date"],month_end)
+        for iso in _date_range(start, (int(end[8:10])-int(start[8:10]))+1):
+            bump(iso, "replace")
 
     return {day: stats[day] for day in sorted(stats, key=int)}
 

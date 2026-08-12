@@ -890,7 +890,10 @@ def derive_attendance(
                     """INSERT INTO attendance_days(employee_id,work_date,status,source,review_flag,review_note)
                        VALUES(?,?,?,'manual',?,?)
                        ON CONFLICT(employee_id,work_date) DO UPDATE SET
-                         status=excluded.status,review_flag=excluded.review_flag,review_note=excluded.review_note""",
+                         status=excluded.status,
+                         actual_in_at=NULL,actual_out_at=NULL,worked_minutes=NULL,
+                         source='manual',review_flag=excluded.review_flag,
+                         review_note=excluded.review_note,last_import_run_id=NULL""",
                     (employee_id, work_date, status, flag,
                      "반차와 근무 기록을 확인해야 합니다." if flag else None),
                 )

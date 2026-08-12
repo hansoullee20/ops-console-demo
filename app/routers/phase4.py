@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from calendar import monthrange
 from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -33,14 +34,23 @@ def allowed():
 def iso(value): return value.isoformat() if value else None
 def write_error(exc): return HTTPException(409,str(exc))
 
+def month_bounds(month:str|None):
+    if not month:return None,None,None
+    try:
+        year,number=(int(part) for part in month.split("-"))
+        if number<1 or number>12:raise ValueError
+    except ValueError as exc:raise HTTPException(422,"month must be YYYY-MM") from exc
+    return f"{year:04d}-{number:02d}-01",f"{year:04d}-{number:02d}-{monthrange(year,number)[1]:02d}",year
+
 @router.get("/leave-operations")
-def leave_index(year:int|None=Query(default=None,ge=2000,le=2200)):
+def leave_index(year:int|None=Query(default=None,ge=2000,le=2200),month:str|None=None):
     conn=db.connect(config.DB_PATH,read_only=True)
     try:
-        balance_year=year or date.today().year
+        month_start,month_end,month_year=month_bounds(month)
+        balance_year=month_year or year or date.today().year
         employees=[dict(r) for r in conn.execute("SELECT id,employee_code,name,status,hire_date,end_date,zone FROM employees ORDER BY name,id")]
         return {
-            "leaves":leave.list_leave(conn,year),
+            "leaves":leave.list_leave(conn,year,month_start,month_end),
             "employees":employees,
             "balanceYear":balance_year,
             "balances":[leave.balance(conn,row["id"],balance_year) for row in employees],
@@ -86,9 +96,11 @@ def leave_cancel(leave_id:int,body:Reason):
     finally:conn.close()
 
 @router.get("/replacement-operations")
-def replacement_index():
+def replacement_index(month:str|None=None):
     conn=db.connect(config.DB_PATH,read_only=True)
-    try:return {"assignments":replacement.list_assignments(conn),"employees":[dict(r) for r in conn.execute("SELECT id,employee_code,name,status,hire_date,end_date,zone FROM employees ORDER BY name,id")]}
+    try:
+        month_start,month_end,_=month_bounds(month)
+        return {"assignments":replacement.list_assignments(conn,month_start,month_end),"employees":[dict(r) for r in conn.execute("SELECT id,employee_code,name,status,hire_date,end_date,zone FROM employees ORDER BY name,id")]}
     finally:conn.close()
 
 @router.post("/replacement-operations",status_code=201)

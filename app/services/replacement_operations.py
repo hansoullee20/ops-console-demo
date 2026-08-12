@@ -10,6 +10,12 @@ from app.services import work_calendar
 API_TO_DB = {"planned": "candidate", "confirmed": "assigned", "completed": "completed", "cancelled": "cancelled"}
 DB_TO_API = {value: key for key, value in API_TO_DB.items()}
 ACTIVE = ("candidate", "assigned", "completed")
+TRANSITIONS = {
+    "candidate": {"assigned", "cancelled"},
+    "assigned": {"completed", "cancelled"},
+    "completed": set(),
+    "cancelled": set(),
+}
 
 
 class ReplacementError(ValueError): pass
@@ -60,10 +66,13 @@ def _get(conn, assignment_id):
     return row
 
 
-def list_assignments(conn):
-    rows=conn.execute("""SELECT r.*,a.name absent_name,s.name substitute_name FROM replacement_assignments r
+def list_assignments(conn, month_start=None, month_end=None):
+    where = """WHERE COALESCE(r.start_date,r.work_date)<=?
+                 AND COALESCE(r.end_date,r.work_date)>=?""" if month_start and month_end else ""
+    params = (month_end, month_start) if where else ()
+    rows=conn.execute(f"""SELECT r.*,a.name absent_name,s.name substitute_name FROM replacement_assignments r
                          LEFT JOIN employees a ON a.id=r.absent_employee_id LEFT JOIN employees s ON s.id=r.substitute_employee_id
-                         ORDER BY COALESCE(r.start_date,r.work_date),r.id""").fetchall()
+                         {where} ORDER BY COALESCE(r.start_date,r.work_date),r.id""",params).fetchall()
     return [serialize(r) for r in rows]
 
 
@@ -74,6 +83,16 @@ def create_assignment(conn, *, absent_employee_id, replacement_employee_id, star
     substitute=_employee(conn,replacement_employee_id); _validate_employee(substitute,start_date,end_date)
     if absent_employee_id is not None: _employee(conn,absent_employee_id)
     if status not in API_TO_DB: raise ReplacementError("대체근무 상태가 올바르지 않습니다.")
+    if status != "planned":
+        raise ReplacementError("new replacement assignments must start as planned")
+    if leave_request_id is not None:
+        linked=conn.execute("SELECT * FROM leave_requests WHERE id=?",(leave_request_id,)).fetchone()
+        if linked is None:
+            raise ReplacementError("linked leave request was not found")
+        if absent_employee_id is None or linked["employee_id"] != absent_employee_id:
+            raise ReplacementError("linked leave must belong to the absent employee")
+        if linked["start_date"] > start_date or linked["end_date"] < end_date:
+            raise ReplacementError("replacement period must be covered by the linked leave")
     _assert_available(conn,replacement_employee_id,start_date,end_date)
     cursor=conn.execute("""INSERT INTO replacement_assignments
         (work_date,start_date,end_date,shift,zone,absent_employee_id,substitute_employee_id,leave_request_id,status,note,assigned_by,assigned_at)
@@ -86,13 +105,20 @@ def create_assignment(conn, *, absent_employee_id, replacement_employee_id, star
 
 def update_assignment(conn, assignment_id, changes, *, actor="operator", reason="대체근무 변경"):
     row=_get(conn,assignment_id); before=dict(row)
-    allowed={"absentEmployeeId":"absent_employee_id","replacementEmployeeId":"substitute_employee_id","startDate":"start_date","endDate":"end_date","zone":"zone","shift":"shift","note":"note","status":"status"}
+    if row["status"] in {"completed","cancelled"}:
+        raise ReplacementError("completed or cancelled assignments cannot be changed")
+    if "status" in changes:
+        raise ReplacementError("use the dedicated status action")
+    allowed={"absentEmployeeId":"absent_employee_id","replacementEmployeeId":"substitute_employee_id","startDate":"start_date","endDate":"end_date","zone":"zone","shift":"shift","note":"note"}
     values=dict(row)
     for key,column in allowed.items():
         if key in changes: values[column]=API_TO_DB.get(changes[key],changes[key]) if key=="status" else changes[key]
     start,end=values["start_date"] or values["work_date"],values["end_date"] or values["work_date"]
     if end<start: raise ReplacementError("종료일은 시작일보다 빠를 수 없습니다.")
+    absent=_employee(conn,values["absent_employee_id"]); _validate_employee(absent,start,end)
     substitute=_employee(conn,values["substitute_employee_id"]); _validate_employee(substitute,start,end)
+    if values["absent_employee_id"]==values["substitute_employee_id"]:
+        raise ReplacementError("absent and replacement employees must differ")
     _assert_available(conn,values["substitute_employee_id"],start,end,assignment_id)
     assignments=[]; params=[]
     for key,column in allowed.items():
@@ -107,6 +133,8 @@ def update_assignment(conn, assignment_id, changes, *, actor="operator", reason=
 
 def patch_checklist(conn, assignment_id, changes, *, actor="operator"):
     row=_get(conn,assignment_id); before=dict(row)
+    if row["status"] in {"completed","cancelled"}:
+        raise ReplacementError("completed or cancelled assignments cannot be changed")
     mapping={"keyReceived":"key_received","uniformReady":"uniform_ready","orientationDone":"orientation_done"}
     assignments=[]; params=[]
     for key,column in mapping.items():
@@ -122,6 +150,9 @@ def patch_checklist(conn, assignment_id, changes, *, actor="operator"):
 def set_status(conn, assignment_id, status, *, actor="operator", reason=None):
     if status not in API_TO_DB: raise ReplacementError("대체근무 상태가 올바르지 않습니다.")
     row=_get(conn,assignment_id); before=dict(row); now=_now()
+    target=API_TO_DB[status]
+    if target not in TRANSITIONS.get(row["status"],set()):
+        raise ReplacementError("this replacement status transition is not allowed")
     fields="status=?,updated_at=?"; params=[API_TO_DB[status],now]
     if status=="completed": fields+=",completed_at=?"; params.append(now)
     if status=="cancelled": fields+=",cancelled_at=?"; params.append(now)

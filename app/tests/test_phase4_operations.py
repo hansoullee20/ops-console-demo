@@ -217,3 +217,126 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     ).fetchone()
     assert tuple(upgraded)==("2026-08-10","2026-08-10","2026-08-10",0)
     assert migrate.run_migrations(database,backups_dir=backups).applied==[]
+
+
+def test_requested_correction_and_cancel_never_touch_attendance(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10")
+    leave.correct_leave(conn,row["id"],employee_id=a,leave_type="annual_leave",
+        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="date correction")
+    leave.cancel_leave(conn,row["id"],"request withdrawn")
+    assert conn.execute("SELECT COUNT(*) FROM attendance_days").fetchone()[0]==0
+    conn.commit()
+    with TestClient(create_app()) as client:
+        created=client.post("/api/v1/leave-operations",json={
+            "employeeId":a,"leaveType":"annual_leave","startDate":"2026-08-12",
+            "endDate":"2026-08-12","portion":"full"}).json()
+        assert client.put(f"/api/v1/leave-operations/{created['id']}",json={
+            "employeeId":a,"leaveType":"annual_leave","startDate":"2026-08-13",
+            "endDate":"2026-08-13","portion":"full","reason":"date correction"}).status_code==200
+        assert client.post(f"/api/v1/leave-operations/{created['id']}/cancel",
+                           json={"reason":"request withdrawn"}).status_code==200
+    assert conn.execute("SELECT COUNT(*) FROM attendance_days").fetchone()[0]==0
+
+
+def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
+        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="employee correction")
+    states={(r["employee_id"],r["work_date"]):r["status"] for r in conn.execute(
+        "SELECT employee_id,work_date,status FROM attendance_days")}
+    assert states=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
+
+
+def _insert_punch(conn,employee,date,key):
+    conn.execute("""INSERT INTO punch_events
+        (terminal_id,terminal_slot_code,employee_id,punch_at,work_date,punch_type,
+         raw_payload,source_filename,source_hash,dedupe_key)
+        VALUES('SC-1','001',?,?,?,'unknown','{}','fictional.xls','fictional-hash',?)""",
+        (employee,date+"T07:00:00",date,key))
+
+
+def test_confirmed_attendance_preserved_but_conflict_is_authoritative(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    _insert_punch(conn,a,"2026-08-10","confirmed-before")
+    conn.execute("""INSERT INTO attendance_days(employee_id,work_date,status,actual_in_at,
+        source,review_flag,confirmed_at,confirmed_by)
+        VALUES(?,'2026-08-10','late','2026-08-10T07:00:00','fingerprint',
+               'manual_review','2026-08-12T00:00:00.000Z','operator')""",(a,))
+    before=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    after=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
+    assert after==before
+    assert leave.list_leave(conn,month_start="2026-08-01",month_end="2026-08-31")[0]["finding"]=="leave_attendance_conflict"
+    view=__import__("app.services.ops",fromlist=["week_view"]).week_view(conn,"2026-08-10","2026-08-10")
+    employee=view["employees"][0]
+    assert employee["cells"][0]["issue"] is True
+
+
+def test_import_after_confirmed_leave_surfaces_conflict_without_overwrite(operational,tmp_path):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    conn.execute("UPDATE attendance_days SET status='late',review_flag='manual_review',confirmed_at='2026-08-12T00:00:00.000Z' WHERE employee_id=?",(a,))
+    before=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"confirmed.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
+    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);after=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
+    assert after==before
+    assert leave.list_leave(conn)[0]["finding"]=="leave_attendance_conflict"
+
+
+def test_rollback_leave_conflict_clears_fingerprint_times_and_owner(operational,tmp_path):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"rollback.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
+    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    xls_pipeline.rollback_import(p.import_run_id,"mapping correction",db_path=path)
+    conn=db.connect(path);attendance=conn.execute("""SELECT status,actual_in_at,actual_out_at,
+        source,review_flag,last_import_run_id FROM attendance_days""").fetchone()
+    assert tuple(attendance)==("leave",None,None,"manual",None,None)
+    assert conn.execute("SELECT COUNT(*) FROM punch_events WHERE rolled_back_at IS NULL").fetchone()[0]==0
+    leave.cancel_leave(conn,row["id"],"leave cancelled")
+    attendance=conn.execute("SELECT actual_in_at,actual_out_at,status FROM attendance_days").fetchone()
+    assert tuple(attendance)==(None,None,"unknown")
+
+
+def test_replacement_status_lifecycle_patch_and_link_validation(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-10",zone="Site A")
+    repl.set_status(conn,assignment["id"],"confirmed");repl.set_status(conn,assignment["id"],"completed")
+    with pytest.raises(repl.ReplacementError):repl.set_status(conn,assignment["id"],"planned")
+    with pytest.raises(repl.ReplacementError):repl.update_assignment(conn,assignment["id"],{"zone":"Site B"})
+    cancelled=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-11",end_date="2026-08-11",zone="Site A")
+    repl.set_status(conn,cancelled["id"],"cancelled")
+    with pytest.raises(repl.ReplacementError):repl.set_status(conn,cancelled["id"],"confirmed")
+    with TestClient(create_app()) as client:
+        assert client.post(f"/api/v1/replacement-operations/{assignment['id']}/status",
+                           json={"status":"planned"}).status_code==409
+        assert client.patch(f"/api/v1/replacement-operations/{assignment['id']}",
+                            json={"status":"planned"}).status_code==409
+
+
+def test_month_overlap_filters_and_multiday_replacement_stats(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    create(conn,a,start="2026-08-31",end="2026-09-02")
+    repl_row=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-12",zone="Site A")
+    repl.set_status(conn,repl_row["id"],"confirmed")
+    conn.commit()
+    with TestClient(create_app()) as client:
+        assert len(client.get("/api/v1/leave-operations?month=2026-08").json()["leaves"])==1
+        assert len(client.get("/api/v1/leave-operations?month=2026-09").json()["leaves"])==1
+        assert client.get("/api/v1/leave-operations?month=2026-09").json()["balanceYear"]==2026
+    from app.services import ops
+    stats=ops.month_stats(conn,2026,8)
+    assert [stats[str(day)]["replace"] for day in (10,11,12)]==[1,1,1]
+    week=ops.week_view(conn,"2026-08-10","2026-08-10")
+    worker=week["employees"][1]
+    assert [cell["type"] for cell in worker["cells"][:3]]==["replacement"]*3
