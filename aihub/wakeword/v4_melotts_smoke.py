@@ -27,6 +27,7 @@ SMOKE_SEED = 20260813
 PRE_SILENCE_MS = 350
 POST_SILENCE_MS = 550
 MELOTTS_CODE_COMMIT = "209145371cff8fc3bd60d7be902ea69cbdb7965a"
+MELOTTS_HF_REPO = "myshell-ai/MeloTTS-Korean"
 MELOTTS_MODEL_REVISION = "0207e5adfc90129a51b6b03d89be6d84360ed323"
 
 ITEMS = [
@@ -71,9 +72,10 @@ def write_manifest(path: Path, rows: list[dict]) -> None:
     fields = [
         "clip_id", "audio_path", "audio_sha256", "language", "label", "wake_variant", "text",
         "tts_input_text", "script_id", "source_id", "source_license", "tts_engine", "tts_engine_version",
-        "tts_code_commit", "model_revision", "voice_id", "generation_seed", "base_audio_id",
-        "augmentation_id", "holdout_role", "split", "pre_silence_ms", "post_silence_ms",
-        "sample_rate_hz", "channels", "duration_ms", "qc_status", "pronunciation_status", "created_by",
+        "tts_code_commit", "model_repo", "model_revision", "model_config_sha256", "model_checkpoint_sha256",
+        "voice_id", "generation_seed", "base_audio_id", "augmentation_id", "holdout_role", "split",
+        "pre_silence_ms", "post_silence_ms", "sample_rate_hz", "channels", "duration_ms", "qc_status",
+        "pronunciation_status", "created_by",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -83,6 +85,7 @@ def write_manifest(path: Path, rows: list[dict]) -> None:
 
 def main() -> None:
     import torch
+    from huggingface_hub import hf_hub_download
     from importlib.metadata import version as package_version
     from melo.api import TTS
 
@@ -95,7 +98,31 @@ def main() -> None:
     audio_dir.mkdir(parents=True, exist_ok=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    model = TTS(language="KR", device="cpu")
+    # Pin the *actual model files* to the declared Hugging Face revision. Passing
+    # explicit local paths prevents MeloTTS from silently resolving main/latest.
+    config_path = Path(hf_hub_download(
+        repo_id=MELOTTS_HF_REPO,
+        filename="config.json",
+        revision=MELOTTS_MODEL_REVISION,
+    ))
+    checkpoint_path = Path(hf_hub_download(
+        repo_id=MELOTTS_HF_REPO,
+        filename="checkpoint.pth",
+        revision=MELOTTS_MODEL_REVISION,
+    ))
+    config_sha256 = sha256_file(config_path)
+    checkpoint_sha256 = sha256_file(checkpoint_path)
+    print(f"MeloTTS model repo: {MELOTTS_HF_REPO}")
+    print(f"MeloTTS model revision: {MELOTTS_MODEL_REVISION}")
+    print(f"config sha256: {config_sha256}")
+    print(f"checkpoint sha256: {checkpoint_sha256}")
+
+    model = TTS(
+        language="KR",
+        device="cpu",
+        config_path=str(config_path),
+        ckpt_path=str(checkpoint_path),
+    )
     speaker_ids = model.hps.data.spk2id
     if "KR" not in speaker_ids:
         raise RuntimeError(f"MeloTTS Korean speaker id not found: {speaker_ids}")
@@ -128,7 +155,10 @@ def main() -> None:
             "tts_engine": "melotts",
             "tts_engine_version": engine_version,
             "tts_code_commit": MELOTTS_CODE_COMMIT,
+            "model_repo": MELOTTS_HF_REPO,
             "model_revision": MELOTTS_MODEL_REVISION,
+            "model_config_sha256": config_sha256,
+            "model_checkpoint_sha256": checkpoint_sha256,
             "voice_id": voice_id,
             "generation_seed": SMOKE_SEED,
             "base_audio_id": clip_id,
