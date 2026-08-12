@@ -32,6 +32,33 @@ sources:
       - "Official voice inventory lists multiple American and British English voices."
       - "Keep complete voice IDs held out from training for generalization tests."
 
+  - id: melotts_korean
+    type: tts_model
+    name: "MyShell MeloTTS Korean"
+    status: "approved_for_initial_v4_data"
+    upstream_code: "https://github.com/myshell-ai/MeloTTS"
+    code_commit: "209145371cff8fc3bd60d7be902ea69cbdb7965a"
+    upstream_model: "https://huggingface.co/myshell-ai/MeloTTS-Korean"
+    model_revision: "0207e5adfc90129a51b6b03d89be6d84360ed323"
+    model_config_sha256: "74543376976dfadde45ba34336fa79c7e95509f43a7c2e701b22c0f71fd7695c"
+    model_checkpoint_sha256: "48e3ff3fd0b5348e095f0468e60ae727507564100f58142ef3a922ead6e0a4d0"
+    generator_commit: "2a5ae9fa4b85ead0aff5333bc06c3c7b6edc6580"
+    smoke_workflow_commit: "1603fa49faddeaefd5181951bc772c73e28412b6"
+    smoke_run_id: 31615755020
+    code_license: "MIT"
+    model_license: "MIT"
+    verified_roles: ["korean_engine_holdout", "korean_positive_initial", "korean_negative_initial"]
+    languages: ["ko"]
+    human_qc_record: "aihub/wakeword/V4_MELOTTS_HUMAN_QC.md"
+    reason: "Independent Korean engine approved for initial v4 data after a clean pinned smoke and human listening review. Reviewer judged the four smoke clips substantially more natural than Chatterbox and suitable for initial data, while noting a voice-actor-like delivery. This is not a production-voice-quality approval."
+    notes:
+      - "Official MeloTTS install docs target Ubuntu 20.04 and Python 3.9."
+      - "Korean frontend has MeCab dependency complexity; keep candidate workflow isolated from the stable smoke workflow."
+      - "Single Korean speaker means this is useful as an engine holdout, not as a speaker-diversity solution."
+      - "Run 31615755020 produced 4/4 automated-QC-passing clips, all explicitly assigned to test_engine."
+      - "Generator downloads config.json and checkpoint.pth from the exact declared Hugging Face revision and records their SHA-256 digests per clip."
+      - "2026-08-13 human review reported no blocking issue for initial-data use across the four smoke clips; larger-scale batches still require spot QC and pronunciation quarantine."
+
   - id: okja_original_scripts
     type: text
     name: "Original Okja conversational scripts"
@@ -44,31 +71,6 @@ sources:
       - "Avoids unnecessary third-party text copyright dependencies."
 
 conditional_sources:
-  - id: melotts_korean
-    type: tts_model
-    name: "MyShell MeloTTS Korean"
-    status: "candidate_smoke_passed_pending_human_qc"
-    upstream_code: "https://github.com/myshell-ai/MeloTTS"
-    code_commit: "209145371cff8fc3bd60d7be902ea69cbdb7965a"
-    upstream_model: "https://huggingface.co/myshell-ai/MeloTTS-Korean"
-    model_revision: "0207e5adfc90129a51b6b03d89be6d84360ed323"
-    model_config_sha256: "74543376976dfadde45ba34336fa79c7e95509f43a7c2e701b22c0f71fd7695c"
-    model_checkpoint_sha256: "48e3ff3fd0b5348e095f0468e60ae727507564100f58142ef3a922ead6e0a4d0"
-    generator_commit: "2a5ae9fa4b85ead0aff5333bc06c3c7b6edc6580"
-    smoke_workflow_commit: "1603fa49faddeaefd5181951bc772c73e28412b6"
-    smoke_run_id: 31615755020
-    code_license: "MIT"
-    model_license: "MIT"
-    languages: ["ko"]
-    intended_role: ["korean_engine_holdout", "korean_positive_candidate", "korean_negative_candidate"]
-    reason: "Independent Korean engine candidate added because Chatterbox naturalness is insufficient. Clean pinned smoke now passes automated generation/QC/leakage; approval still requires human pronunciation and naturalness review."
-    notes:
-      - "Official MeloTTS install docs target Ubuntu 20.04 and Python 3.9."
-      - "Korean frontend has MeCab dependency complexity; keep candidate workflow isolated from the stable smoke workflow."
-      - "Single Korean speaker means this is useful as an engine holdout, not as a speaker-diversity solution."
-      - "Run 31615755020 produced 4/4 automated-QC-passing clips, all explicitly assigned to test_engine."
-      - "Generator downloads config.json and checkpoint.pth from the exact declared Hugging Face revision and records their SHA-256 digests per clip."
-
   - id: project_gutenberg
     type: text
     status: "conditional"
