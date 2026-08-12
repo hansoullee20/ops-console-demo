@@ -355,3 +355,66 @@ def test_import_ui_is_served_and_the_buttons_are_wired(client):
     assert "OPS_OPEN_IMPORT()" in html
     assert "OPS_OPEN_IMPORT_HISTORY()" in html
     assert './import-ui.js' in html
+
+
+# ---------------------------------------------------------------------------
+# "no new punches" over HTTP: the same two situations, through the real path
+# an operator uses.
+# ---------------------------------------------------------------------------
+def test_an_already_active_reimport_is_refused_over_http(client, export: Path, operational_db: Path):
+    preview = _upload(client, export).json()
+    client.post(f"{ENDPOINT}/{preview['importRunId']}/apply",
+                json={"confirmationToken": preview["confirmationToken"]})
+
+    second = _upload(client, export).json()
+    assert second["newPunches"] == 0
+    assert second["reactivatablePunches"] == 0
+    assert second["canApply"] is False
+
+    refused = client.post(
+        f"{ENDPOINT}/{second['importRunId']}/apply",
+        json={"confirmationToken": second["confirmationToken"]},
+    )
+    assert refused.status_code == 409
+    assert "nothing to apply" in refused.json()["detail"]
+
+    statuses = [r["status"] for r in client.get(ENDPOINT).json()]
+    assert statuses.count("applied") == 1, "a refused apply must not appear as an import"
+
+
+def test_a_rolled_back_source_can_be_reapplied_over_http(client, export: Path, operational_db: Path):
+    """The whole rollback -> re-apply -> roll back again loop, over the API."""
+    first = _upload(client, export).json()
+    run_id = first["importRunId"]
+    client.post(f"{ENDPOINT}/{run_id}/apply",
+                json={"confirmationToken": first["confirmationToken"]})
+    client.post(f"{ENDPOINT}/{run_id}/rollback", json={"reason": "잘못된 파일"})
+
+    second = _upload(client, export).json()
+    assert second["newPunches"] == 0
+    assert second["reactivatablePunches"] > 0
+    assert second["canApply"] is True
+
+    applied = client.post(
+        f"{ENDPOINT}/{second['importRunId']}/apply",
+        json={"confirmationToken": second["confirmationToken"]},
+    )
+    assert applied.status_code == 200
+    body = applied.json()
+    assert body["inserted"] == 0
+    assert body["reactivated"] == second["reactivatablePunches"]
+    assert body["attendanceRows"] > 0
+
+    undo = client.post(f"{ENDPOINT}/{second['importRunId']}/rollback",
+                       json={"reason": "다시 취소"}).json()
+    assert undo["punchesMarkedRolledBack"] == second["reactivatablePunches"]
+    assert undo["punchesDeleted"] == 0
+
+    conn = db.connect(operational_db)
+    try:
+        assert not conn.execute(
+            "SELECT 1 FROM attendance_days WHERE status = 'normal'"
+            "   AND last_import_run_id = ?", (second["importRunId"],)
+        ).fetchone(), "no attendance may survive a rollback of the run that revived it"
+    finally:
+        conn.close()

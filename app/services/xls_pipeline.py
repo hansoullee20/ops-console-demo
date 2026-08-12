@@ -101,6 +101,10 @@ class ImportPreview:
     findings: list[dict] = field(default_factory=list)
     new_punches: int = 0
     already_imported: int = 0
+    # Punches this file would bring back: the same raw events, currently marked
+    # rolled_back. Re-applying a rolled-back source is a legitimate operation
+    # (§E) and it inserts nothing, so "no new punches" cannot mean "no work".
+    reactivatable_punches: int = 0
     zero_punch_dates: list[str] = field(default_factory=list)
     covered_dates: list[str] = field(default_factory=list)
 
@@ -119,11 +123,23 @@ class ImportPreview:
             "findings": self.findings,
             "newPunches": self.new_punches,
             "alreadyImported": self.already_imported,
+            "reactivatablePunches": self.reactivatable_punches,
             "zeroPunchDates": self.zero_punch_dates,
             "coveredDates": self.covered_dates,
             "previewFingerprint": self.preview_fingerprint,
-            "canApply": not self.blocking and self.new_punches > 0,
+            "canApply": self.can_apply,
         }
+
+    @property
+    def can_apply(self) -> bool:
+        """Is there anything for an apply to do?
+
+        A file whose punches are all present and active is a no-op: applying it
+        would produce an 'applied' run that changed nothing. A file whose
+        punches were rolled back inserts nothing either, but reactivating them
+        is real work, so it must stay allowed.
+        """
+        return not self.blocking and (self.new_punches + self.reactivatable_punches) > 0
 
 
 def _now() -> str:
@@ -209,7 +225,11 @@ def _resolve_slot(
 # preview
 # ---------------------------------------------------------------------------
 def _preview_fingerprint(
-    digest: str, slot_rows: list[dict], new_punches: int, findings: list[dict]
+    digest: str,
+    slot_rows: list[dict],
+    new_punches: int,
+    findings: list[dict],
+    reactivatable: int = 0,
 ) -> str:
     """A digest of what the operator actually reviewed.
 
@@ -230,6 +250,9 @@ def _preview_fingerprint(
                 for row in slot_rows
             ],
             "newPunches": new_punches,
+            # Part of the reviewed state: if rolled-back events came back
+            # between the review and the apply, this is not what was agreed.
+            "reactivatablePunches": reactivatable,
             "findings": sorted(
                 json.dumps(f, ensure_ascii=False, sort_keys=True) for f in findings
             ),
@@ -332,16 +355,19 @@ def _build_preview(
     threshold_minutes: int,
 ) -> ImportPreview:
     intervals = _slot_intervals(conn)
+    # key -> is this event currently rolled back? The three states are
+    # different work: absent = insert, rolled back = reactivate, active = no-op.
     existing = {
-        row[0]
+        row["dedupe_key"]: row["rolled_back_at"] is not None
         for row in conn.execute(
-            "SELECT dedupe_key FROM punch_events WHERE dedupe_key IS NOT NULL"
+            "SELECT dedupe_key, rolled_back_at FROM punch_events "
+            " WHERE dedupe_key IS NOT NULL"
         )
     }
 
     findings: list[Finding] = []
     slot_rows: list[dict] = []
-    new_punches = already = 0
+    new_punches = already = reactivatable = 0
 
     by_slot_day: dict[tuple[str, str], list] = {}
     for punch in parsed.punches:
@@ -409,10 +435,13 @@ def _build_preview(
         review = punch_review.review_day(times, threshold_minutes)
 
         for punch in punches:
-            if dedupe_key(TERMINAL_ID, punch) in existing:
-                already += 1
-            else:
+            key = dedupe_key(TERMINAL_ID, punch)
+            if key not in existing:
                 new_punches += 1
+            elif existing[key]:
+                reactivatable += 1
+            else:
+                already += 1
 
         if review["has_repeated_candidate"]:
             findings.append(Finding(
@@ -468,7 +497,9 @@ def _build_preview(
         ))
 
     finding_dicts = [f.as_dict() for f in findings]
-    fingerprint = _preview_fingerprint(digest, slot_rows, new_punches, finding_dicts)
+    fingerprint = _preview_fingerprint(
+        digest, slot_rows, new_punches, finding_dicts, reactivatable
+    )
     token = _confirmation_token(run_id, digest, fingerprint, secrets.token_urlsafe(16))
 
     return ImportPreview(
@@ -484,6 +515,7 @@ def _build_preview(
         findings=finding_dicts,
         new_punches=new_punches,
         already_imported=already,
+        reactivatable_punches=reactivatable,
         zero_punch_dates=zero_dates,
         covered_dates=parsed.covered_dates,
     )
@@ -555,6 +587,21 @@ def apply_import(
             raise ImportError_(
                 "the slot mapping or file changed after this preview was reviewed; "
                 "run the preview again before applying"
+            )
+        # Nothing to do is not the same as a rolled-back source. Both insert no
+        # rows, but one of them has events to bring back (§E) and the other
+        # would produce an 'applied' run that changed nothing — a record of work
+        # that never happened. Enforced here, not only in the UI, because the
+        # UI is one caller of this function.
+        if not current.can_apply:
+            if current.blocking:
+                raise ImportError_(
+                    "this preview has blocking findings; resolve them before applying"
+                )
+            raise ImportError_(
+                "nothing to apply: every punch in this file is already imported "
+                "and active. Roll the earlier import back first if you meant to "
+                "redo it."
             )
     finally:
         conn.close()

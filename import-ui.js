@@ -220,6 +220,12 @@
         '<div class="k">새 기록</div><div><b>' + p.newPunches + '</b>건' +
           (p.alreadyImported ? ' <span class="sub">· 이미 가져온 기록 ' + p.alreadyImported + '건</span>' : '') +
           '</div>' +
+        // A rolled-back file inserts nothing but still has work to do. Saying
+        // so is the difference between "적용할 수 없습니다" and "되살립니다".
+        (p.reactivatablePunches
+          ? '<div class="k">되살릴 기록</div><div><b>' + p.reactivatablePunches + '</b>건' +
+            ' <span class="sub">이전에 되돌린 기록입니다. 새로 넣지 않고 그대로 되살립니다.</span></div>'
+          : '') +
         '<div class="k">사용 슬롯</div><div>' + slots.length + '개' +
           (unmapped ? ' <span class="tag amber">직원 미연결 ' + unmapped + '</span>' : '') + '</div>' +
         '<div class="k">확인 필요</div><div>' + review + '건' +
@@ -253,13 +259,21 @@
     var foot;
     if (!p.canApply) {
       body += '<div class="alert" style="margin-top:14px"><b>적용할 수 없습니다.</b><br>' +
-        (blocking ? '차단 항목을 먼저 해결해야 합니다.' : '새로 가져올 기록이 없습니다.') + '</div>';
+        (blocking
+          ? '차단 항목을 먼저 해결해야 합니다.'
+          : '이 파일의 기록은 모두 이미 반영되어 있습니다. 다시 가져올 필요가 없습니다.') +
+        '</div>';
       foot = '<button class="btn" onclick="closeDrawer()">닫기</button>';
     } else {
       body += '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:16px">' +
         '<input type="checkbox" id="importConfirm" style="margin-top:3px">' +
-        '<span>위 내용을 확인했으며, 이 파일의 기록 <b>' + p.newPunches + '건</b>을 ' +
-        '근태 데이터에 반영합니다.</span></label>';
+        '<span>위 내용을 확인했으며, 이 파일의 기록 <b>' +
+        (p.newPunches + (p.reactivatablePunches || 0)) + '건</b>을 ' +
+        '근태 데이터에 반영합니다.' +
+        (p.reactivatablePunches
+          ? ' (새로 ' + p.newPunches + '건, 되살림 ' + p.reactivatablePunches + '건)'
+          : '') +
+        '</span></label>';
       foot = '<button class="btn" onclick="closeDrawer()">취소</button>' +
         '<button class="btn primary" onclick="OPS_IMPORT_APPLY()">적용</button>';
     }

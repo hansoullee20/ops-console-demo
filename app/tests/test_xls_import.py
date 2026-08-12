@@ -287,18 +287,30 @@ def test_apply_snapshots_records_and_derives(export, seeded, tmp_path):
 
 
 def test_reimport_is_idempotent(export, seeded, tmp_path):
+    """The same file twice adds nothing — and is refused rather than recorded.
+
+    An 'applied' run that changed nothing is a record of work that never
+    happened; the history would show two imports of one month.
+    """
     first = _preview(export, seeded, tmp_path)
     _apply(first, seeded, tmp_path)
     with db.connection(seeded) as conn:
         after_first = conn.execute("SELECT COUNT(*) FROM punch_events").fetchone()[0]
 
     second = _preview(export, seeded, tmp_path)
-    assert second.already_imported == 29 and second.new_punches == 0
-    result = _apply(second, seeded, tmp_path)
-    assert result["inserted"] == 0 and result["alreadyPresent"] == 29
+    assert second.already_imported == 29
+    assert second.new_punches == 0
+    assert second.reactivatable_punches == 0
+    assert second.can_apply is False
+
+    with pytest.raises(xls_pipeline.ImportError_, match="nothing to apply"):
+        _apply(second, seeded, tmp_path)
 
     with db.connection(seeded) as conn:
         assert conn.execute("SELECT COUNT(*) FROM punch_events").fetchone()[0] == after_first
+        assert conn.execute(
+            "SELECT status FROM import_runs WHERE id = ?", (second.import_run_id,)
+        ).fetchone()[0] == "previewed", "a refused apply must not become an applied run"
 
 
 def test_repeated_punch_candidates_are_flagged_not_merged(export, seeded, tmp_path):
@@ -834,8 +846,9 @@ def test_reimporting_the_same_file_does_not_take_over_the_attendance_row(seeded,
     _apply(first, seeded, tmp_path)
 
     second = _preview(export, seeded, tmp_path)
-    assert second.new_punches == 0
-    _apply(second, seeded, tmp_path)
+    assert second.new_punches == 0 and second.reactivatable_punches == 0
+    with pytest.raises(xls_pipeline.ImportError_, match="nothing to apply"):
+        _apply(second, seeded, tmp_path)
 
     with db.connection(seeded) as conn:
         owner = conn.execute(
@@ -1075,3 +1088,68 @@ def test_a_human_review_note_is_not_cleared_by_an_import(seeded, tmp_path):
         assert conn.execute(
             "SELECT review_flag FROM attendance_days WHERE work_date = '2026-07-01'"
         ).fetchone()[0] == "manager_checking"
+
+
+# ---------------------------------------------------------------------------
+# "no new punches" is two different situations
+#
+# Both insert nothing. One is a no-op that must be refused; the other is a
+# rolled-back source being brought back, which §E requires to work. Telling
+# them apart is the whole point of counting reactivatable punches.
+# ---------------------------------------------------------------------------
+def test_a_rolled_back_source_is_reactivatable_not_a_no_op(seeded, tmp_path):
+    export = _slot_export(tmp_path / "month.XLS", ["07:00", "16:00"])
+    first = _preview(export, seeded, tmp_path)
+    _apply(first, seeded, tmp_path)
+    xls_pipeline.rollback_import(first.import_run_id, "잘못 가져옴", db_path=seeded)
+
+    again = _preview(export, seeded, tmp_path)
+    assert again.new_punches == 0, "the same file inserts nothing"
+    assert again.reactivatable_punches == 2, "but it has events to bring back"
+    assert again.already_imported == 0
+    assert again.can_apply is True
+    assert again.as_dict()["reactivatablePunches"] == 2
+
+    result = _apply(again, seeded, tmp_path)
+    assert result["inserted"] == 0
+    assert result["reactivated"] == 2
+
+    with db.connection(seeded) as conn:
+        active = conn.execute(
+            "SELECT COUNT(*) FROM punch_events WHERE work_date = '2026-07-01'"
+            "   AND terminal_slot_code = '001' AND rolled_back_at IS NULL"
+        ).fetchone()[0]
+        row = conn.execute(
+            "SELECT status, last_import_run_id FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()
+    assert active == 2
+    assert row["status"] == "normal"
+    assert row["last_import_run_id"] == again.import_run_id, (
+        "the run that brought the evidence back owns the row, so it can undo it"
+    )
+
+    # ...and that run can be rolled back in its turn
+    undo = xls_pipeline.rollback_import(again.import_run_id, "다시 취소", db_path=seeded)
+    assert undo["punchesMarkedRolledBack"] == 2
+    assert undo["punchesDeleted"] == 0
+    with db.connection(seeded) as conn:
+        assert conn.execute(
+            "SELECT status FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()[0] == "unknown"
+
+
+def test_a_partly_rolled_back_source_counts_both_kinds(seeded, tmp_path):
+    """A file that both adds and revives is allowed, and says so."""
+    first = _slot_export(tmp_path / "one.XLS", ["07:00", "16:00"])
+    run = _preview(first, seeded, tmp_path)
+    _apply(run, seeded, tmp_path)
+    xls_pipeline.rollback_import(run.import_run_id, "취소", db_path=seeded)
+
+    bigger = _slot_export(tmp_path / "two.XLS", ["07:00", "12:00", "16:00"])
+    preview = _preview(bigger, seeded, tmp_path)
+    assert preview.new_punches == 1            # 12:00
+    assert preview.reactivatable_punches == 2  # 07:00, 16:00
+    assert preview.can_apply is True
+
+    result = _apply(preview, seeded, tmp_path)
+    assert (result["inserted"], result["reactivated"]) == (1, 2)
