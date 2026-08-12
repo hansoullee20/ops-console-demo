@@ -30,8 +30,10 @@ Two more properties of the real data shape the model here:
 
 * The same timestamp legitimately repeats inside one cell — the sample contains
   06:40 three times in a single day. Every occurrence is preserved and gets its
-  own sequence number, because §2.4 forbids dropping a punch for looking like a
-  duplicate.
+  own ordinal, because §2.4 forbids dropping a punch for looking like a
+  duplicate. The ordinal counts *repeats of that value*, not position in the
+  cell: a later re-export that adds a missing 06:50 must not renumber the
+  07:00 that was already imported.
 * There are no 출/외/퇴/복 markers anywhere in the workbook; the terminal emits
   bare times. Imported events therefore carry punch_type 'unknown' rather than
   a guess.
@@ -78,15 +80,21 @@ class ParsedPunch:
     """One punch *occurrence*, not one spreadsheet row.
 
     The export packs a whole day into a single cell, so several occurrences
-    share one row, column and cell address. `occurrence_index` distinguishes
-    them; the provenance fields point back at where they came from.
+    share one row, column and cell address. `cell_position` says where in that
+    cell this one sat; `occurrence_index` distinguishes genuine repeats of the
+    same time and is the part that belongs in the identity.
     """
 
     slot_code: str
     work_date: str          # ISO
     punch_time: str         # HH:MM
     punch_type: str         # this terminal emits none, so 'unknown'
-    occurrence_index: int   # 0-based position inside that day's cell
+    # How many punches with this exact value came before it on this day. It is
+    # 0 unless the same time repeats, and it is the only part of the identity
+    # that distinguishes those repeats. NOT the position in the cell — see
+    # migration 0006 for why that was wrong.
+    occurrence_index: int
+    cell_position: int      # 0-based position inside that day's cell; provenance only
     raw_cell: str
     source_sheet: str
     source_row: int         # 0-based row in the sheet
@@ -285,10 +293,15 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
                 continue
             days_with_punches += 1
             work_date = f"{year:04d}-{month:02d}-{day:02d}"
-            for occurrence, punch_time in enumerate(valid):
+            repeats: dict[str, int] = {}
+            for position, punch_time in enumerate(valid):
                 # Every occurrence is kept, including exact repeats of the same
                 # timestamp: the sample export has 06:40 three times in one day,
                 # and §2.4 forbids dropping a punch for looking duplicated.
+                # The ordinal counts repeats of this value only, so inserting an
+                # earlier punch in a later re-export does not renumber the rest.
+                occurrence = repeats.get(punch_time, 0)
+                repeats[punch_time] = occurrence + 1
                 result.punches.append(
                     ParsedPunch(
                         slot_code=slot_code,
@@ -296,6 +309,7 @@ def parse_workbook(path: Path | str, *, source_filename: str | None = None) -> P
                         punch_time=punch_time,
                         punch_type="unknown",
                         occurrence_index=occurrence,
+                        cell_position=position,
                         raw_cell=raw,
                         source_sheet=RAW_SHEET_NAME,
                         source_row=index + 2,
@@ -321,9 +335,13 @@ def dedupe_key(terminal_id: str, punch: ParsedPunch) -> str:
 
     The ordinal is part of the key on purpose. Without it, a day containing the
     same timestamp twice collides on the unique index and one of the two raw
-    events is silently refused — 12 real punches in one sample month. The cell
-    address is deliberately NOT part of the key: it is provenance, and keying on
-    it would make a re-exported file with shifted rows look like new data.
+    events is silently refused — 12 real punches in one sample month.
+
+    It counts repeats of that value and nothing else. It used to be the punch's
+    position in the cell, which meant a re-export containing one extra earlier
+    punch renumbered every later punch and re-imported all of them as new
+    (migration 0006). Neither the cell address nor the row number belongs in the
+    key either: both are provenance, and both move when a file is re-exported.
     """
     return (
         f"{terminal_id}|{punch.slot_code}|{punch.work_date}"

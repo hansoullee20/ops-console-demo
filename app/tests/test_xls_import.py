@@ -81,7 +81,10 @@ def test_exact_repeated_timestamps_are_all_preserved(export: Path):
     parsed = parse_workbook(export)
     day = [p for p in parsed.punches if p.slot_code == "004" and p.work_date == "2026-07-01"]
     assert [p.punch_time for p in day] == ["06:40", "06:40", "06:40", "16:11"]
-    assert [p.occurrence_index for p in day] == [0, 1, 2, 3]
+    # the ordinal counts repeats of the value, so the lone 16:11 is also 0
+    assert [p.occurrence_index for p in day] == [0, 1, 2, 0]
+    # where each one sat in the cell is kept separately, as provenance
+    assert [p.cell_position for p in day] == [0, 1, 2, 3]
 
 
 def test_dedupe_key_includes_the_sequence(export: Path):
@@ -486,15 +489,16 @@ def test_punch_carries_provenance_separate_from_the_occurrence_ordinal(export, s
         rows = conn.execute(
             """
             SELECT punch_at, source_sheet, source_row_no, source_column, source_cell,
-                   occurrence_index
+                   occurrence_index, cell_position
               FROM punch_events
              WHERE terminal_slot_code = '004' AND work_date = '2026-07-01'
-             ORDER BY occurrence_index
+             ORDER BY cell_position
             """
         ).fetchall()
 
     assert len(rows) == 4
-    assert [r["occurrence_index"] for r in rows] == [0, 1, 2, 3]
+    assert [r["occurrence_index"] for r in rows] == [0, 1, 2, 0]
+    assert [r["cell_position"] for r in rows] == [0, 1, 2, 3]
     # all four came out of one cell, so provenance is shared while the ordinal differs
     assert len({r["source_cell"] for r in rows}) == 1
     assert all(r["source_sheet"] == "근태기록" for r in rows)
@@ -783,3 +787,291 @@ def test_the_service_functions_take_no_http_types():
             assert "Request" not in rendered and "UploadFile" not in rendered, (
                 f"{function.__name__}({name}) takes an HTTP type"
             )
+
+
+# ---------------------------------------------------------------------------
+# Regressions from the independent Phase 3 review. Each of these failed before
+# the fix, and each describes a way a real month goes wrong quietly.
+# ---------------------------------------------------------------------------
+def _slot_export(path: Path, times: list[str], slot: str = "001") -> Path:
+    return build_export(path, slots=[SlotSpec(slot, "가상민", {1: times})])
+
+
+def test_a_re_export_that_adds_an_earlier_punch_does_not_reimport_the_rest(seeded, tmp_path):
+    """The terminal drops a punch, someone fixes it, the month is exported again.
+
+    The added punch is earlier in the day, so it used to renumber every punch
+    after it and all of them came back as new. A month re-exported after a late
+    correction would have doubled.
+    """
+    first = _slot_export(tmp_path / "first.XLS", ["07:00", "16:00"])
+    _apply(_preview(first, seeded, tmp_path), seeded, tmp_path)
+
+    again = _slot_export(tmp_path / "again.XLS", ["06:50", "07:00", "16:00"])
+    preview = _preview(again, seeded, tmp_path)
+    assert preview.new_punches == 1, "only the recovered 06:50 is new"
+    assert preview.already_imported == 2
+
+    _apply(preview, seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        times = [
+            r[0][11:16] for r in conn.execute(
+                "SELECT punch_at FROM punch_events WHERE terminal_slot_code = '001'"
+                "   AND work_date = '2026-07-01' ORDER BY punch_at"
+            )
+        ]
+    assert times == ["06:50", "07:00", "16:00"], f"duplicated punches: {times}"
+
+
+def test_reimporting_the_same_file_does_not_take_over_the_attendance_row(seeded, tmp_path):
+    """A second run that inserts nothing must not become the row's owner.
+
+    It did, and then rolling back the run that *had* supplied the punches left
+    the day reading 정상 with every punch behind it rolled back.
+    """
+    export = _slot_export(tmp_path / "month.XLS", ["07:00", "16:00"])
+    first = _preview(export, seeded, tmp_path)
+    _apply(first, seeded, tmp_path)
+
+    second = _preview(export, seeded, tmp_path)
+    assert second.new_punches == 0
+    _apply(second, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        owner = conn.execute(
+            "SELECT last_import_run_id FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()[0]
+    assert owner == first.import_run_id, "the run that supplied the evidence still owns the row"
+
+    result = xls_pipeline.rollback_import(first.import_run_id, "잘못 가져옴", db_path=seeded)
+    assert result["conflicts"] == []
+
+    with db.connection(seeded) as conn:
+        row = conn.execute(
+            "SELECT status, review_flag FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()
+        active = conn.execute(
+            "SELECT COUNT(*) FROM punch_events WHERE terminal_slot_code = '001'"
+            "   AND work_date = '2026-07-01' AND rolled_back_at IS NULL"
+        ).fetchone()[0]
+    assert active == 0
+    assert row["status"] == "unknown", "정상 with no surviving punch is a fabricated record"
+    assert row["review_flag"] == "import_rolled_back"
+
+
+def test_rolling_back_the_run_that_reactivated_the_punches_undoes_them(seeded, tmp_path):
+    """Apply, roll back, re-apply, roll back again.
+
+    The re-apply reactivates the original events rather than duplicating them,
+    so the second rollback has to undo events it never inserted.
+    """
+    export = _slot_export(tmp_path / "month.XLS", ["07:00", "16:00"])
+    first = _preview(export, seeded, tmp_path)
+    _apply(first, seeded, tmp_path)
+    xls_pipeline.rollback_import(first.import_run_id, "오적용", db_path=seeded)
+
+    second = _preview(export, seeded, tmp_path)
+    again = _apply(second, seeded, tmp_path)
+    assert again["reactivated"] == 2 and again["inserted"] == 0
+
+    with db.connection(seeded) as conn:
+        assert conn.execute(
+            "SELECT status FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()[0] == "normal"
+
+    result = xls_pipeline.rollback_import(second.import_run_id, "다시 취소", db_path=seeded)
+    assert result["punchesMarkedRolledBack"] == 2, "the reactivating run owns those events"
+    assert result["punchesDeleted"] == 0
+
+    with db.connection(seeded) as conn:
+        assert conn.execute(
+            "SELECT status FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()[0] == "unknown"
+
+
+def test_punches_go_to_whoever_held_the_slot_on_that_date(migrated_db, tmp_path):
+    """A slot changes hands. July's punches belong to July's holder.
+
+    terminal_slots is date-scoped, and reading it as one row per slot handed a
+    departed employee's month to their successor.
+    """
+    conn = db.connect(migrated_db)
+    conn.execute("UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'")
+    conn.execute(
+        "INSERT INTO employees (employee_code, name, zone, hire_date, end_date, status) "
+        "VALUES ('E1', '전임자', '본관', '2024-01-01', '2026-07-31', 'terminated')"
+    )
+    conn.execute(
+        "INSERT INTO employees (employee_code, name, zone, hire_date, status) "
+        "VALUES ('E2', '후임자', '본관', '2026-08-01', 'active')"
+    )
+    conn.execute(
+        "INSERT INTO terminal_slots (slot_code, employee_id, effective_from, effective_to) "
+        "VALUES ('001', 1, '2024-01-01', '2026-07-31')"
+    )
+    conn.execute(
+        "INSERT INTO terminal_slots (slot_code, employee_id, effective_from) "
+        "VALUES ('001', 2, '2026-08-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    export = _slot_export(tmp_path / "july.XLS", ["07:00", "16:00"])
+    preview = _preview(export, migrated_db, tmp_path)
+    assert preview.slots[0]["employee"] == "전임자"
+
+    _apply(preview, migrated_db, tmp_path)
+    with db.connection(migrated_db) as conn:
+        owners = {
+            r[0] for r in conn.execute(
+                "SELECT employee_id FROM punch_events WHERE work_date = '2026-07-01'"
+            )
+        }
+        attendance = conn.execute(
+            "SELECT employee_id FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchall()
+    assert owners == {1}, "July belongs to the employee who held the slot in July"
+    assert [r[0] for r in attendance] == [1]
+
+
+def test_a_slot_that_changes_hands_mid_month_is_split_by_date(migrated_db, tmp_path):
+    conn = db.connect(migrated_db)
+    conn.execute("UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'")
+    for code, name, hire in (("E1", "전임자", "2024-01-01"), ("E2", "후임자", "2026-07-10")):
+        conn.execute(
+            "INSERT INTO employees (employee_code, name, zone, hire_date) VALUES (?, ?, '본관', ?)",
+            (code, name, hire),
+        )
+    conn.execute(
+        "INSERT INTO terminal_slots (slot_code, employee_id, effective_from, effective_to) "
+        "VALUES ('001', 1, '2024-01-01', '2026-07-09')"
+    )
+    conn.execute(
+        "INSERT INTO terminal_slots (slot_code, employee_id, effective_from) "
+        "VALUES ('001', 2, '2026-07-10')"
+    )
+    conn.commit()
+    conn.close()
+
+    export = build_export(
+        tmp_path / "split.XLS",
+        slots=[SlotSpec("001", "슬롯", {5: ["07:00", "16:00"], 20: ["07:05", "16:05"]})],
+    )
+    preview = _preview(export, migrated_db, tmp_path)
+    assert any(f["code"] == "slot_changed_hands" for f in preview.findings)
+
+    _apply(preview, migrated_db, tmp_path)
+    with db.connection(migrated_db) as conn:
+        by_date = dict(conn.execute(
+            "SELECT work_date, employee_id FROM punch_events GROUP BY work_date"
+        ).fetchall())
+    assert by_date == {"2026-07-05": 1, "2026-07-20": 2}
+
+
+def test_remapping_a_slot_to_a_namesake_invalidates_the_confirmation(seeded, tmp_path, export):
+    """The fingerprint has to carry identity, not a display name."""
+    preview = _preview(export, seeded, tmp_path)
+
+    with db.transaction(seeded) as conn:
+        original = conn.execute(
+            "SELECT name FROM employees WHERE id = "
+            " (SELECT employee_id FROM terminal_slots WHERE slot_code = '001')"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO employees (employee_code, name, zone, hire_date) VALUES (?, ?, ?, ?)",
+            ("E900", original, "본관 1층", "2024-01-01"),
+        )
+        twin = conn.execute("SELECT id FROM employees WHERE employee_code = 'E900'").fetchone()[0]
+        conn.execute("UPDATE terminal_slots SET employee_id = ? WHERE slot_code = '001'", (twin,))
+
+    with pytest.raises(xls_pipeline.ImportError_, match="changed"):
+        _apply(preview, seeded, tmp_path)
+
+
+def test_a_leave_approved_after_the_preview_invalidates_the_confirmation(seeded, tmp_path, export):
+    """A finding the operator never saw must not be applied past."""
+    preview = _preview(export, seeded, tmp_path)
+
+    with db.transaction(seeded) as conn:
+        employee = conn.execute(
+            "SELECT employee_id FROM terminal_slots WHERE slot_code = '001'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO leave_requests (employee_id, leave_year, leave_type, "
+            "                            start_date, end_date, status) "
+            "VALUES (?, 2026, 'annual', '2026-07-01', '2026-07-03', 'approved')",
+            (employee,),
+        )
+
+    with pytest.raises(xls_pipeline.ImportError_, match="changed"):
+        _apply(preview, seeded, tmp_path)
+
+
+def test_an_inactive_employees_punch_is_flagged_on_the_raw_event(migrated_db, tmp_path):
+    """§F wants the raw event flagged, not only the preview."""
+    conn = db.connect(migrated_db)
+    conn.execute("UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'")
+    conn.execute(
+        "INSERT INTO employees (employee_code, name, zone, hire_date, status) "
+        "VALUES ('E1', '퇴사자', '본관', '2024-01-01', 'terminated')"
+    )
+    conn.execute(
+        "INSERT INTO terminal_slots (slot_code, employee_id, effective_from) VALUES ('001', 1, '2024-01-01')"
+    )
+    conn.commit()
+    conn.close()
+
+    export = _slot_export(tmp_path / "inactive.XLS", ["07:00", "16:00"])
+    preview = _preview(export, migrated_db, tmp_path)
+    assert any(f["code"] == "inactive_employee" for f in preview.findings)
+
+    _apply(preview, migrated_db, tmp_path)
+    with db.connection(migrated_db) as conn:
+        flags = {r[0] for r in conn.execute("SELECT review_flag FROM punch_events")}
+        kept = conn.execute("SELECT COUNT(*) FROM punch_events").fetchone()[0]
+    assert kept == 2, "the punches are preserved"
+    assert flags == {"inactive_employee"}
+
+
+def test_an_import_flag_is_cleared_once_it_stops_being_true(seeded, tmp_path):
+    """A day flagged incomplete must not keep warning after the punch arrives."""
+    first = _slot_export(tmp_path / "one.XLS", ["07:00"])
+    _apply(_preview(first, seeded, tmp_path), seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        row = conn.execute(
+            "SELECT status, review_flag FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()
+    assert (row["status"], row["review_flag"]) == ("unknown", "incomplete_day")
+
+    complete = _slot_export(tmp_path / "two.XLS", ["07:00", "16:00"])
+    _apply(_preview(complete, seeded, tmp_path), seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        row = conn.execute(
+            "SELECT status, review_flag FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()
+    assert row["status"] == "normal"
+    assert row["review_flag"] is None, "a stale warning is a warning nobody trusts"
+
+
+def test_a_human_review_note_is_not_cleared_by_an_import(seeded, tmp_path):
+    from app.services import attendance
+
+    first = _slot_export(tmp_path / "one.XLS", ["07:00"])
+    _apply(_preview(first, seeded, tmp_path), seeded, tmp_path)
+
+    with db.transaction(seeded) as conn:
+        employee = conn.execute(
+            "SELECT employee_id FROM terminal_slots WHERE slot_code = '001'"
+        ).fetchone()[0]
+        attendance.correct_attendance(
+            conn, employee_id=employee, work_date="2026-07-01",
+            changes={"review_flag": "manager_checking"},
+            actor_id="manager", reason="본인 확인 중",
+        )
+
+    complete = _slot_export(tmp_path / "two.XLS", ["07:00", "16:00"])
+    _apply(_preview(complete, seeded, tmp_path), seeded, tmp_path)
+    with db.connection(seeded) as conn:
+        assert conn.execute(
+            "SELECT review_flag FROM attendance_days WHERE work_date = '2026-07-01'"
+        ).fetchone()[0] == "manager_checking"

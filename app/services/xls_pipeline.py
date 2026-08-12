@@ -158,37 +158,81 @@ def _dates_in(period_start: str, period_end: str) -> list[str]:
     return _date_range(period_start, end_day - start_day + 1)
 
 
-def _slot_mapping(conn: sqlite3.Connection) -> dict[str, dict]:
+def _slot_intervals(conn: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Every mapping a slot has ever had, in date order.
+
+    terminal_slots is date-scoped on purpose: a slot changes hands when someone
+    leaves and their replacement inherits the finger. Reading it as one row per
+    slot attributes July's punches to whoever holds the slot today — which is
+    how a departed employee's month lands on their successor's record.
+    """
     rows = conn.execute(
         """
-        SELECT t.slot_code, t.status AS slot_status, e.id AS employee_id, e.name,
-               e.status AS employee_status, e.hire_date, e.end_date
+        SELECT t.slot_code, t.status AS slot_status, t.effective_from, t.effective_to,
+               e.id AS employee_id, e.name, e.status AS employee_status,
+               e.hire_date, e.end_date
           FROM terminal_slots t
           LEFT JOIN employees e ON e.id = t.employee_id
          WHERE t.terminal_id = ?
+         ORDER BY t.slot_code, IFNULL(t.effective_from, ''), t.id
         """,
         (TERMINAL_ID,),
     ).fetchall()
-    return {row["slot_code"]: dict(row) for row in rows}
+    intervals: dict[str, list[dict]] = {}
+    for row in rows:
+        intervals.setdefault(row["slot_code"], []).append(dict(row))
+    return intervals
+
+
+def _resolve_slot(
+    intervals: dict[str, list[dict]], slot_code: str, work_date: str
+) -> dict | None:
+    """Who held this slot on this date, or None if nobody did.
+
+    An open `effective_from` means "as far back as the records go"; an open
+    `effective_to` means "still current". A punch on a date no mapping covers is
+    left unattached rather than guessed at.
+    """
+    covering = [
+        row for row in intervals.get(slot_code, [])
+        if (not row["effective_from"] or row["effective_from"] <= work_date)
+        and (not row["effective_to"] or work_date <= row["effective_to"])
+    ]
+    if not covering:
+        return None
+    # Latest applicable mapping wins if two overlap — a data problem, but a
+    # deterministic answer beats an arbitrary one.
+    return sorted(covering, key=lambda r: (r["effective_from"] or "", r["id"] if "id" in r.keys() else 0))[-1]
 
 
 # ---------------------------------------------------------------------------
 # preview
 # ---------------------------------------------------------------------------
-def _preview_fingerprint(digest: str, slot_rows: list[dict], new_punches: int) -> str:
+def _preview_fingerprint(
+    digest: str, slot_rows: list[dict], new_punches: int, findings: list[dict]
+) -> str:
     """A digest of what the operator actually reviewed.
 
-    Covers the file and the slot mapping the preview was computed against, so a
-    mapping change between review and apply invalidates the confirmation.
+    Everything on the screen goes in, so anything that would have changed the
+    screen invalidates the confirmation:
+
+    * the file, by hash;
+    * the slot mapping *by employee id* — the display name is not identity, and
+      remapping a slot from one 김동명 to another must not slip through;
+    * the findings themselves — a leave request approved between the review and
+      the apply creates a leave_conflict the operator never saw.
     """
     payload = json.dumps(
         {
             "source": digest,
             "slots": [
-                {k: row[k] for k in ("slot", "employee", "status", "punchCount")}
+                {k: row[k] for k in ("slot", "employee", "employeeIds", "status", "punchCount")}
                 for row in slot_rows
             ],
             "newPunches": new_punches,
+            "findings": sorted(
+                json.dumps(f, ensure_ascii=False, sort_keys=True) for f in findings
+            ),
         },
         ensure_ascii=False, sort_keys=True,
     )
@@ -287,7 +331,7 @@ def _build_preview(
     digest: str,
     threshold_minutes: int,
 ) -> ImportPreview:
-    mapping = _slot_mapping(conn)
+    intervals = _slot_intervals(conn)
     existing = {
         row[0]
         for row in conn.execute(
@@ -304,17 +348,33 @@ def _build_preview(
         by_slot_day.setdefault((punch.slot_code, punch.work_date), []).append(punch)
 
     for slot in parsed.slots:
-        mapped = mapping.get(slot.slot_code)
-        employee = mapped["name"] if mapped and mapped.get("employee_id") else None
+        # A slot can change hands inside one month, so resolve it for every date
+        # it actually carried punches rather than once for the whole file.
+        dates = sorted({d for (s, d) in by_slot_day if s == slot.slot_code})
+        resolved = [_resolve_slot(intervals, slot.slot_code, d) for d in dates]
+        holders = {
+            r["employee_id"]: r for r in resolved if r and r.get("employee_id")
+        }
+        mapped = next(iter(holders.values())) if len(holders) == 1 else None
+        employee = mapped["name"] if mapped else None
         status = "mapped"
-        if slot.punch_count == 0:
+        if len(holders) > 1:
+            status = "mapping_changed"
+            employee = " / ".join(sorted(r["name"] for r in holders.values()))
+            findings.append(Finding(
+                "slot_changed_hands", "review",
+                f"슬롯 {slot.slot_code}: 이 기간 안에 담당자가 바뀝니다({employee}). "
+                "각 펀치는 그 날짜의 담당자에게 귀속됩니다.",
+                slot_code=slot.slot_code, employee=employee,
+            ))
+        elif slot.punch_count == 0:
             status = "unused"
             findings.append(Finding(
                 "unused_slot", "info",
                 f"슬롯 {slot.slot_code}: 이 기간에 기록이 없습니다. 결근으로 처리하지 않습니다.",
                 slot_code=slot.slot_code,
             ))
-        elif not mapped or not mapped.get("employee_id"):
+        elif not mapped:
             status = "unmapped"
             findings.append(Finding(
                 "unmapped_slot", "review",
@@ -334,13 +394,16 @@ def _build_preview(
             "slot": slot.slot_code,
             "terminalName": slot.display_name,
             "employee": employee,
+            # Identity, not the display name: two people can share a name, and
+            # remapping a slot between them must invalidate a confirmation.
+            "employeeIds": sorted(holders),
             "status": status,
             "punchCount": slot.punch_count,
             "dayCount": slot.day_count,
         })
 
     for (slot_code, work_date), punches in sorted(by_slot_day.items()):
-        mapped = mapping.get(slot_code)
+        mapped = _resolve_slot(intervals, slot_code, work_date)
         employee = mapped["name"] if mapped and mapped.get("employee_id") else None
         times = [p.punch_time for p in punches]
         review = punch_review.review_day(times, threshold_minutes)
@@ -404,7 +467,8 @@ def _build_preview(
             work_date=date,
         ))
 
-    fingerprint = _preview_fingerprint(digest, slot_rows, new_punches)
+    finding_dicts = [f.as_dict() for f in findings]
+    fingerprint = _preview_fingerprint(digest, slot_rows, new_punches, finding_dicts)
     token = _confirmation_token(run_id, digest, fingerprint, secrets.token_urlsafe(16))
 
     return ImportPreview(
@@ -417,7 +481,7 @@ def _build_preview(
         confirmation_token=token,
         preview_fingerprint=fingerprint,
         slots=slot_rows,
-        findings=[f.as_dict() for f in findings],
+        findings=finding_dicts,
         new_punches=new_punches,
         already_imported=already,
         zero_punch_dates=zero_dates,
@@ -499,53 +563,77 @@ def apply_import(
 
     conn = db.connect(path)
     try:
-        mapping = _slot_mapping(conn)
+        intervals = _slot_intervals(conn)
         inserted = skipped = reactivated = 0
+        # Days this run actually put evidence behind, as opposed to days whose
+        # punches were already present. Only the first kind may change hands:
+        # claiming a day this run did not contribute to is what let a rollback
+        # leave attendance standing with no punches under it.
+        contributed: set[tuple[int, str]] = set()
         touched: set[tuple[int, str]] = set()
 
         conn.execute("BEGIN")
         for punch in parsed.punches:
-            mapped = mapping.get(punch.slot_code) or {}
+            mapped = _resolve_slot(intervals, punch.slot_code, punch.work_date) or {}
             employee_id = mapped.get("employee_id")
+            if not employee_id:
+                review_flag = "unmapped_slot"
+            elif mapped.get("employee_status") != "active":
+                # §F: the raw event carries the flag too, not just the preview.
+                review_flag = "inactive_employee"
+            else:
+                review_flag = None
             key = dedupe_key(TERMINAL_ID, punch)
             cursor = conn.execute(
                 """
                 INSERT INTO punch_events
                     (terminal_id, terminal_slot_code, punch_at, work_date, punch_type,
                      raw_payload, source_filename, source_sheet, source_row_no,
-                     source_column, source_cell, occurrence_index, source_hash,
-                     dedupe_key, import_run_id, employee_id, review_flag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source_column, source_cell, occurrence_index, cell_position,
+                     source_hash, dedupe_key, import_run_id, active_import_run_id,
+                     employee_id, review_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dedupe_key) DO NOTHING
                 """,
                 (
                     TERMINAL_ID, punch.slot_code, punch.punch_at, punch.work_date,
                     punch.punch_type, punch.raw_cell, run["source_filename"],
                     punch.source_sheet, punch.source_row, punch.source_column,
-                    punch.source_cell, punch.occurrence_index,
-                    run["source_sha256"], key, import_run_id, employee_id,
-                    None if employee_id else "unmapped_slot",
+                    punch.source_cell, punch.occurrence_index, punch.cell_position,
+                    run["source_sha256"], key, import_run_id, import_run_id,
+                    employee_id, review_flag,
                 ),
             )
             if cursor.rowcount:
                 inserted += 1
+                if employee_id:
+                    contributed.add((employee_id, punch.work_date))
             else:
                 skipped += 1
                 # Re-applying a source that was rolled back reactivates its
                 # events rather than inserting duplicates. The raw columns are
-                # untouched; only the rollback marker is cleared.
-                reactivated += conn.execute(
+                # untouched; the rollback marker is cleared and this run becomes
+                # the one responsible for them, so rolling *it* back undoes them.
+                back = conn.execute(
                     "UPDATE punch_events "
-                    "   SET rolled_back_at = NULL, rolled_back_reason = NULL "
+                    "   SET rolled_back_at = NULL, rolled_back_reason = NULL, "
+                    "       active_import_run_id = ? "
                     " WHERE dedupe_key = ? AND rolled_back_at IS NOT NULL",
-                    (key,),
+                    (import_run_id, key),
                 ).rowcount
+                reactivated += back
+                if back and employee_id:
+                    contributed.add((employee_id, punch.work_date))
             if employee_id:
                 touched.add((employee_id, punch.work_date))
 
         _flag_repeated_punches(conn, import_run_id, threshold_minutes)
         _record_coverage(conn, import_run_id, parsed)
-        derived = derive_attendance(conn, sorted(touched), import_run_id=import_run_id)
+        # Re-derive every touched day, but only take responsibility for the ones
+        # this run actually changed.
+        derived = derive_attendance(
+            conn, sorted(touched), import_run_id=import_run_id, owned=contributed
+        )
 
         conn.execute(
             """
@@ -599,7 +687,7 @@ def _flag_repeated_punches(
     rows = conn.execute(
         """
         SELECT id, terminal_slot_code, work_date, punch_at
-          FROM punch_events WHERE import_run_id = ? AND rolled_back_at IS NULL
+          FROM punch_events WHERE active_import_run_id = ? AND rolled_back_at IS NULL
          ORDER BY terminal_slot_code, work_date, punch_at, id
         """,
         (import_run_id,),
@@ -645,11 +733,18 @@ def _record_coverage(conn: sqlite3.Connection, import_run_id: int, parsed) -> No
         )
 
 
+# Review flags the importer sets on attendance_days. They describe the state of
+# the derivation, so the importer may clear its own when the state changes —
+# and nothing else's.
+IMPORT_REVIEW_FLAGS = ("incomplete_day", "import_rolled_back")
+
+
 def derive_attendance(
     conn: sqlite3.Connection,
     employee_days: list[tuple[int, str]],
     *,
     import_run_id: int | None = None,
+    owned: set[tuple[int, str]] | None = None,
 ) -> int:
     """Derive attendance_days from punches for the given employee-days.
 
@@ -663,11 +758,18 @@ def derive_attendance(
                                     another source are left alone.
       * a row a human confirmed  -> never overwritten by an import
 
+    `owned` are the employee-days this run actually put evidence behind. Only
+    those get last_import_run_id, because that column decides which run may
+    later roll the row back. A run that inserted nothing must not take over a
+    day it did not change: re-applying the same file used to do exactly that,
+    and the earlier run's rollback then left 정상 standing on zero punches.
+
     Uses ON CONFLICT DO UPDATE. INSERT OR REPLACE would destroy the row's id,
     created_at, revision history and notes (finding N1).
     """
     written = 0
     for employee_id, work_date in employee_days:
+        claims = owned is None or (employee_id, work_date) in owned
         times = [
             row[0][11:16]
             for row in conn.execute(
@@ -712,12 +814,20 @@ def derive_attendance(
                 actual_in_at = excluded.actual_in_at,
                 actual_out_at = excluded.actual_out_at,
                 source = 'fingerprint',
-                review_flag = COALESCE(attendance_days.review_flag, excluded.review_flag),
+                -- A flag the importer raised is cleared once it stops being
+                -- true: a day that was incomplete, or was rolled back, must not
+                -- keep warning about it after the missing punch arrives.
+                -- Anything a human put there is left alone.
+                review_flag = CASE
+                    WHEN attendance_days.review_flag IN (?, ?) THEN excluded.review_flag
+                    ELSE COALESCE(attendance_days.review_flag, excluded.review_flag)
+                END,
                 last_import_run_id = COALESCE(excluded.last_import_run_id,
                                               attendance_days.last_import_run_id)
             """,
             (employee_id, work_date, status, times[0],
-             times[-1] if len(times) > 1 else None, review_flag, import_run_id),
+             times[-1] if len(times) > 1 else None, review_flag,
+             import_run_id if claims else None, *IMPORT_REVIEW_FLAGS),
         )
         written += 1
     return written
@@ -744,7 +854,7 @@ def _rollback_conflicts(
           JOIN attendance_days a
             ON a.employee_id = p.employee_id AND a.work_date = p.work_date
           JOIN employees e ON e.id = a.employee_id
-         WHERE p.import_run_id = ? AND p.employee_id IS NOT NULL
+         WHERE p.active_import_run_id = ? AND p.employee_id IS NOT NULL
         """,
         (import_run_id,),
     ).fetchall()
@@ -818,12 +928,17 @@ def rollback_import(
         safe, conflicts = _rollback_conflicts(conn, import_run_id, run["finished_at"])
 
         conn.execute("BEGIN")
+        # By active_import_run_id, not import_run_id: an event first imported by
+        # run 1 and reactivated by run 3 is run 3's to undo. import_run_id is
+        # immutable provenance and answers a different question.
         marked = conn.execute(
             "UPDATE punch_events SET rolled_back_at = ?, rolled_back_reason = ? "
-            " WHERE import_run_id = ? AND rolled_back_at IS NULL",
+            " WHERE active_import_run_id = ? AND rolled_back_at IS NULL",
             (_now(), reason, import_run_id),
         ).rowcount
-        redone = derive_attendance(conn, safe, import_run_id=import_run_id)
+        redone = derive_attendance(
+            conn, safe, import_run_id=import_run_id, owned=set(safe)
+        )
 
         conn.execute(
             "UPDATE import_runs SET status = 'rolled_back', rolled_back_at = ?, "
