@@ -7,7 +7,7 @@
     {id:'12',name:'직원 12',zone:'학생회관',shift:'08:00–17:00',state:'정상',punch:'07:55 · 17:03'},
     {id:'16',name:'직원 16',zone:'연구동 1층',shift:'08:00–17:00',state:'정상',punch:'07:58 · 17:01'}
   ];
-  var titles={today:'오늘',issues:'확인할 항목',people:'직원',more:'더보기'};
+  var titles={today:'오늘',issues:'확인할 항목',attendance:'근태',leave:'휴가 · 병가',people:'직원',more:'전체 메뉴'};
   var screens=[].slice.call(document.querySelectorAll('.mobile-screen'));
   var navs=[].slice.call(document.querySelectorAll('[data-nav]'));
   var backdrop=document.getElementById('sheetBackdrop');
@@ -17,6 +17,7 @@
   function setPeriod(period){
     document.querySelectorAll('[data-period]').forEach(function(button){button.classList.toggle('active',button.dataset.period===period)});
     document.querySelectorAll('[data-period-view]').forEach(function(view){view.classList.toggle('active',view.dataset.periodView===period)});
+    document.getElementById('screenTitle').textContent=period==='day'?'오늘':period==='week'?'이번 주':'2026년 8월';
   }
 
   function esc(v){return String(v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[c]})}
@@ -38,6 +39,9 @@
   function actionSheet(kind){
     if(kind==='replacement') openSheet('<h2 id="sheetTitle">대체 인력 배정</h2><p class="prototype-note">공학관 3층 · 오늘 07:00–16:00</p><div class="detail-grid"><span>결원</span><span>직원 07</span><span>대체 후보</span><span>직원 19 (가능)</span><span>겹치는 배치</span><span>없음</span></div><div class="sheet-actions"><button id="cancelSheet">취소</button><button class="primary-action" data-sheet-action="save-replacement">배정하기</button></div>');
     else if(kind==='leave') openSheet('<h2 id="sheetTitle">병가 증빙 확인</h2><p class="prototype-note">신청기간과 증빙기간이 달라 자동 승인하지 않았습니다.</p><div class="detail-grid"><span>직원</span><span>직원 05</span><span>신청기간</span><span>8/10–8/14</span><span>증빙기간</span><span>8/10–8/12</span></div><div class="sheet-actions"><button data-sheet-action="request-document">추가 증빙 요청</button><button class="primary-action" data-sheet-action="edit-leave">기간 수정</button></div>');
+    else if(kind==='import') openSheet('<h2 id="sheetTitle">지문 XLS 가져오기</h2><p class="prototype-note">파일 선택 → 미리보기 → 관리자 확인 → 적용. 미리보기 전에는 근태가 바뀌지 않습니다.</p><div class="detail-grid"><span>1단계</span><span>파일 선택</span><span>2단계</span><span>펀치·직원 연결 미리보기</span><span>3단계</span><span>확인 후 적용</span></div><div class="sheet-actions"><button>취소</button><button class="primary-action" data-sheet-action="preview">파일 선택</button></div>');
+    else if(kind==='history') openSheet('<h2 id="sheetTitle">원본기록 · 롤백</h2><div class="detail-grid"><span>8월 12일</span><span>650건 · 적용 완료</span><span>7월 31일</span><span>612건 · 롤백 가능</span><span>보존</span><span>원본과 감사기록 유지</span></div><div class="sheet-actions"><button>기록 보기</button><button class="primary-action" data-sheet-action="rollback">롤백 검토</button></div>');
+    else if(kind==='docs') openSheet('<h2 id="sheetTitle">문서 생성</h2><div class="doc-actions"><button data-sheet-action="doc">월 출근부 XLS</button><button data-sheet-action="doc">휴가대장</button><button data-sheet-action="doc">대체근무 확인서</button><button data-sheet-action="doc">재직증명서</button><button data-sheet-action="doc">근로계약서</button><button data-sheet-action="doc">입사서류 패킷</button></div>');
     else openSheet('<h2 id="sheetTitle">지문 데이터 상태</h2><p class="prototype-note">현재 목업에서는 실제 단말이나 운영 DB에 연결하지 않습니다.</p><div class="detail-grid"><span>마지막 반영</span><span>오늘 08:20</span><span>수집 방식</span><span>USB 월간 XLS</span><span>상태</span><span>정상 · 데모</span></div>');
   }
   function renderPeople(query){
@@ -53,6 +57,7 @@
     var jump=e.target.closest('[data-go]');if(jump){go(jump.dataset.go);return}
     var person=e.target.closest('[data-person]');if(person){personSheet(person.dataset.person);return}
     var action=e.target.closest('[data-action]');if(action){actionSheet(action.dataset.action);return}
+    var demo=e.target.closest('[data-demo]');if(demo){showToast(demo.dataset.demo);return}
     var sheetAction=e.target.closest('[data-sheet-action]');if(sheetAction){closeSheet();showToast('목업에서 처리 흐름을 확인했습니다. 실제 저장은 하지 않습니다.');return}
     if(e.target.id==='cancelSheet'){closeSheet()}
   });

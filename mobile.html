@@ -7,6 +7,7 @@
   <title>미화 운영 모바일 · 데모</title>
   <link rel="stylesheet" href="./mobile.css">
   <link rel="stylesheet" href="./mobile-period.css">
+  <link rel="stylesheet" href="./mobile-full.css">
 </head>
 <body>
 <div class="mobile-app">
@@ -104,22 +105,43 @@
       <div class="people-list" id="peopleList"></div>
     </section>
 
+    <section class="mobile-screen" data-screen="attendance">
+      <div class="month-head"><button>‹</button><b>2026년 8월 근태</b><button>›</button></div>
+      <div class="summary-card"><div><span>정상</span><strong>82</strong></div><div><span>휴가·병가</span><strong>3</strong></div><div><span>확인</span><strong class="warn-text">4</strong></div></div>
+      <div class="quick-actions"><button data-demo="근태 검증을 다시 실행했습니다.">검증 다시 실행</button><button data-demo="출근부 XLS 생성 흐름입니다.">출근부 XLS 생성</button></div>
+      <div class="section-title"><h2>직원별 월간 결과</h2><button data-go="issues">이상 4건</button></div>
+      <div class="record-list"><button data-person="직원 01"><span><b>직원 01 · 본관 1층</b><small>정상 19 · 휴가 1 · 확인 0</small></span><em class="status ok">정상</em></button><button data-person="직원 03"><span><b>직원 03 · 도서관 2층</b><small>정상 18 · 기록 확인 2</small></span><em class="status check">확인 2</em></button><button data-person="직원 07"><span><b>직원 07 · 공학관 3층</b><small>정상 15 · 휴가 5 · 대체 1</small></span><em class="status absent">휴가</em></button></div>
+    </section>
+
+    <section class="mobile-screen" data-screen="leave">
+      <div class="month-head"><button>‹</button><b>2026년 8월</b><button>›</button></div>
+      <div class="summary-card"><div><span>신청</span><strong>4</strong></div><div><span>승인</span><strong>3</strong></div><div><span>확인</span><strong class="warn-text">1</strong></div></div>
+      <button class="wide-create" data-demo="새 휴가 등록 화면입니다.">＋ 휴가 등록</button>
+      <div class="section-title"><h2>휴가 · 병가</h2><span>신청 → 증빙 → 승인 → 복귀</span></div>
+      <div class="record-list"><button data-action="leave"><span><b>직원 05 · 병가</b><small>8/10–8/14 · 증빙기간 확인 필요</small></span><em class="status check">확인</em></button><button data-person="직원 07"><span><b>직원 07 · 연차</b><small>8/12 · 승인 · 대체 미배정</small></span><em class="status absent">결원</em></button><button data-demo="승인된 휴가 상세입니다."><span><b>직원 12 · 연차</b><small>8/20–8/21 · 승인</small></span><em class="status ok">승인</em></button></div>
+    </section>
+
     <section class="mobile-screen" data-screen="more">
       <div class="user-card"><span class="manager-avatar">관</span><div><b>현장 관리자</b><small>업무용 모바일 데모</small></div></div>
       <div class="menu-list">
+        <button data-go="issues"><span>확</span><div><b>확인할 항목</b><small>지문·휴가·대체 예외 3건</small></div><em>›</em></button>
         <button data-action="leave"><span>휴</span><div><b>휴가 · 병가</b><small>신청과 증빙 상태 확인</small></div><em>›</em></button>
         <button data-action="replacement"><span>대</span><div><b>대체 근무</b><small>결원 확인과 대체자 배정</small></div><em>›</em></button>
         <button data-action="fingerprint"><span>지</span><div><b>지문 데이터 상태</b><small>마지막 반영 08:20 · 정상</small></div><em>›</em></button>
+        <button data-action="import"><span>원</span><div><b>지문 XLS 가져오기</b><small>파일 → 미리보기 → 확인 → 적용</small></div><em>›</em></button>
+        <button data-action="history"><span>록</span><div><b>원본기록 · 롤백</b><small>가져오기 이력과 되돌리기</small></div><em>›</em></button>
+        <button data-action="docs"><span>문</span><div><b>문서</b><small>출근부·휴가대장·확인서 생성</small></div><em>›</em></button>
       </div>
       <p class="prototype-note">이 화면은 클라이언트 검토용 목업입니다. 표시된 사람과 기록은 모두 가상이며 실제 저장은 하지 않습니다.</p>
     </section>
   </main>
 
   <nav class="bottom-nav" aria-label="주 메뉴">
-    <button class="active" data-nav="today"><span>⌂</span>오늘</button>
-    <button data-nav="issues"><span>!</span>확인<b>3</b></button>
+    <button class="active" data-nav="today"><span>⌂</span>운영</button>
+    <button data-nav="attendance"><span>근</span>근태</button>
+    <button data-nav="leave"><span>휴</span>휴가</button>
     <button data-nav="people"><span>♙</span>직원</button>
-    <button data-nav="more"><span>•••</span>더보기</button>
+    <button data-nav="more"><span>•••</span>전체</button>
   </nav>
 </div>
 
