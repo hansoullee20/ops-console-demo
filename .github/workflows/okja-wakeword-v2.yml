@@ -1,0 +1,202 @@
+name: Train Okja Wakeword v2
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/generate_melotts_dataset.py'
+      - 'aihub/wakeword/okja_v2_melotts.yaml'
+      - '.github/workflows/okja-wakeword-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  generate-speech:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PYTHONUNBUFFERED: '1'
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      TOKENIZERS_PARALLELISM: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install MeloTTS CPU environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1 espeak-ng
+
+          echo 'numpy<2' > /tmp/constraints.txt
+          export PIP_CONSTRAINT=/tmp/constraints.txt
+          python -m pip install --upgrade pip wheel 'setuptools<81'
+          git clone --depth 1 https://github.com/myshell-ai/MeloTTS.git /tmp/MeloTTS
+
+          # Keep this job CPU-only; otherwise pip may pull several GB of CUDA libs.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+            'torch==2.8.0' 'torchaudio==2.8.0'
+          python -m pip install -e /tmp/MeloTTS
+
+          # Korean frontend dependencies. Remove the empty full-UniDic shim so
+          # mecab-python3 uses the bundled unidic-lite dictionary.
+          python -m pip install python-mecab-ko python-mecab-ko-dic
+          python -m pip uninstall -y unidic
+
+          python - <<'PY'
+          from melo.api import TTS
+          import unidic_lite
+          print('MeloTTS ready; unidic-lite=', unidic_lite.DICDIR)
+          PY
+
+      - name: Generate Okja speech dataset
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v python aihub/wakeword/generate_melotts_dataset.py speech \
+            --output-root wakeword_v2_output \
+            --model-name okja_v2_melotts \
+            --positive-train 256 --positive-test 64 \
+            --negative-train 512 --negative-test 128 \
+            2>&1 | tee v2_generation.log
+
+          echo '--- generated counts ---'
+          for d in positive_train positive_test negative_train negative_test; do
+            printf '%s ' "$d"
+            find "wakeword_v2_output/okja_v2_melotts/$d" -name 'clip_*.wav' | wc -l
+          done
+          du -sh wakeword_v2_output/okja_v2_melotts
+
+      - name: Upload speech dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-v2-speech
+          path: |
+            wakeword_v2_output/okja_v2_melotts/positive_train/**
+            wakeword_v2_output/okja_v2_melotts/positive_test/**
+            wakeword_v2_output/okja_v2_melotts/negative_train/**
+            wakeword_v2_output/okja_v2_melotts/negative_test/**
+            v2_generation.log
+          if-no-files-found: error
+          retention-days: 3
+
+  train:
+    needs: generate-speech
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONUNBUFFERED: '1'
+      HF_HOME: ${{ github.workspace }}/.hf-cache
+      TOKENIZERS_PARALLELISM: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore generated speech
+        uses: actions/download-artifact@v4
+        with:
+          name: okja-v2-speech
+          path: .
+
+      - name: Install LiveKit WakeWord CPU environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng libsndfile1 ffmpeg sox portaudio19-dev
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+            'torch==2.8.0' 'torchaudio==2.8.0'
+          python -m pip install 'livekit-wakeword[train,eval,export]' librosa soundfile
+          livekit-wakeword --help | head -40
+
+      - name: Download compact LiveKit dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          # Skip the ~16 GB ACAV training corpus for v2. The validation feature
+          # set is still downloaded, so FPPH is tested on general speech.
+          livekit-wakeword setup \
+            --config aihub/wakeword/okja_v2_melotts.yaml \
+            --skip-acav 2>&1 | tee v2_setup.log
+          df -h
+
+      - name: Generate standalone background clips
+        shell: bash
+        run: |
+          set -o pipefail
+          python aihub/wakeword/generate_melotts_dataset.py background \
+            --background-root wakeword_v2_data/backgrounds \
+            --output-root wakeword_v2_output \
+            --model-name okja_v2_melotts \
+            --train 128 --test 32 --seconds 2.0 \
+            2>&1 | tee v2_background.log
+
+          echo '--- raw split counts ---'
+          for d in positive_train positive_test negative_train negative_test background_train background_test; do
+            printf '%s ' "$d"
+            find "wakeword_v2_output/okja_v2_melotts/$d" -name 'clip_*.wav' | wc -l
+          done
+
+      - name: Augment and extract features
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v livekit-wakeword augment aihub/wakeword/okja_v2_melotts.yaml \
+            2>&1 | tee v2_augment.log
+
+      - name: Train conv-attention classifier
+        shell: bash
+        run: |
+          set -o pipefail
+          /usr/bin/time -v livekit-wakeword train aihub/wakeword/okja_v2_melotts.yaml \
+            2>&1 | tee v2_train.log
+
+      - name: Export and evaluate ONNX
+        shell: bash
+        run: |
+          set -o pipefail
+          livekit-wakeword export aihub/wakeword/okja_v2_melotts.yaml \
+            2>&1 | tee v2_export.log
+          livekit-wakeword eval aihub/wakeword/okja_v2_melotts.yaml \
+            2>&1 | tee v2_eval.log
+
+      - name: Show v2 results
+        if: always()
+        shell: bash
+        run: |
+          echo '--- model output files ---'
+          find wakeword_v2_output/okja_v2_melotts -maxdepth 1 -type f -printf '%f %k KB\n' 2>/dev/null | sort || true
+          echo '--- evaluation tail ---'
+          tail -80 v2_eval.log 2>/dev/null || true
+          echo '--- training tail ---'
+          tail -80 v2_train.log 2>/dev/null || true
+          echo '--- disk ---'
+          df -h
+
+      - name: Upload Okja v2 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-wakeword-v2
+          path: |
+            wakeword_v2_output/okja_v2_melotts/*.onnx
+            wakeword_v2_output/okja_v2_melotts/*.json
+            wakeword_v2_output/okja_v2_melotts/*.png
+            wakeword_v2_output/okja_v2_melotts/*.pt
+            v2_setup.log
+            v2_background.log
+            v2_augment.log
+            v2_train.log
+            v2_export.log
+            v2_eval.log
+          if-no-files-found: warn
+          retention-days: 7
