@@ -15,7 +15,7 @@ from app.config import REPO_ROOT
 # Committed files the public build serves. `demo-data.js` is generated at
 # deploy time and is deliberately not here.
 PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js",
-                "import-ui.js", "mobile.html", "mobile.css", "mobile-period.css",
+                "import-ui.js", "mobile.html", "mobile.css", "mobile-period.css", "mobile-full.css",
                 "mobile.js", ".nojekyll")
 STAGED_FILES = PUBLIC_FILES + ("demo-data.js",)
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pages.yml"
