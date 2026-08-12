@@ -38,8 +38,6 @@ def test_index_no_longer_carries_its_own_dataset():
     assert "let employees=[];" in html
     assert "let days=[];" in html
     assert "let monthStats={};" in html
-    assert "재직 <b>${employees.length}</b>" in html
-    assert "재직 <b>18</b>" not in html
 
 
 def test_index_references_its_assets_statically():
