@@ -2,11 +2,22 @@
 
 > **Working branch:** `aihub-voice-test`  
 > **Project directory:** `aihub/`  
-> **Handoff / restart guide:** [`AIHUB_HANDOFF.md`](./AIHUB_HANDOFF.md)
+> **Canonical handoff / restart guide:** [`AIHUB_HANDOFF.md`](./AIHUB_HANDOFF.md)
 
-This branch contains the Android AI Hub / **옥자 (Okja)** voice-assistant prototype. The current end-to-end path is Android STT → persistent Claude Agent SDK bridge → Android TTS, with a working wake-phrase prototype and an active migration toward a fully free/local wake backend.
+This branch contains the Android AI Hub / **옥자 (Okja)** voice-assistant prototype. If you are resuming this project in a new ChatGPT/Claude/Codex session, **read `AIHUB_HANDOFF.md` first**.
 
-If you are resuming this project in a new ChatGPT/Claude/Codex session, **read `AIHUB_HANDOFF.md` first**.
+Current checkpoint:
+
+```text
+Android STT → persistent Claude bridge → Android TTS: WORKING
+local/template wake prototypes: WORKING
+LiveKit Okja v2 training pipeline: SUCCESS
+v2 ONNX export: SUCCESS
+v2 offline model quality: FAIL (Recall 13.28%, FPPH 2.66 @ threshold 0.50)
+next: diagnose v2 data/training and make a justified v3
+```
+
+Do not start from the older Vosk experiment and do not integrate the current v2 ONNX into Android as if the wake model were finished. Full context, exact workflow/artifact IDs, environment, benchmarks, and restart instructions are in [`AIHUB_HANDOFF.md`](./AIHUB_HANDOFF.md).
 
 ---
 
