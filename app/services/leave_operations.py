@@ -106,6 +106,7 @@ def _finding(row: sqlite3.Row) -> str | None:
 
 
 def serialize(row: sqlite3.Row) -> dict:
+    finding = _finding(row)
     return {
         "id": row["id"], "employeeId": row["employee_id"],
         "employee": row["employee_name"] if "employee_name" in row.keys() else None,
@@ -119,10 +120,31 @@ def serialize(row: sqlite3.Row) -> dict:
         "evidenceEndDate": row["cert_end_date"],
         "evidenceNote": row["evidence_note"],
         "evidenceCheckedDate": row["evidence_checked_date"],
-        "finding": _finding(row), "approvedAt": row["approved_at"],
+        "finding": finding, "findings": [finding] if finding else [],
+        "approvedAt": row["approved_at"],
         "cancelledAt": row["cancelled_at"], "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
     }
+
+
+def approved_leave_coverage(conn: sqlite3.Connection, employee_id: int, iso: str) -> dict:
+    """Resolve approved leave for one employee/workday without row-order assumptions."""
+    if not work_calendar.is_working_day(conn, iso):
+        return {"coverage": "none", "leaveType": None, "rows": []}
+    rows = conn.execute(
+        """SELECT * FROM leave_requests WHERE employee_id=? AND status='approved'
+             AND start_date<=? AND end_date>=? ORDER BY id""", (employee_id, iso, iso)
+    ).fetchall()
+    full = [row for row in rows if row["leave_type"] != "half_day"]
+    portions = {row["half_day_period"] for row in rows if row["leave_type"] == "half_day"}
+    if full:
+        chosen = full[-1]
+        return {"coverage": "full", "leaveType": chosen["leave_type"], "rows": rows}
+    if {"am", "pm"}.issubset(portions):
+        return {"coverage": "full", "leaveType": "annual", "rows": rows}
+    if "am" in portions or "pm" in portions:
+        return {"coverage": "am" if "am" in portions else "pm", "leaveType": "half_day", "rows": rows}
+    return {"coverage": "none", "leaveType": None, "rows": rows}
 
 
 def list_leave(conn: sqlite3.Connection, year: int | None = None,
@@ -142,15 +164,15 @@ def list_leave(conn: sqlite3.Connection, year: int | None = None,
     result = []
     for row in rows:
         item = serialize(row)
-        if row["status"] == "approved" and row["leave_type"] != "half_day":
-            active = conn.execute(
-                """SELECT 1 FROM punch_events
-                    WHERE employee_id=? AND work_date BETWEEN ? AND ?
-                      AND rolled_back_at IS NULL LIMIT 1""",
-                (row["employee_id"], row["start_date"], row["end_date"]),
-            ).fetchone()
-            if active:
-                item["finding"] = "leave_attendance_conflict"
+        if row["status"] == "approved":
+            conflict = any(
+                approved_leave_coverage(conn, row["employee_id"], iso)["coverage"] == "full"
+                and conn.execute("SELECT 1 FROM punch_events WHERE employee_id=? AND work_date=? AND rolled_back_at IS NULL LIMIT 1", (row["employee_id"], iso)).fetchone()
+                for iso in work_calendar.working_dates(conn, row["start_date"], row["end_date"])
+            )
+            if conflict and "leave_attendance_conflict" not in item["findings"]:
+                item["findings"].append("leave_attendance_conflict")
+        item["finding"] = item["findings"][0] if item["findings"] else None
         result.append(item)
     return result
 
@@ -168,7 +190,10 @@ def create_leave(conn: sqlite3.Connection, *, employee_id: int, leave_type: str,
     employee = _employee(conn, employee_id)
     _validate_employment(employee, start_date, end_date)
     db_type, half = _normalize_input(leave_type, portion)
-    days = work_calendar.leave_days(conn, start_date, end_date, half or "full")
+    try:
+        days = work_calendar.leave_days(conn, start_date, end_date, half or "full")
+    except work_calendar.CalendarError as exc:
+        raise LeaveError(str(exc)) from exc
     if days <= 0:
         raise LeaveError("선택한 기간에 근무일이 없습니다.")
     _assert_no_overlap(conn, employee_id, start_date, end_date, db_type, half)
@@ -232,11 +257,7 @@ def _sync_attendance(conn: sqlite3.Connection, employee_id: int, dates: set[str]
         "leave_attendance_conflict", "partial_leave_review",
     }
     for iso in sorted(dates):
-        leave = conn.execute(
-            """SELECT * FROM leave_requests WHERE employee_id=? AND status='approved'
-                 AND start_date<=? AND end_date>=? ORDER BY id DESC LIMIT 1""",
-            (employee_id, iso, iso),
-        ).fetchone()
+        coverage = approved_leave_coverage(conn, employee_id, iso)
         punch_count = conn.execute(
             "SELECT COUNT(*) FROM punch_events WHERE employee_id=? AND work_date=? AND rolled_back_at IS NULL",
             (employee_id, iso),
@@ -247,10 +268,10 @@ def _sync_attendance(conn: sqlite3.Connection, employee_id: int, dates: set[str]
         ).fetchone()
         if existing and existing["confirmed_at"]:
             continue
-        if leave and leave["leave_type"] == "half_day":
+        if coverage["coverage"] in {"am", "pm"}:
             status, flag, note = "half_day", "partial_leave_review", "반차와 지문 시간을 관리자가 확인해야 합니다."
-        elif leave:
-            status = "sick_leave" if leave["leave_type"] == "sick" else "leave"
+        elif coverage["coverage"] == "full":
+            status = "sick_leave" if coverage["leaveType"] == "sick" else "leave"
             flag = "leave_attendance_conflict" if punch_count else None
             note = "승인 휴가일에 활성 지문이 있습니다." if punch_count else None
         elif punch_count >= 2:
@@ -301,7 +322,10 @@ def correct_leave(conn: sqlite3.Connection, leave_id: int, *, employee_id: int,
         raise LeaveError("cross-year leave must be registered as one request per year")
     employee = _employee(conn, employee_id); _validate_employment(employee, start_date, end_date)
     db_type, half = _normalize_input(leave_type, portion)
-    days = work_calendar.leave_days(conn, start_date, end_date, half or "full")
+    try:
+        days = work_calendar.leave_days(conn, start_date, end_date, half or "full")
+    except work_calendar.CalendarError as exc:
+        raise LeaveError(str(exc)) from exc
     if days <= 0: raise LeaveError("선택한 기간에 근무일이 없습니다.")
     _assert_no_overlap(conn, employee_id, start_date, end_date, db_type, half, leave_id)
     if evidence_start_date and evidence_end_date and evidence_end_date < evidence_start_date:

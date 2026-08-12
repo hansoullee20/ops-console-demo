@@ -45,7 +45,7 @@ from pathlib import Path
 from app import config, db, migrate
 from app.rules import punch_review
 from app.rules.punch_review import Finding
-from app.services import xls_import
+from app.services import leave_operations, xls_import
 from app.services.xls_import import ParsedWorkbook, dedupe_key
 
 TERMINAL_ID = "default"
@@ -873,19 +873,13 @@ def derive_attendance(
         if existing and existing["confirmed_at"]:
             continue
 
-        approved_leave = conn.execute(
-            """SELECT leave_type FROM leave_requests
-                 WHERE employee_id = ? AND status = 'approved'
-                   AND start_date <= ? AND end_date >= ?
-                 ORDER BY id DESC LIMIT 1""",
-            (employee_id, work_date, work_date),
-        ).fetchone()
+        leave_coverage = leave_operations.approved_leave_coverage(conn, employee_id, work_date)
 
         if not times:
-            if approved_leave:
-                leave_type = approved_leave["leave_type"]
-                status = "half_day" if leave_type == "half_day" else "sick_leave" if leave_type == "sick" else "leave"
-                flag = "partial_leave_review" if leave_type == "half_day" else None
+            if leave_coverage["coverage"] != "none":
+                leave_type = leave_coverage["leaveType"]
+                status = "half_day" if leave_coverage["coverage"] in {"am", "pm"} else "sick_leave" if leave_type == "sick" else "leave"
+                flag = "partial_leave_review" if leave_coverage["coverage"] in {"am", "pm"} else None
                 conn.execute(
                     """INSERT INTO attendance_days(employee_id,work_date,status,source,review_flag,review_note)
                        VALUES(?,?,?,'manual',?,?)
@@ -912,10 +906,10 @@ def derive_attendance(
                 written += 1
             continue
 
-        if approved_leave:
-            leave_type = approved_leave["leave_type"]
-            status = "half_day" if leave_type == "half_day" else "sick_leave" if leave_type == "sick" else "leave"
-            review_flag = "partial_leave_review" if leave_type == "half_day" else "leave_attendance_conflict"
+        if leave_coverage["coverage"] != "none":
+            leave_type = leave_coverage["leaveType"]
+            status = "half_day" if leave_coverage["coverage"] in {"am", "pm"} else "sick_leave" if leave_type == "sick" else "leave"
+            review_flag = "partial_leave_review" if leave_coverage["coverage"] in {"am", "pm"} else "leave_attendance_conflict"
         else:
             status = "normal" if len(times) >= 2 else "unknown"
             review_flag = None if len(times) >= 2 else "incomplete_day"

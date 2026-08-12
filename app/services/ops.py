@@ -12,7 +12,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from app.services import presentation
+from app.services import leave_operations, presentation
 
 
 def data_context(conn: sqlite3.Connection) -> dict[str, str | None]:
@@ -122,16 +122,13 @@ def week_view(
     attendance = _attendance_map(conn, dates)
     punches = _punch_map(conn, dates)
     leave_conflicts_enabled = data_context(conn)["data_context"] == "operational"
-    for row in conn.execute(
-        """SELECT employee_id,start_date,end_date,leave_type FROM leave_requests
-            WHERE status='approved' AND leave_type!='half_day'
-              AND start_date<=? AND end_date>=?""", (dates[-1], dates[0])
-    ):
+    for person in employees(conn):
         for iso in dates:
-            key = (row["employee_id"], iso)
-            if leave_conflicts_enabled and row["start_date"] <= iso <= row["end_date"] and punches.get(key):
+            key = (person["id"], iso)
+            coverage = leave_operations.approved_leave_coverage(conn, person["id"], iso)
+            if leave_conflicts_enabled and coverage["coverage"] == "full" and punches.get(key):
                 view = dict(attendance.get(key) or {
-                    "employee_id": row["employee_id"], "work_date": iso,
+                    "employee_id": person["id"], "work_date": iso,
                     "status": "unknown",
                 })
                 view["review_flag"] = "leave_attendance_conflict"
@@ -276,16 +273,8 @@ def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, di
     if data_context(conn)["data_context"] == "operational":
         conflict_keys = {
             (row["employee_id"], row["work_date"])
-            for row in conn.execute(
-                """SELECT DISTINCT p.employee_id,p.work_date
-                     FROM punch_events p
-                     JOIN leave_requests l ON l.employee_id=p.employee_id
-                      AND l.status='approved' AND l.leave_type!='half_day'
-                      AND p.work_date BETWEEN l.start_date AND l.end_date
-                    WHERE p.rolled_back_at IS NULL AND p.employee_id IS NOT NULL
-                      AND p.work_date LIKE ?""",
-                (prefix + "%",),
-            )
+            for row in conn.execute("SELECT DISTINCT employee_id,work_date FROM punch_events WHERE rolled_back_at IS NULL AND employee_id IS NOT NULL AND work_date LIKE ?", (prefix + "%",))
+            if leave_operations.approved_leave_coverage(conn, row["employee_id"], row["work_date"])["coverage"] == "full"
         }
 
     def bump(iso: str, key: str) -> None:

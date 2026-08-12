@@ -340,3 +340,98 @@ def test_month_overlap_filters_and_multiday_replacement_stats(operational):
     week=ops.week_view(conn,"2026-08-10","2026-08-10")
     worker=week["employees"][1]
     assert [cell["type"] for cell in worker["cells"][:3]]==["replacement"]*3
+
+
+@pytest.mark.parametrize("date,is_working,expected",[
+    ("2026-08-08",None,False),
+    ("2026-08-10",False,False),
+    ("2026-08-08",True,True),
+])
+def test_leave_punch_conflict_respects_work_calendar(operational,date,is_working,expected):
+    path,a,_,_=operational;conn=db.connect(path)
+    if is_working is not None:
+        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES(?,?,?)",(date,"special",is_working))
+    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    _insert_punch(conn,a,date,"calendar-"+date)
+    item=leave.list_leave(conn)[0]
+    assert ("leave_attendance_conflict" in item["findings"]) is expected
+    from app.services import ops
+    view=ops.week_view(conn,"2026-08-07","2026-08-07")
+    cell=view["employees"][0]["cells"][(int(date[-2:])-7)]
+    assert (cell.get("issue") is True) is expected
+
+
+def test_approved_am_pm_aggregate_to_full_day(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    am=create(conn,a,"half_day","2026-08-10","2026-08-10","am")
+    pm=create(conn,a,"half_day","2026-08-10","2026-08-10","pm")
+    leave.approve_leave(conn,am["id"]);leave.approve_leave(conn,pm["id"])
+    assert leave.balance(conn,a,2026)["used"]==1.0
+    assert leave.approved_leave_coverage(conn,a,"2026-08-10")["coverage"]=="full"
+    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave",None)
+    _insert_punch(conn,a,"2026-08-10","both-halves")
+    leave._sync_attendance(conn,a,{"2026-08-10"})
+    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave","leave_attendance_conflict")
+
+
+def test_sick_mismatch_and_punch_preserve_both_findings(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,"sick_leave","2026-08-04","2026-09-11",evidence_received=True,
+        evidence_start_date="2026-08-04",evidence_end_date="2026-08-31")
+    leave.approve_leave(conn,row["id"])
+    assert leave.list_leave(conn)[0]["findings"]==["sick_leave_evidence_mismatch"]
+    _insert_punch(conn,a,"2026-08-04","sick-both")
+    findings=leave.list_leave(conn)[0]["findings"]
+    assert findings==["sick_leave_evidence_mismatch","leave_attendance_conflict"]
+
+
+def test_replacement_edit_revalidates_link_and_allows_null_absent(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    other=conn.execute("INSERT INTO employees(employee_code,name,hire_date,status) VALUES('P4-D','Fictional D','2020-01-01','active')").lastrowid
+    linked=create(conn,a,start="2026-08-10",end="2026-08-12")
+    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-12",zone="A",leave_request_id=linked["id"])
+    with pytest.raises(repl.ReplacementError,match="belong"):
+        repl.update_assignment(conn,assignment["id"],{"absentEmployeeId":other})
+    with pytest.raises(repl.ReplacementError,match="covered"):
+        repl.update_assignment(conn,assignment["id"],{"startDate":"2026-08-15","endDate":"2026-08-15"})
+    loose=repl.create_assignment(conn,absent_employee_id=None,replacement_employee_id=b,
+        start_date="2026-08-13",end_date="2026-08-13",zone="A")
+    changed=repl.update_assignment(conn,loose["id"],{"zone":"B","note":"fictional"})
+    assert changed["absentEmployeeId"] is None and changed["zone"]=="B"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='replacement.update'").fetchone()[0]==1
+
+
+@pytest.mark.parametrize("payload",[
+    {"leaveType":"annual_leave","startDate":"2026-08-11","endDate":"2026-08-10","portion":"full"},
+    {"leaveType":"half_day","startDate":"2026-08-10","endDate":"2026-08-11","portion":"am"},
+])
+def test_bad_leave_calendar_inputs_are_controlled_http_errors(operational,payload):
+    path,a,_,_=operational
+    payload={"employeeId":a,**payload}
+    with TestClient(create_app()) as client:
+        response=client.post("/api/v1/leave-operations",json=payload)
+    assert response.status_code in {409,422}
+    assert db.connect(path).execute("SELECT COUNT(*) FROM leave_requests").fetchone()[0]==0
+
+
+def test_operational_ui_initial_month_is_dynamic():
+    script=Path("phase4-ui.js").read_text(encoding="utf-8")
+    assert "selectedMonth='2026-08'" not in script
+    assert "now.getFullYear()" in script and "now.getMonth()+1" in script
+
+
+def test_xls_derivation_uses_authoritative_work_calendar(operational,tmp_path):
+    path,a,_,_=operational;conn=db.connect(path)
+    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-08','special',1)")
+    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-10','holiday',0)")
+    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"calendar.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{
+        8:["07:00","16:00"],10:["07:00","16:00"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path)
+    rows={r["work_date"]:dict(r) for r in conn.execute("SELECT work_date,status,review_flag FROM attendance_days WHERE work_date IN ('2026-08-08','2026-08-10')")}
+    assert rows["2026-08-08"]["review_flag"]=="leave_attendance_conflict"
+    assert rows["2026-08-10"]["status"]=="normal" and rows["2026-08-10"]["review_flag"] is None

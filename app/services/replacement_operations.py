@@ -42,6 +42,23 @@ def _validate_employee(employee, start_date, end_date):
         raise ReplacementError("대체근무 기간이 직원의 재직기간을 벗어납니다.")
 
 
+def _validate_absent(employee, start_date, end_date):
+    if start_date < employee["hire_date"] or (employee["end_date"] and end_date > employee["end_date"]):
+        raise ReplacementError("absent employee is outside the employment period")
+
+
+def _validate_link(conn, leave_request_id, absent_employee_id, start_date, end_date):
+    if leave_request_id is None:
+        return
+    linked=conn.execute("SELECT * FROM leave_requests WHERE id=?",(leave_request_id,)).fetchone()
+    if linked is None:
+        raise ReplacementError("linked leave request was not found")
+    if absent_employee_id is None or linked["employee_id"] != absent_employee_id:
+        raise ReplacementError("linked leave must belong to the absent employee")
+    if linked["start_date"] > start_date or linked["end_date"] < end_date:
+        raise ReplacementError("replacement period must be covered by the linked leave")
+
+
 def _assert_available(conn, employee_id, start_date, end_date, exclude_id=None):
     row=conn.execute("""SELECT id FROM replacement_assignments
                         WHERE substitute_employee_id=? AND status IN ('candidate','assigned','completed')
@@ -81,18 +98,11 @@ def create_assignment(conn, *, absent_employee_id, replacement_employee_id, star
     if end_date < start_date: raise ReplacementError("종료일은 시작일보다 빠를 수 없습니다.")
     if absent_employee_id == replacement_employee_id: raise ReplacementError("결원 직원과 대체근무자는 같을 수 없습니다.")
     substitute=_employee(conn,replacement_employee_id); _validate_employee(substitute,start_date,end_date)
-    if absent_employee_id is not None: _employee(conn,absent_employee_id)
+    if absent_employee_id is not None: _validate_absent(_employee(conn,absent_employee_id),start_date,end_date)
     if status not in API_TO_DB: raise ReplacementError("대체근무 상태가 올바르지 않습니다.")
     if status != "planned":
         raise ReplacementError("new replacement assignments must start as planned")
-    if leave_request_id is not None:
-        linked=conn.execute("SELECT * FROM leave_requests WHERE id=?",(leave_request_id,)).fetchone()
-        if linked is None:
-            raise ReplacementError("linked leave request was not found")
-        if absent_employee_id is None or linked["employee_id"] != absent_employee_id:
-            raise ReplacementError("linked leave must belong to the absent employee")
-        if linked["start_date"] > start_date or linked["end_date"] < end_date:
-            raise ReplacementError("replacement period must be covered by the linked leave")
+    _validate_link(conn,leave_request_id,absent_employee_id,start_date,end_date)
     _assert_available(conn,replacement_employee_id,start_date,end_date)
     cursor=conn.execute("""INSERT INTO replacement_assignments
         (work_date,start_date,end_date,shift,zone,absent_employee_id,substitute_employee_id,leave_request_id,status,note,assigned_by,assigned_at)
@@ -115,10 +125,12 @@ def update_assignment(conn, assignment_id, changes, *, actor="operator", reason=
         if key in changes: values[column]=API_TO_DB.get(changes[key],changes[key]) if key=="status" else changes[key]
     start,end=values["start_date"] or values["work_date"],values["end_date"] or values["work_date"]
     if end<start: raise ReplacementError("종료일은 시작일보다 빠를 수 없습니다.")
-    absent=_employee(conn,values["absent_employee_id"]); _validate_employee(absent,start,end)
+    if values["absent_employee_id"] is not None:
+        _validate_absent(_employee(conn,values["absent_employee_id"]),start,end)
     substitute=_employee(conn,values["substitute_employee_id"]); _validate_employee(substitute,start,end)
     if values["absent_employee_id"]==values["substitute_employee_id"]:
         raise ReplacementError("absent and replacement employees must differ")
+    _validate_link(conn,values["leave_request_id"],values["absent_employee_id"],start,end)
     _assert_available(conn,values["substitute_employee_id"],start,end,assignment_id)
     assignments=[]; params=[]
     for key,column in allowed.items():
