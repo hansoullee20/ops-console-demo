@@ -68,3 +68,69 @@ def test_mapping_write_is_refused_on_demo_database(monkeypatch,migrated_db,tmp_p
     with TestClient(create_app()) as client:
         response=client.post("/api/v1/terminal-slots",json={"slotCode":"099","employeeId":1,"effectiveFrom":"2026-08-01"})
     assert response.status_code==409
+
+def test_partial_mapping_is_blocking_and_lists_uncovered_punch_dates(operational,tmp_path):
+    path,a,_=operational
+    source=build_export(tmp_path/"partial.xls",year=2026,month=8,slots=[SlotSpec("001","가상 슬롯",{1:["07:00"],5:["16:00"]})])
+    conn=db.connect(path); slot_mappings.create_mapping(conn,slot_code="001",employee_id=a,effective_from="2026-08-05"); conn.commit(); conn.close()
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads")
+    assert preview.slots[0]["status"]=="partial_unmapped"
+    assert preview.slots[0]["uncoveredDates"]==["2026-08-01"]
+    assert any(f["code"]=="unmapped_punch_dates" and f["severity"]=="blocking" for f in preview.findings)
+    assert preview.can_apply is False
+
+def test_mapping_handoff_finding_does_not_hide_a_gap(operational,tmp_path):
+    path,a,b=operational
+    source=build_export(tmp_path/"gap.xls",year=2026,month=8,slots=[SlotSpec("001","가상 슬롯",{3:["07:00"],4:["07:00"],5:["07:00"]})])
+    conn=db.connect(path)
+    slot_mappings.create_mapping(conn,slot_code="001",employee_id=a,effective_from="2026-08-01",effective_to="2026-08-03")
+    slot_mappings.create_mapping(conn,slot_code="001",employee_id=b,effective_from="2026-08-05")
+    conn.commit(); conn.close()
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads")
+    assert {f["code"] for f in preview.findings}>={"slot_changed_hands","unmapped_punch_dates"}
+    assert preview.slots[0]["uncoveredDates"]==["2026-08-04"]
+    assert preview.can_apply is False
+
+def test_wrong_mapping_can_be_cancelled_then_corrected_and_audited(operational,tmp_path):
+    path,a,b=operational
+    source=build_export(tmp_path/"correct.xls",year=2026,month=8,slots=[SlotSpec("001","가상 슬롯",{1:["07:00","16:00"]})])
+    first=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads")
+    conn=db.connect(path)
+    wrong=slot_mappings.create_mapping(conn,slot_code="001",employee_id=a,effective_from="2026-08-01")
+    conn.commit(); conn.close()
+    wrong_preview=xls_pipeline.refresh_preview(first.import_run_id,db_path=path)
+    conn=db.connect(path)
+    slot_mappings.correct_mapping(conn,wrong,b,"잘못 선택")
+    conn.commit(); conn.close()
+    corrected=xls_pipeline.refresh_preview(first.import_run_id,db_path=path)
+    assert corrected.slots[0]["employeeIds"]==[b]
+    assert corrected.confirmation_token!=wrong_preview.confirmation_token
+    with pytest.raises(xls_pipeline.ImportError_,match="confirmation token"):
+        xls_pipeline.apply_import(first.import_run_id,wrong_preview.confirmation_token,db_path=path,backups_dir=tmp_path/"backups")
+    result=xls_pipeline.apply_import(first.import_run_id,corrected.confirmation_token,db_path=path,backups_dir=tmp_path/"backups")
+    assert result["inserted"]==2
+    conn=db.connect(path)
+    assert conn.execute("SELECT COUNT(*) FROM punch_events WHERE employee_id=?",(b,)).fetchone()[0]==2
+    assert [r[0] for r in conn.execute("SELECT action FROM audit_log WHERE entity_type='terminal_slots' ORDER BY id")]==["terminal_slot.create","terminal_slot.correct"]
+    conn.close()
+
+def test_mapping_used_by_active_import_requires_rollback_before_cancel(operational,tmp_path):
+    path,a,_=operational
+    source=build_export(tmp_path/"used.xls",year=2026,month=8,slots=[SlotSpec("001","가상 슬롯",{1:["07:00","16:00"]})])
+    conn=db.connect(path); mapping=slot_mappings.create_mapping(conn,slot_code="001",employee_id=a,effective_from="2026-08-01"); conn.commit(); conn.close()
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"uploads")
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"backups")
+    conn=db.connect(path)
+    with pytest.raises(slot_mappings.MappingError,match="먼저.*되돌리"):
+        slot_mappings.cancel_mapping(conn,mapping,"잘못 선택")
+    conn.close()
+
+def test_historical_employee_is_returned_with_status_and_end_date(operational):
+    path,_,_=operational
+    conn=db.connect(path)
+    departed=add_employee(conn,"OLD","과거 직원")
+    conn.execute("UPDATE employees SET status='terminated', end_date='2025-12-31' WHERE id=?",(departed,))
+    conn.commit()
+    employee=next(e for e in slot_mappings.list_mappings(conn)["employees"] if e["id"]==departed)
+    conn.close()
+    assert employee["status"]=="terminated" and employee["end_date"]=="2025-12-31"

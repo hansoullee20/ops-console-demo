@@ -187,12 +187,12 @@ def _slot_intervals(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     """
     rows = conn.execute(
         """
-        SELECT t.slot_code, t.status AS slot_status, t.effective_from, t.effective_to,
+        SELECT t.id, t.slot_code, t.status AS slot_status, t.effective_from, t.effective_to,
                e.id AS employee_id, e.name, e.status AS employee_status,
                e.hire_date, e.end_date
           FROM terminal_slots t
           LEFT JOIN employees e ON e.id = t.employee_id
-         WHERE t.terminal_id = ?
+         WHERE t.terminal_id = ? AND t.status = 'mapped'
          ORDER BY t.slot_code, IFNULL(t.effective_from, ''), t.id
         """,
         (TERMINAL_ID,),
@@ -381,6 +381,7 @@ def _build_preview(
         # it actually carried punches rather than once for the whole file.
         dates = sorted({d for (s, d) in by_slot_day if s == slot.slot_code})
         resolved = [_resolve_slot(intervals, slot.slot_code, d) for d in dates]
+        uncovered_dates = [d for d, owner in zip(dates, resolved) if owner is None]
         holders = {
             r["employee_id"]: r for r in resolved if r and r.get("employee_id")
         }
@@ -395,6 +396,14 @@ def _build_preview(
                 f"슬롯 {slot.slot_code}: 이 기간 안에 담당자가 바뀝니다({employee}). "
                 "각 펀치는 그 날짜의 담당자에게 귀속됩니다.",
                 slot_code=slot.slot_code, employee=employee,
+            ))
+        if uncovered_dates and slot.punch_count:
+            status = "partial_unmapped" if holders else "unmapped"
+            findings.append(Finding(
+                "unmapped_punch_dates", "blocking",
+                f"슬롯 {slot.slot_code}: 지문이 있는 날짜 중 직원 연결이 없는 날짜가 있습니다: "
+                f"{', '.join(uncovered_dates)}. 직원을 추측하지 않으며 연결 전에는 반영할 수 없습니다.",
+                slot_code=slot.slot_code,
             ))
         elif slot.punch_count == 0:
             status = "unused"
@@ -429,6 +438,7 @@ def _build_preview(
             "status": status,
             "punchCount": slot.punch_count,
             "dayCount": slot.day_count,
+            "uncoveredDates": uncovered_dates,
         })
 
     for (slot_code, work_date), punches in sorted(by_slot_day.items()):

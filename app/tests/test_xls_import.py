@@ -15,7 +15,7 @@ import pytest
 from app import db
 from app.rules import punch_review
 from app.seed.demo_dataset import seed_demo_database
-from app.services import xls_import, xls_pipeline
+from app.services import slot_mappings, xls_import, xls_pipeline
 from app.services.xls_import import XlsImportError, dedupe_key, parse_workbook
 from app.tests.fixtures.terminal_xls import SlotSpec, build_export, realistic_month
 
@@ -59,7 +59,7 @@ def _apply(preview, seeded: Path, tmp_path: Path):
 def test_reactivation_uses_the_current_date_scoped_mapping(
     migrated_db: Path, tmp_path: Path
 ):
-    """A rolled-back unmapped punch must become mapped when reactivated.
+    """A rolled-back punch must use a corrected mapping when reactivated.
 
     Slot mappings are derived state, not immutable punch provenance. Operators
     commonly import first and repair a missing mapping before retrying.
@@ -69,10 +69,18 @@ def test_reactivation_uses_the_current_date_scoped_mapping(
         conn.execute(
             "UPDATE app_meta SET value = 'operational' WHERE key = 'data_context'"
         )
+        original_employee_id = conn.execute(
+            "INSERT INTO employees (employee_code, name, zone, hire_date) "
+            "VALUES ('REMAP-0', 'Fictional Original', 'Z', '2020-01-01')"
+        ).lastrowid
         employee_id = conn.execute(
             "INSERT INTO employees (employee_code, name, zone, hire_date) "
-            "VALUES ('REMAP-1', 'Fictional Remap', 'Z', '2020-01-01')"
+            "VALUES ('REMAP-1', 'Fictional Corrected', 'Z', '2020-01-01')"
         ).lastrowid
+        mapping_id = slot_mappings.create_mapping(
+            conn, slot_code="001", employee_id=original_employee_id,
+            effective_from="2026-01-01",
+        )
         conn.commit()
     finally:
         conn.close()
@@ -87,11 +95,8 @@ def test_reactivation_uses_the_current_date_scoped_mapping(
 
     conn = db.connect(migrated_db)
     try:
-        conn.execute(
-            "INSERT INTO terminal_slots "
-            "(terminal_id, slot_code, employee_id, effective_from, status) "
-            "VALUES ('default', '001', ?, '2026-01-01', 'mapped')",
-            (employee_id,),
+        slot_mappings.correct_mapping(
+            conn, mapping_id, employee_id, "롤백 후 직원 연결 정정"
         )
         conn.commit()
     finally:
@@ -109,18 +114,18 @@ def test_reactivation_uses_the_current_date_scoped_mapping(
             "SELECT employee_id, review_flag FROM punch_events ORDER BY id"
         ).fetchall()
         attendance = conn.execute(
-            "SELECT employee_id, status FROM attendance_days"
-        ).fetchone()
+            "SELECT employee_id, status FROM attendance_days ORDER BY employee_id"
+        ).fetchall()
     finally:
         conn.close()
     assert [(row["employee_id"], row["review_flag"]) for row in punches] == [
         (employee_id, None),
         (employee_id, None),
     ]
-    assert (attendance["employee_id"], attendance["status"]) == (
-        employee_id,
-        "normal",
-    )
+    assert [(row["employee_id"], row["status"]) for row in attendance] == [
+        (original_employee_id, "unknown"),
+        (employee_id, "normal"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -243,22 +248,23 @@ def test_preview_reports_every_finding_class(export, seeded, tmp_path):
     assert preview.zero_punch_dates, "quiet days must be surfaced, not ignored"
 
 
-def test_unmapped_slot_is_flagged_and_its_punches_still_kept(seeded, tmp_path):
+def test_unmapped_slot_is_blocked_before_any_raw_punch_is_written(seeded, tmp_path):
     export = build_export(
         tmp_path / "unmapped.XLS",
         slots=[SlotSpec("099", "미등록", {1: ["07:20", "16:00"]})],
     )
     preview = _preview(export, seeded, tmp_path)
-    assert any(f["code"] == "unmapped_slot" for f in preview.findings)
+    assert any(f["code"] == "unmapped_punch_dates" for f in preview.findings)
     assert preview.new_punches == 2
+    assert preview.can_apply is False
 
-    _apply(preview, seeded, tmp_path)
+    with pytest.raises(xls_pipeline.ImportError_, match="blocking findings"):
+        _apply(preview, seeded, tmp_path)
     with db.connection(seeded) as conn:
-        rows = conn.execute(
-            "SELECT employee_id, review_flag FROM punch_events WHERE terminal_slot_code = '099'"
-        ).fetchall()
-    assert len(rows) == 2, "punches from an unmapped slot must still be preserved"
-    assert all(r["employee_id"] is None and r["review_flag"] == "unmapped_slot" for r in rows)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM punch_events WHERE terminal_slot_code = '099'"
+        ).fetchone()[0]
+    assert count == 0, "a blocked preview must not write employee-less business data"
 
 
 def test_punch_before_hire_date_is_flagged(seeded, tmp_path):

@@ -145,6 +145,8 @@ MUTATION_ALLOWLIST = {
     ("post", "/api/v1/terminal-slots"),
     ("post", "/api/v1/terminal-slots/batch"),
     ("post", "/api/v1/terminal-slots/{mapping_id}/close"),
+    ("post", "/api/v1/terminal-slots/{mapping_id}/cancel"),
+    ("post", "/api/v1/terminal-slots/{mapping_id}/correct"),
 }
 
 
