@@ -91,23 +91,26 @@ def _punch_map(conn: sqlite3.Connection, dates: list[str]) -> dict[tuple[int, st
 
 
 def _replacement_map(conn: sqlite3.Connection, dates: list[str]) -> dict[tuple[int, str], dict]:
-    marks = ",".join("?" * len(dates))
     rows = conn.execute(
-        f"""
+        """
         SELECT r.*, a.name AS absent_name, s.name AS substitute_name
           FROM replacement_assignments r
           LEFT JOIN employees a ON a.id = r.absent_employee_id
           LEFT JOIN employees s ON s.id = r.substitute_employee_id
-         WHERE r.work_date IN ({marks}) AND r.status IN ('assigned', 'completed')
+         WHERE COALESCE(r.start_date,r.work_date) <= ?
+           AND COALESCE(r.end_date,r.work_date) >= ?
+           AND r.status IN ('assigned', 'completed')
         """,
-        dates,
+        (dates[-1], dates[0]),
     ).fetchall()
     out: dict[tuple[int, str], dict] = {}
     for row in rows:
         if row["substitute_employee_id"] is not None:
             entry = dict(row)
             entry["substitute_is_this_employee"] = True
-            out[(row["substitute_employee_id"], row["work_date"])] = entry
+            for iso in dates:
+                if (row["start_date"] or row["work_date"]) <= iso <= (row["end_date"] or row["work_date"]):
+                    out[(row["substitute_employee_id"], iso)] = entry
     return out
 
 

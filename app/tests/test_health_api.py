@@ -33,7 +33,7 @@ def test_health_reports_ready_database(app_client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["app"] == "ops-console-backend"
-    assert body["phase"] == 3
+    assert body["phase"] == 4
     assert body["database"]["reachable"] is True
     assert body["database"]["foreign_keys_enforced"] is True
     assert body["database"]["schema_version"] == LATEST_VERSION
@@ -150,8 +150,8 @@ def test_startup_migrates_the_database(monkeypatch, tmp_path: Path):
         assert migrate.schema_version(conn) == LATEST_VERSION
 
 
-def test_the_write_surface_is_phase_35_attendance_only():
-    """Phase 3.5 adds date-scoped slot mapping beside the import flow.
+def test_the_write_surface_is_deliberately_scoped():
+    """Phase 4 adds leave and replacement operations beside imports.
 
     Attendance correction remains a service, not an endpoint; the exact
     allowlist is pinned in test_api.py.
@@ -165,7 +165,11 @@ def test_the_write_surface_is_phase_35_attendance_only():
         for method in operations
         if method.lower() not in {"get", "head", "options"}
     }
-    assert writable and all(path.startswith(("/api/v1/imports", "/api/v1/terminal-slots")) for path in writable), (
-        f"a write endpoint outside the import flow: {sorted(writable)}"
+    allowed_prefixes = (
+        "/api/v1/imports", "/api/v1/terminal-slots",
+        "/api/v1/leave-operations", "/api/v1/replacement-operations",
+    )
+    assert writable and all(path.startswith(allowed_prefixes) for path in writable), (
+        f"a write endpoint outside the operational flows: {sorted(writable)}"
     )
     assert "/api/v1/attendance" in schema      # still read-only

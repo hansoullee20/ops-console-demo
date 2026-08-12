@@ -147,11 +147,19 @@ MUTATION_ALLOWLIST = {
     ("post", "/api/v1/terminal-slots/{mapping_id}/close"),
     ("post", "/api/v1/terminal-slots/{mapping_id}/cancel"),
     ("post", "/api/v1/terminal-slots/{mapping_id}/correct"),
+    ("post", "/api/v1/leave-operations"),
+    ("put", "/api/v1/leave-operations/{leave_id}"),
+    ("post", "/api/v1/leave-operations/{leave_id}/approve"),
+    ("post", "/api/v1/leave-operations/{leave_id}/cancel"),
+    ("post", "/api/v1/replacement-operations"),
+    ("patch", "/api/v1/replacement-operations/{assignment_id}"),
+    ("patch", "/api/v1/replacement-operations/{assignment_id}/checklist"),
+    ("post", "/api/v1/replacement-operations/{assignment_id}/status"),
 }
 
 
-def test_only_phase_35_operational_attendance_can_write(client):
-    """Phase 3.5 adds only preview refresh and slot-mapping writes.
+def test_only_deliberately_allowlisted_operational_routes_can_write(client):
+    """Phase 4 adds leave and replacement writes to the pinned surface.
 
     The attendance correction service exists and is tested, but stays off HTTP
     until the UI needs attendance editing. A new mutation endpoint has to be
