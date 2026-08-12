@@ -15,7 +15,6 @@ jobs:
   melotts-korean-candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
