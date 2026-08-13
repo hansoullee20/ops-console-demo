@@ -97,13 +97,14 @@
         "events": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["wellness", "symptom_journal", "arrival_departure", "inactivity", "emergency"],
+          "required": ["wellness", "symptom_journal", "arrival_departure", "inactivity", "emergency", "family_eta"],
           "properties": {
             "wellness": { "type": "boolean" },
             "symptom_journal": { "type": "boolean" },
             "arrival_departure": { "type": "boolean" },
             "inactivity": { "type": "boolean" },
-            "emergency": { "type": "boolean" }
+            "emergency": { "type": "boolean" },
+            "family_eta": { "type": "boolean" }
           }
         },
         "quiet_hours_respected": { "type": "boolean" },

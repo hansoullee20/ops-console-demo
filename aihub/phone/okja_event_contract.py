@@ -42,6 +42,10 @@ EVENT_TYPES = frozenset({
     "tts.started", "tts.completed", "tts.failed",
     "emergency.confirmation_requested", "emergency.dismissed",
     "emergency.ready", "emergency.escalation_started", "emergency.resolved",
+    "wellness.checkin_requested", "wellness.checkin_recorded",
+    "symptom.recorded", "presence.arrived", "presence.departed",
+    "family.eta_updated", "notification.requested",
+    "notification.delivered", "notification.failed",
 })
 
 REQUIRED_FIELDS = frozenset({

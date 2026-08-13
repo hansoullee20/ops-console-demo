@@ -30,6 +30,7 @@ NOTIFICATION_FIELDS = frozenset({
 })
 NOTIFICATION_EVENT_FIELDS = frozenset({
     "wellness", "symptom_journal", "arrival_departure", "inactivity", "emergency",
+    "family_eta",
 })
 RECIPIENT_FIELDS = frozenset({"caregiver_id", "channels"})
 CONSENT_FIELDS = frozenset({

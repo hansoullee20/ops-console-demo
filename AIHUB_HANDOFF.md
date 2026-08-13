@@ -86,6 +86,12 @@
 - Clean evidence: run `31682851423` passes 36 phone contract/config tests plus the 48-test wake/evaluator suite; APK run `31682851417` is green. G3.6, G3.9 and G3.10 are closed.
 - Scope guard: G3.7 retains partial schema/default evidence but stays open until Android applies the accessibility settings. Profile UI, actual notification delivery and legal/pilot consent review remain open.
 
+### G3.4 care/family event contract — active
+
+- Current task: add exact event/payload contracts for wellness check-ins, non-diagnostic symptom records, estimated/confirmed arrival and departure, family ETA and the notification request/delivery/failure lifecycle.
+- Consent enforcement in progress: health records require health-journal consent; caregiver delivery and family ETA require caregiver-sharing consent; notification targets/channels/categories must be enabled in the shared profile.
+- Scope guard: G3.4 may close on contract/test/build evidence. It does not claim sensors, notifications, family UI or care workflows are integrated end to end.
+
 ---
 
 ## 0. Fast restart

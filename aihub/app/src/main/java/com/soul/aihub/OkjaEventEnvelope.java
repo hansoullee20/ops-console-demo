@@ -31,7 +31,11 @@ public final class OkjaEventEnvelope {
             "assistant.response", "assistant.failed",
             "tts.started", "tts.completed", "tts.failed",
             "emergency.confirmation_requested", "emergency.dismissed",
-            "emergency.ready", "emergency.escalation_started", "emergency.resolved");
+            "emergency.ready", "emergency.escalation_started", "emergency.resolved",
+            "wellness.checkin_requested", "wellness.checkin_recorded",
+            "symptom.recorded", "presence.arrived", "presence.departed",
+            "family.eta_updated", "notification.requested",
+            "notification.delivered", "notification.failed");
     private static final Set<String> SEVERITIES = set(
             "debug", "info", "notice", "warning", "error", "critical");
     private static final Set<String> PRIVACY_CLASSES = set(
