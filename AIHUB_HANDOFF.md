@@ -1,10 +1,10 @@
 # AI Hub / Okja — Project Handoff
 
 **Last updated:** 2026-08-13 (KST)
-**Repository:** `hansoullee20/ops-console-demo`  
-**Working branch:** `aihub-voice-test`  
-**Project directory:** `aihub/`  
-**Wake-word work:** `aihub/wakeword/`  
+**Repository:** `hansoullee20/ops-console-demo`
+**Working branch:** `aihub-voice-test`
+**Project directory:** `aihub/`
+**Wake-word work:** `aihub/wakeword/`
 **Start here in a new session:** read this file first. If chat memory conflicts with Git, Git is source of truth.
 
 > **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real replay run `31669141305` executed the pinned v3 ONNX against a fixed, human-approved MeloTTS `옥자` WAV three times per threshold and produced identical outputs. At threshold 0.50 it missed; at 0.06 it detected once with score 0.16584, consistent with the existing v3 failure verdict. G2.5 stays open until the identical audio SHA is replayed through v4 and another local/open engine. Existing Android SpeechRecognizer remains the working control/fallback.
