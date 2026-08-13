@@ -58,6 +58,12 @@
 - Verification: all 48 evaluator/report tests pass in clean run `31679294780`; debug APK run `31679460462` compiles the instrumentation and uploads the installable artifact. `V4_ANDROID_LATENCY_MEASUREMENT.md` contains the exact pull/report procedure.
 - Closure guard: keep G2.8 unchecked until the instrumented debug APK records at least 20 accepted wake attempts on the target Fold4 and the report validates a single device/session/model identity. APK/unit CI proves instrumentation readiness, not physical-device latency.
 
+### G3.1 versioned event envelope — active
+
+- Audit finding: Android currently sends an unversioned `{profile, language, text}` object to the phone bridge and accepts an unversioned text reply. No transport-level correlation, causation, device/session identity, privacy or retention contract is enforced.
+- Implementation in progress: define the strict `okja.event.v1` JSON envelope and registry; mirror validation in dependency-free Python and Android Java; migrate `transcript.final` and `assistant.response/failed` packets; preserve device/profile/session/correlation IDs and causation across the round trip; and remove transcript/reply text from bridge logs.
+- Scope guard: G3.1 may close after contract tests and Android build/transport validation. Keep G3.2 open until wake rejection/candidate, structured intent, confirmation and device-command accepted/failed paths are genuinely emitted by their real implementations.
+
 ---
 
 ## 0. Fast restart

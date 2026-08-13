@@ -12,6 +12,11 @@ from claude_agent_sdk import (
     AssistantMessage,
     TextBlock,
 )
+from okja_event_contract import (
+    assistant_failure,
+    assistant_response,
+    parse_transcript_request,
+)
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -45,16 +50,8 @@ async def collect_reply(client: ClaudeSDKClient) -> str:
 
 
 def parse_request(raw: str):
-    try:
-        obj = json.loads(raw)
-        return {
-            "profile": obj.get("profile", "personal"),
-            "language": obj.get("language", "ko-KR"),
-            "text": str(obj.get("text", "")).strip(),
-        }
-    except json.JSONDecodeError:
-        # Backward compatibility with the first text-only test client.
-        return {"profile": "personal", "language": "ko-KR", "text": raw.strip()}
+    obj = json.loads(raw)
+    return parse_transcript_request(obj)
 
 
 def make_prompt(profile: str, language: str, text: str) -> str:
@@ -106,6 +103,7 @@ async def main():
         print("[AI Hub] Personal profile ready: AI Hub / ko-KR+en-US / sonnet")
 
         async def handle(reader, writer):
+            req = None
             try:
                 raw = await read_packet(reader)
                 req = parse_request(raw)
@@ -114,7 +112,11 @@ async def main():
                 text = req["text"]
 
                 if not text:
-                    await write_packet(writer, "말씀을 다시 해주세요." if profile == "grandma" else "I didn't catch that.")
+                    response = assistant_response(
+                        req["envelope"],
+                        "말씀을 다시 해주세요." if profile == "grandma" else "I didn't catch that.",
+                    )
+                    await write_packet(writer, json.dumps(response, ensure_ascii=False))
                     return
 
                 if profile == "grandma":
@@ -128,7 +130,12 @@ async def main():
 
                 prompt = make_prompt(profile, language, text)
                 started = time.perf_counter()
-                print(f"[AI Hub] {profile}/{language}/{model} USER: {text}")
+                envelope = req["envelope"]
+                print(
+                    f"[AI Hub] event={envelope['event_id']} "
+                    f"correlation={envelope['correlation_id']} "
+                    f"{profile}/{language}/{model} request"
+                )
 
                 async with lock:
                     await client.query(prompt)
@@ -138,16 +145,23 @@ async def main():
                 if not reply:
                     reply = "응답이 비어 있습니다." if language != "en-US" else "The response was empty."
 
-                print(f"[AI Hub] {profile}/{model} ({elapsed:.2f}s): {reply}")
-                await write_packet(writer, reply)
+                print(
+                    f"[AI Hub] correlation={envelope['correlation_id']} "
+                    f"{profile}/{model} completed ({elapsed:.2f}s)"
+                )
+                response = assistant_response(envelope, reply)
+                await write_packet(writer, json.dumps(response, ensure_ascii=False))
 
             except Exception as e:
-                err = f"오류: {type(e).__name__}: {e}"
-                print(f"[AI Hub] {err}")
-                try:
-                    await write_packet(writer, err)
-                except Exception:
-                    pass
+                error_code = type(e).__name__
+                print(f"[AI Hub] request failed: {error_code}")
+                if req is not None:
+                    try:
+                        failure = assistant_failure(
+                            req["envelope"], error_code, "Assistant request failed")
+                        await write_packet(writer, json.dumps(failure, ensure_ascii=False))
+                    except Exception:
+                        pass
             finally:
                 writer.close()
                 try:

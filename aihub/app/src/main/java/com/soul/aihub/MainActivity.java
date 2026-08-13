@@ -28,6 +28,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -43,6 +44,10 @@ public class MainActivity extends Activity {
     private ListenMode listenMode = ListenMode.IDLE;
     private boolean handsFree = true;
     private boolean destroyed = false;
+    private String deviceId;
+    private String sessionId;
+    private String correlationId = "";
+    private String listeningEventId;
 
     private TextView titleText;
     private TextView stateText;
@@ -61,6 +66,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        deviceId = getSharedPreferences("okja_identity", MODE_PRIVATE)
+                .getString("device_id", "");
+        if (deviceId == null || deviceId.isEmpty()) {
+            deviceId = "device-" + UUID.randomUUID();
+            getSharedPreferences("okja_identity", MODE_PRIVATE)
+                    .edit().putString("device_id", deviceId).apply();
+        }
+        sessionId = "session-" + UUID.randomUUID();
         buildUi();
         initTts();
         applyProfileUi();
@@ -87,6 +100,7 @@ public class MainActivity extends Activity {
         profileButton = button();
         profileButton.setOnClickListener(v -> {
             profile = profile == Profile.PERSONAL ? Profile.GRANDMA : Profile.PERSONAL;
+            clearInteractionChain();
             resetListening();
             applyProfileUi();
             scheduleWakeListening(400);
@@ -96,6 +110,7 @@ public class MainActivity extends Activity {
         languageButton.setOnClickListener(v -> {
             if (profile == Profile.PERSONAL) {
                 personalLanguage = personalLanguage.equals("ko-KR") ? "en-US" : "ko-KR";
+                clearInteractionChain();
                 resetListening();
                 applyProfileUi();
                 scheduleWakeListening(400);
@@ -236,9 +251,11 @@ public class MainActivity extends Activity {
                 if (handsFree && failedMode == ListenMode.WAKE) {
                     scheduleWakeListening(350);
                 } else if (handsFree && failedMode == ListenMode.COMMAND) {
+                    clearInteractionChain();
                     stateText.setText("다시 대기합니다");
                     scheduleWakeListening(650);
                 } else {
+                    if (failedMode == ListenMode.COMMAND) clearInteractionChain();
                     stateText.setText("음성인식 오류: " + error);
                 }
             }
@@ -250,6 +267,7 @@ public class MainActivity extends Activity {
 
                 if (matches == null || matches.isEmpty()) {
                     talkButton.setEnabled(true);
+                    if (completedMode == ListenMode.COMMAND) clearInteractionChain();
                     if (handsFree) scheduleWakeListening(350);
                     return;
                 }
@@ -258,6 +276,17 @@ public class MainActivity extends Activity {
 
                 if (completedMode == ListenMode.WAKE) {
                     if (containsWakePhrase(matches)) {
+                        correlationId = "corr-" + UUID.randomUUID();
+                        try {
+                            JSONObject payload = new JSONObject();
+                            payload.put("language", recognitionLanguage());
+                            payload.put("candidate_count", matches.size());
+                            JSONObject detected = voiceEvent(
+                                    "wake.detected", null, "info", "household", payload);
+                            listeningEventId = detected.getString("event_id");
+                        } catch (Exception ignored) {
+                            listeningEventId = null;
+                        }
                         transcriptText.setText(profile == Profile.GRANDMA ? "네, 말씀하세요." : "Listening…");
                         stateText.setText("깨움 감지");
                         main.postDelayed(() -> startCommandListening(), 250);
@@ -270,7 +299,7 @@ public class MainActivity extends Activity {
                 if (completedMode == ListenMode.COMMAND) {
                     transcriptText.setText((profile == Profile.GRANDMA ? "할머니: " : "You: ") + spoken);
                     stateText.setText("Claude에게 보내는 중…");
-                    sendToBridge(spoken);
+                    sendToBridge(spoken, listeningEventId);
                 }
             }
 
@@ -342,11 +371,22 @@ public class MainActivity extends Activity {
         }
 
         try {
+            if (correlationId.isEmpty()) correlationId = "corr-" + UUID.randomUUID();
             recognizer.cancel();
             listenMode = ListenMode.COMMAND;
             talkButton.setEnabled(false);
             answerText.setText("");
             stateText.setText("듣고 있습니다…");
+            try {
+                JSONObject payload = new JSONObject();
+                payload.put("language", recognitionLanguage());
+                payload.put("entrypoint", handsFree ? "voice_or_button" : "button");
+                JSONObject listening = voiceEvent(
+                        "listening.started", listeningEventId, "info", "household", payload);
+                listeningEventId = listening.getString("event_id");
+            } catch (Exception ignored) {
+                listeningEventId = null;
+            }
             recognizer.startListening(recognizerIntent(recognitionLanguage(), true));
         } catch (Exception e) {
             listenMode = ListenMode.IDLE;
@@ -363,9 +403,22 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sendToBridge(String prompt) {
+    private void sendToBridge(String prompt, String causationId) {
         final String lang = recognitionLanguage();
         final String profileName = profile == Profile.GRANDMA ? "grandma" : "personal";
+        final JSONObject request;
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("profile", profileName);
+            payload.put("language", lang);
+            payload.put("text", prompt);
+            request = voiceEvent(
+                    "transcript.final", causationId, "info", "sensitive", payload);
+        } catch (Exception error) {
+            stateText.setText("이벤트 생성 실패");
+            talkButton.setEnabled(true);
+            return;
+        }
 
         ioPool.execute(() -> {
             String result;
@@ -373,12 +426,7 @@ public class MainActivity extends Activity {
                 socket.connect(new InetSocketAddress("127.0.0.1", PORT), 3000);
                 socket.setSoTimeout(90000);
 
-                JSONObject payload = new JSONObject();
-                payload.put("profile", profileName);
-                payload.put("language", lang);
-                payload.put("text", prompt);
-
-                byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
+                byte[] out = request.toString().getBytes(StandardCharsets.UTF_8);
                 DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
                 DataInputStream dis = new DataInputStream(socket.getInputStream());
                 dos.writeInt(out.length);
@@ -389,9 +437,16 @@ public class MainActivity extends Activity {
                 if (len < 0 || len > 2_000_000) throw new IllegalStateException("Bad reply length");
                 byte[] in = new byte[len];
                 dis.readFully(in);
-                result = new String(in, StandardCharsets.UTF_8);
+                JSONObject response = new JSONObject(new String(in, StandardCharsets.UTF_8));
+                OkjaEventEnvelope.requireResponseFor(response, request);
+                JSONObject responsePayload = response.getJSONObject("payload");
+                if (response.getString("event_type").equals("assistant.response")) {
+                    result = responsePayload.getString("text");
+                } else {
+                    result = responsePayload.optString("message", "Assistant request failed");
+                }
             } catch (Exception e) {
-                result = "브리지 연결 실패: " + e.getClass().getSimpleName() + " - " + e.getMessage();
+                result = "브리지/이벤트 오류: " + e.getClass().getSimpleName();
             }
 
             final String reply = result;
@@ -418,6 +473,7 @@ public class MainActivity extends Activity {
 
                     @Override public void onDone(String utteranceId) {
                         main.post(() -> {
+                            clearInteractionChain();
                             listenMode = ListenMode.IDLE;
                             stateText.setText(handsFree ? wakePrompt() : "준비됨");
                             if (handsFree) scheduleWakeListening(650);
@@ -426,6 +482,7 @@ public class MainActivity extends Activity {
 
                     @Override public void onError(String utteranceId) {
                         main.post(() -> {
+                            clearInteractionChain();
                             listenMode = ListenMode.IDLE;
                             if (handsFree) scheduleWakeListening(650);
                         });
@@ -437,12 +494,35 @@ public class MainActivity extends Activity {
 
     private void speak(String text, String lang) {
         if (tts == null) {
+            clearInteractionChain();
             if (handsFree) scheduleWakeListening(500);
             return;
         }
         resetListening();
         tts.setLanguage(lang.equals("en-US") ? Locale.US : Locale.KOREA);
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "aihub-reply");
+    }
+
+    private JSONObject voiceEvent(String eventType, String causationId, String severity,
+                                  String privacyClass, JSONObject payload) throws Exception {
+        if (correlationId.isEmpty()) correlationId = "corr-" + UUID.randomUUID();
+        return OkjaEventEnvelope.create(
+                eventType,
+                deviceId,
+                profile == Profile.GRANDMA ? "profile-grandma" : "profile-personal",
+                sessionId,
+                correlationId,
+                causationId,
+                "android.voice",
+                severity,
+                privacyClass,
+                "volatile",
+                payload);
+    }
+
+    private void clearInteractionChain() {
+        correlationId = "";
+        listeningEventId = null;
     }
 
     @Override

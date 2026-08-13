@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://okja.local/contracts/okja-event-v1.schema.json",
+  "title": "Okja event envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "monotonic_ms",
+    "device_id",
+    "profile_id",
+    "session_id",
+    "correlation_id",
+    "causation_id",
+    "source",
+    "severity",
+    "privacy_class",
+    "retention_class",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": "okja.event.v1" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": {
+      "enum": [
+        "wake.candidate", "wake.detected", "wake.rejected",
+        "listening.started", "listening.stopped", "listening.failed",
+        "transcript.partial", "transcript.final", "transcript.failed",
+        "intent.requested", "intent.resolved", "intent.failed",
+        "confirmation.requested", "confirmation.accepted", "confirmation.rejected",
+        "command.accepted", "command.completed", "command.failed",
+        "assistant.response", "assistant.failed",
+        "tts.started", "tts.completed", "tts.failed"
+      ]
+    },
+    "occurred_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "monotonic_ms": { "type": "number", "minimum": 0 },
+    "device_id": { "$ref": "#/$defs/id" },
+    "profile_id": { "$ref": "#/$defs/id" },
+    "session_id": { "$ref": "#/$defs/id" },
+    "correlation_id": { "$ref": "#/$defs/id" },
+    "causation_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "severity": {
+      "enum": ["debug", "info", "notice", "warning", "error", "critical"]
+    },
+    "privacy_class": {
+      "enum": ["public", "household", "personal", "sensitive", "health", "emergency"]
+    },
+    "retention_class": {
+      "enum": ["volatile", "diagnostic_7d", "history_30d", "user_record", "benchmark_fixed", "audit"]
+    },
+    "payload": { "type": "object" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    }
+  }
+}

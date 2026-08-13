@@ -26,6 +26,9 @@ on:
       - 'aihub/wakeword/build_v4_scripts.py'
       - 'aihub/wakeword/test_build_v4_scripts.py'
       - 'aihub/wakeword/v4_scripts.csv'
+      - 'aihub/phone/okja_event_contract.py'
+      - 'aihub/phone/okja_event_v1.schema.json'
+      - 'aihub/phone/test_okja_event_contract.py'
       - '.github/workflows/okja-v4-eval-tests.yml'
 
 permissions:
@@ -43,3 +46,6 @@ jobs:
       - name: Run evaluator, latency, scripts, dataset, benchmark-contract, ring-buffer, and replay unit tests
         working-directory: aihub/wakeword
         run: python -m unittest -v test_v4_eval.py test_v4_android_latency_report.py test_build_v4_scripts.py test_v4_dataset_tools.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py test_v4_replay.py test_livekit_v3_replay_adapter.py test_openwakeword_replay_adapter.py
+      - name: Run versioned event-envelope contract tests
+        working-directory: aihub/phone
+        run: python -m unittest -v test_okja_event_contract.py
