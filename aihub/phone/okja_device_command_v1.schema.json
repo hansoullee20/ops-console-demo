@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://okja.local/contracts/okja-device-command-v1.schema.json",
+  "title": "Okja device command v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "command_id", "idempotency_key", "issued_at",
+    "expires_at", "device_id", "profile_id", "session_id",
+    "correlation_id", "source_event_id", "target", "action", "parameters"
+  ],
+  "properties": {
+    "schema_version": { "const": "okja.device-command.v1" },
+    "command_id": { "type": "string", "format": "uuid" },
+    "idempotency_key": { "$ref": "#/$defs/id" },
+    "issued_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "expires_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "device_id": { "$ref": "#/$defs/id" },
+    "profile_id": { "$ref": "#/$defs/id" },
+    "session_id": { "$ref": "#/$defs/id" },
+    "correlation_id": { "$ref": "#/$defs/id" },
+    "source_event_id": { "type": "string", "format": "uuid" },
+    "target": { "enum": ["tv", "ac", "phone_finder", "washer"] },
+    "action": {
+      "enum": [
+        "power_on", "power_off", "resume_last_source",
+        "volume_up", "volume_down", "set_channel",
+        "set_temperature", "set_mode", "ring", "cancel", "start"
+      ]
+    },
+    "parameters": { "type": "object" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    }
+  }
+}

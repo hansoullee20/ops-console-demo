@@ -65,6 +65,12 @@
 - Clean evidence: run `31680385188` passes the 48 existing tests plus 8 envelope/transport contract tests; APK run `31680385242` compiles the Android producer/consumer and uploads the artifact. G3.1 is closed.
 - Scope guard: keep G3.2 open until wake rejection/candidate, structured intent, confirmation and device-command accepted/failed paths are genuinely emitted by their real implementations.
 
+### G3.3 idempotent device-command boundary — active
+
+- Current task: define a fail-closed `okja.device-command.v1` request contract for TV, AC and phone finder, with washer present only as an explicitly disabled future capability.
+- Implementation in progress: validate exact target/action/parameter combinations and a <=5-minute validity window; reserve idempotency keys durably in SQLite before adapter invocation; cache success/failure events; reject key reuse with different content; and leave interrupted actions `in_progress` rather than risk automatic duplicate execution.
+- Scope guard: passing contract tests closes the G3.3 command boundary, not physical integrations. G3.15/G3.16/G4.3/G4.4 remain open until real TV, AC and phone-finder adapters and devices are tested.
+
 ---
 
 ## 0. Fast restart

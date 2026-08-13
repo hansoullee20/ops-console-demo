@@ -1,5 +1,7 @@
 {
   "schema_version": 1,
+  "status": "legacy_design_reference_only",
+  "canonical_runtime_schema": "../phone/okja_event_v1.schema.json",
   "events": {
     "WAKE_OKJA": {"fields": ["timestamp", "device_id", "wake_variant", "confidence"]},
     "LISTENING_STARTED": {"fields": ["timestamp", "device_id"]},
