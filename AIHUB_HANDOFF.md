@@ -34,6 +34,8 @@
 
 - Current task: turn the clean-CI resolved Kokoro, Chatterbox and MeloTTS environments into committed, platform/Python-specific lock files, make each smoke job consume its lock, and rerun from clean CI before closing G1.2.
 - First step: capture sorted `pip freeze`, Python version and pip version inside every smoke artifact. Existing MeloTTS capture is expanded to the same contract; Kokoro and Chatterbox gain equivalent always-run diagnostics.
+- Capture verification is green: run `31675238792` recorded Python `3.11.15`, pip `26.2.1`, 110 Kokoro pins and 122 Chatterbox pins; run `31675238803` recorded Python `3.9.25`, pip `26.0.1` and 170 MeloTTS pins. All generation, manifest, WAV QC, leakage and upload steps also passed.
+- Lock implementation in progress: commit the three captured lists as platform/Python-specific lock files, pin the exact Python/pip versions in each job, install from the matching lock, run `pip check`, and require byte-equivalent sorted `pip freeze` output (excluding lock comments) before synthesis.
 - Closure guard: a captured environment is not yet a lock. Keep G1.2 unchecked until the committed lock files are installed by their real smoke workflows and all generation/QC/manifest/leakage steps pass.
 
 ---

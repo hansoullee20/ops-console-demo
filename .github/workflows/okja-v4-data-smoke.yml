@@ -8,6 +8,8 @@ on:
       - 'aihub/wakeword/v4_tts_smoke.py'
       - 'aihub/wakeword/v4_dataset_tools.py'
       - 'aihub/wakeword/v4_dataset_schema.json'
+      - 'aihub/wakeword/requirements-v4-kokoro-py311-linux.lock'
+      - 'aihub/wakeword/requirements-v4-chatterbox-py311-linux.lock'
       - '.github/workflows/okja-v4-data-smoke.yml'
 
 jobs:
@@ -19,7 +21,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11.15'
 
       - name: Install system dependencies
         run: |
@@ -28,8 +30,12 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install 'kokoro==0.9.4' 'soundfile==0.14.0' 'scipy==1.17.1'
+          python -m pip install 'pip==26.2.1'
+          python -m pip install -r aihub/wakeword/requirements-v4-kokoro-py311-linux.lock
+          python -m pip check
+          grep -v '^#' aihub/wakeword/requirements-v4-kokoro-py311-linux.lock > /tmp/expected-runtime.lock
+          python -m pip freeze | LC_ALL=C sort > /tmp/actual-runtime.lock
+          diff -u /tmp/expected-runtime.lock /tmp/actual-runtime.lock
 
       - name: Generate tiny real TTS corpus
         run: |
@@ -111,12 +117,16 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11.15'
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install 'chatterbox-tts==0.1.7' 'soundfile==0.14.0' 'scipy==1.17.1'
+          python -m pip install 'pip==26.2.1'
+          python -m pip install -r aihub/wakeword/requirements-v4-chatterbox-py311-linux.lock
+          python -m pip check
+          grep -v '^#' aihub/wakeword/requirements-v4-chatterbox-py311-linux.lock > /tmp/expected-runtime.lock
+          python -m pip freeze | LC_ALL=C sort > /tmp/actual-runtime.lock
+          diff -u /tmp/expected-runtime.lock /tmp/actual-runtime.lock
 
       - name: Generate tiny Korean real TTS corpus
         run: |
