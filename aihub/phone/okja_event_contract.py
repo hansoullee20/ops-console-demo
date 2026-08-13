@@ -40,6 +40,8 @@ EVENT_TYPES = frozenset({
     "command.accepted", "command.completed", "command.failed",
     "assistant.response", "assistant.failed",
     "tts.started", "tts.completed", "tts.failed",
+    "emergency.confirmation_requested", "emergency.dismissed",
+    "emergency.ready", "emergency.escalation_started", "emergency.resolved",
 })
 
 REQUIRED_FIELDS = frozenset({

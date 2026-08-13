@@ -72,6 +72,12 @@
 - Clean evidence: contract run `31681395404` passes 16 phone-contract tests plus the 48-test wake/evaluator suite; APK run `31681395431` is green. G3.3 and the exact capability-flag DoD in G3.8 are closed.
 - Scope guard: passing contract tests closes the G3.3 command boundary, not physical integrations. G3.15/G3.16/G4.3/G4.4 remain open until real TV, AC and phone-finder adapters and devices are tested.
 
+### G3.5 guarded emergency state machine — active
+
+- Current task: create a persisted confirm-before-escalate state machine with explicit trusted signal/response sources. Agent/LLM output receives only a non-authoritative advisory path and cannot call transition or escalation adapters.
+- Escalation design in progress: require an HMAC authorization bound to case ID, exact state version, family-notification channel and short expiry. Emergency-services/119 remains outside the allowed channel registry.
+- Scope guard: G3.5 may close after bypass/state tests and clean CI. This does not close G6 detect/ask/wait hardware behavior, family delivery, telephony, 119 validation or any physical emergency test.
+
 ---
 
 ## 0. Fast restart

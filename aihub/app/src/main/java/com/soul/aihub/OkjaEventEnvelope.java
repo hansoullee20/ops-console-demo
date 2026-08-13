@@ -29,7 +29,9 @@ public final class OkjaEventEnvelope {
             "confirmation.requested", "confirmation.accepted", "confirmation.rejected",
             "command.accepted", "command.completed", "command.failed",
             "assistant.response", "assistant.failed",
-            "tts.started", "tts.completed", "tts.failed");
+            "tts.started", "tts.completed", "tts.failed",
+            "emergency.confirmation_requested", "emergency.dismissed",
+            "emergency.ready", "emergency.escalation_started", "emergency.resolved");
     private static final Set<String> SEVERITIES = set(
             "debug", "info", "notice", "warning", "error", "critical");
     private static final Set<String> PRIVACY_CLASSES = set(
