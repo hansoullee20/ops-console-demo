@@ -39,6 +39,8 @@ on:
       - 'aihub/phone/test_okja_profile_config.py'
       - 'aihub/phone/okja_care_events.py'
       - 'aihub/phone/test_okja_care_events.py'
+      - 'aihub/phone/okja_core_voice_events.py'
+      - 'aihub/phone/test_okja_core_voice_events.py'
       - '.github/workflows/okja-v4-eval-tests.yml'
 
 permissions:
@@ -58,4 +60,4 @@ jobs:
         run: python -m unittest -v test_v4_eval.py test_v4_android_latency_report.py test_build_v4_scripts.py test_v4_dataset_tools.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py test_v4_replay.py test_livekit_v3_replay_adapter.py test_openwakeword_replay_adapter.py
       - name: Run versioned event-envelope contract tests
         working-directory: aihub/phone
-        run: python -m unittest -v test_okja_event_contract.py test_okja_device_command.py test_okja_emergency_state.py test_okja_profile_config.py test_okja_care_events.py
+        run: python -m unittest -v test_okja_event_contract.py test_okja_device_command.py test_okja_emergency_state.py test_okja_profile_config.py test_okja_care_events.py test_okja_core_voice_events.py
