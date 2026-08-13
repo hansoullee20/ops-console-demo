@@ -2,6 +2,12 @@ name: Okja v4 MeloTTS Candidate Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      inject_qc_failure:
+        description: Corrupt one generated WAV to verify diagnostic preservation
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [aihub-voice-test]
     paths:
@@ -67,6 +73,13 @@ jobs:
           python aihub/wakeword/v4_dataset_tools.py assign-splits \
             --input out/v4-smoke-melotts/manifest_raw.csv \
             --output out/v4-smoke-melotts/manifest_split.csv
+
+      - name: Inject controlled WAV failure
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.inject_qc_failure }}
+        run: |
+          printf '%s\n' 'smoke_melotts_01.wav truncated after generation to test G1.7' \
+            > out/v4-smoke-melotts/controlled-qc-failure.txt
+          truncate -s 0 out/v4-smoke-melotts/audio/smoke_melotts_01.wav
 
       - name: Run WAV QC
         run: |

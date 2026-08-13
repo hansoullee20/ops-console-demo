@@ -38,6 +38,12 @@
 - Lock implementation commit `ab96ecc` adds the three platform/Python-specific lock files, pins exact Python/pip versions, installs from the matching lock, runs `pip check`, and requires byte-equivalent sorted `pip freeze` output (excluding lock comments) before synthesis.
 - Closure evidence: locked data-smoke run `31676094058` passed both Kokoro and Chatterbox jobs; locked MeloTTS run `31676094114` also passed. All three completed dependency equality, generation, manifest validation, WAV QC, leakage and artifact upload. G1.2 is closed.
 
+### G1.7 failed-run diagnostics — active
+
+- Current task: add an opt-in `workflow_dispatch` input that truncates exactly one generated WAV after deterministic split assignment in each real smoke job. This exercises the actual `audio-qc --fail-on-qc` failure path without changing normal push behavior.
+- Required evidence: the controlled run must fail at WAV QC, but `manifest_qc.csv`, the failure marker, generated audio, resolved environment and summary must still upload through the existing `if: always()` steps for Kokoro, Chatterbox and MeloTTS.
+- Closure guard: workflow syntax or an artifact name alone is insufficient. Keep G1.7 unchecked until both controlled workflows run and their downloaded artifacts contain a failed QC row naming the intentionally truncated clip.
+
 ---
 
 ## 0. Fast restart
