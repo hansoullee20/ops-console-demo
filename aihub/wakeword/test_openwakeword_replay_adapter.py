@@ -54,24 +54,51 @@ class OpenWakeWordReplayAdapterTests(unittest.TestCase):
             root = Path(td)
             audio = root / "fixed.wav"
             model = root / "okja_v3.onnx"
+            melspec = root / "melspectrogram.onnx"
+            embedding = root / "embedding_model.onnx"
             self._write_wav(audio, frame_count=DEFAULT_FRAME_SAMPLES)
             model.write_bytes(b"fixture")
+            melspec.write_bytes(b"fixture")
+            embedding.write_bytes(b"fixture")
             seen_paths = []
 
-            def factory(model_path):
-                seen_paths.append(model_path)
+            def factory(model_path, melspec_path, embedding_path):
+                seen_paths.append((model_path, melspec_path, embedding_path))
                 return lambda _frame: {"okja_v3": 0.75}
 
             rows = replay_wav(
                 audio_path=audio,
                 model_path=model,
+                melspec_model_path=melspec,
+                embedding_model_path=embedding,
                 model_name=None,
                 threshold=0.5,
                 predictor_factory=factory,
             )
 
-            self.assertEqual(seen_paths, [model])
+            self.assertEqual(seen_paths, [(model, melspec, embedding)])
             self.assertEqual(rows[0]["model_name"], "okja_v3")
+
+    def test_missing_feature_model_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            audio = root / "fixed.wav"
+            model = root / "okja_v3.onnx"
+            embedding = root / "embedding_model.onnx"
+            self._write_wav(audio, frame_count=DEFAULT_FRAME_SAMPLES)
+            model.write_bytes(b"fixture")
+            embedding.write_bytes(b"fixture")
+
+            with self.assertRaisesRegex(ValueError, "melspectrogram model"):
+                replay_wav(
+                    audio_path=audio,
+                    model_path=model,
+                    melspec_model_path=root / "missing.onnx",
+                    embedding_model_path=embedding,
+                    model_name=None,
+                    threshold=0.5,
+                    predictor_factory=lambda *_paths: lambda _frame: {},
+                )
 
     def test_missing_or_non_finite_score_fails_closed(self):
         samples = [0] * DEFAULT_FRAME_SAMPLES

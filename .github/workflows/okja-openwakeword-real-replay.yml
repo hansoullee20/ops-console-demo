@@ -50,6 +50,17 @@ jobs:
       - name: Install pinned openWakeWord runtime
         run: python -m pip install 'openwakeword==0.6.0'
 
+      - name: Download versioned openWakeWord feature models
+        run: |
+          mkdir -p replay-inputs/openwakeword
+          curl --fail --location --retry 5 \
+            --output replay-inputs/openwakeword/melspectrogram.onnx \
+            https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx
+          curl --fail --location --retry 5 \
+            --output replay-inputs/openwakeword/embedding_model.onnx \
+            https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx
+          sha256sum replay-inputs/openwakeword/*.onnx
+
       - name: Replay identical WAV at v3 evaluation thresholds
         env:
           MODEL: replay-inputs/v3/wakeword_v3_output/okja_v3_korean_probe/okja_v3_korean_probe.onnx
@@ -58,7 +69,7 @@ jobs:
           AUDIO_SOURCE: github-actions:run-31615755020/artifact-9149302273
           ADAPTER_SOURCE: ${{ github.repository }}@${{ github.sha }}:aihub/wakeword/openwakeword_replay_adapter.py
         run: |
-          adapter='python aihub/wakeword/openwakeword_replay_adapter.py --audio {audio} --model {model} --threshold {threshold} --expected-engine-version {engine_version} --frame-samples 1280 --debounce-ms 2000'
+          adapter='python aihub/wakeword/openwakeword_replay_adapter.py --audio {audio} --model {model} --melspec-model replay-inputs/openwakeword/melspectrogram.onnx --embedding-model replay-inputs/openwakeword/embedding_model.onnx --threshold {threshold} --expected-engine-version {engine_version} --frame-samples 1280 --debounce-ms 2000'
           for threshold in 0.5 0.06; do
             out="replay-evidence/threshold-${threshold}"
             python aihub/wakeword/v4_replay.py \

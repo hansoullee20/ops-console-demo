@@ -21,7 +21,7 @@ DEFAULT_FRAME_SAMPLES = 1280  # 80 ms at 16 kHz
 DEFAULT_DEBOUNCE_MS = 2000
 
 FramePredictor = Callable[[Sequence[int]], Mapping[str, float]]
-PredictorFactory = Callable[[Path], FramePredictor]
+PredictorFactory = Callable[[Path, Path, Path], FramePredictor]
 
 
 def installed_openwakeword_version() -> str:
@@ -42,7 +42,11 @@ def require_openwakeword_version(expected: str) -> str:
     return actual
 
 
-def create_openwakeword_predictor(model_path: Path) -> FramePredictor:
+def create_openwakeword_predictor(
+    model_path: Path,
+    melspec_model_path: Path,
+    embedding_model_path: Path,
+) -> FramePredictor:
     try:
         import numpy as np
         from openwakeword.model import Model
@@ -54,6 +58,8 @@ def create_openwakeword_predictor(model_path: Path) -> FramePredictor:
     model = Model(
         wakeword_models=[str(model_path)],
         inference_framework="onnx",
+        melspec_model_path=str(melspec_model_path),
+        embedding_model_path=str(embedding_model_path),
     )
 
     def predict(frame: Sequence[int]) -> Mapping[str, float]:
@@ -121,6 +127,8 @@ def replay_wav(
     *,
     audio_path: Path,
     model_path: Path,
+    melspec_model_path: Path,
+    embedding_model_path: Path,
     model_name: str | None,
     threshold: float,
     frame_samples: int = DEFAULT_FRAME_SAMPLES,
@@ -129,9 +137,17 @@ def replay_wav(
 ) -> list[dict[str, float | str]]:
     if not model_path.is_file():
         raise ValueError(f"model file does not exist: {model_path}")
+    if not melspec_model_path.is_file():
+        raise ValueError(f"melspectrogram model file does not exist: {melspec_model_path}")
+    if not embedding_model_path.is_file():
+        raise ValueError(f"embedding model file does not exist: {embedding_model_path}")
     resolved_name = model_name or model_path.stem
     samples = load_pcm16_wav(audio_path)
-    predictor = predictor_factory(model_path)
+    predictor = predictor_factory(
+        model_path,
+        melspec_model_path,
+        embedding_model_path,
+    )
     return replay_stream(
         samples,
         model_name=resolved_name,
@@ -146,6 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="openWakeWord offline replay adapter")
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--melspec-model", type=Path, required=True)
+    parser.add_argument("--embedding-model", type=Path, required=True)
     parser.add_argument("--model-name")
     parser.add_argument("--threshold", type=float, required=True)
     parser.add_argument("--expected-engine-version", required=True)
@@ -160,6 +178,8 @@ def main() -> int:
     rows = replay_wav(
         audio_path=args.audio,
         model_path=args.model,
+        melspec_model_path=args.melspec_model,
+        embedding_model_path=args.embedding_model,
         model_name=args.model_name,
         threshold=args.threshold,
         frame_samples=args.frame_samples,
