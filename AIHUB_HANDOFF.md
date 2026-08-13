@@ -51,10 +51,11 @@
 - Split enforcement preserves valid preassigned splits, rejects conflicts with engine/speaker/real/household holdouts, and fails on parent/template or normalized-text crossings. The full local suite passed 43 tests.
 - Clean-CI evidence on the same commit is green: evaluator run `31677969571`, data-smoke run `31677969581` (Kokoro + Chatterbox), MeloTTS run `31677969589`, and APK run `31677969572`. G1.12 and G1.13 are closed. Large generation remains locked while G1.5/G1.10 are open.
 
-### G2.8 target-device latency instrumentation — active
+### G2.8 target-device latency instrumentation — ready for device measurement
 
 - Audit finding: the offline evaluator already reports matched-event latency, but the live Android detector did not persist a monotonic speech-onset-to-decision measurement or identify the device, app, session and enrolled template set used for the sample.
-- Implementation in progress: record monotonic VAD onset, segment end and decision timestamps for accepted/near-threshold candidates; show accepted-event P50/P95 in the diagnostic UI; fingerprint the exact enrolled template files; and add a strict metadata-only report tool for one device/session.
+- Commits `fc87823` and `a506e61` record monotonic VAD onset, segment end and decision timestamps for accepted/near-threshold candidates; show accepted-event P50/P95 in the diagnostic UI; fingerprint the exact enrolled template files; and add a strict metadata-only report tool for one device/session.
+- Verification: all 48 evaluator/report tests pass in clean run `31679294780`; debug APK run `31679460462` compiles the instrumentation and uploads the installable artifact. `V4_ANDROID_LATENCY_MEASUREMENT.md` contains the exact pull/report procedure.
 - Closure guard: keep G2.8 unchecked until the instrumented debug APK records at least 20 accepted wake attempts on the target Fold4 and the report validates a single device/session/model identity. APK/unit CI proves instrumentation readiness, not physical-device latency.
 
 ---
@@ -381,7 +382,8 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 2. **G1 audit completed:** G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 now have durable clean-CI evidence.
 3. Remaining G1 blockers are human/data decisions: replace or explicitly exclude the failed Chatterbox Korean positives for G1.5, and finish listening dispositions for every remaining admitted phrase/voice combination—including Kokoro English—for G1.10.
 4. G1.12/G1.13 script and split preparation is complete. While the human reviews are pending, keep G1.14 and large generation locked; do not reinterpret the completed preparation as corpus approval.
-5. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
+5. Install the debug APK from run `31679460462` on the Fold4 and follow `V4_ANDROID_LATENCY_MEASUREMENT.md` for one >=20-accepted-attempt session; keep G2.8 unchecked until its strict report is preserved.
+6. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
 
 ## 16. Do not repeat
 

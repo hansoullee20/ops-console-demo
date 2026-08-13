@@ -59,10 +59,9 @@ G2.3/G2.4 implementation evidence is commit
 
 ### CI evidence
 
-Evaluator run `31677969571` passed the 43-test suite after the script/split
-gate work. The latest Android ring-buffer wiring build evidence remains APK run
-`31652333689`; newer latency instrumentation must receive its own clean build
-run before it is considered ready for physical measurement.
+Evaluator run `31679294780` passed all 48 evaluator/report tests. APK run
+`31679460462` compiled the latency instrumentation and uploaded the debug APK,
+so it is ready for physical measurement.
 
 ## Implemented as reference/helper but not yet closed
 
@@ -74,11 +73,10 @@ same input.
 
 ### G2.8 target-device latency metrics
 
-Implementation in progress adds monotonic VAD-onset, segment-end and decision
-timestamps to Android candidate metadata, on-screen accepted-event P50/P95,
-exact enrolled-template SHA-256 identity, and the strict metadata-only
-`v4_android_latency_report.py` report. See
-`V4_ANDROID_LATENCY_MEASUREMENT.md`.
+Commits `fc87823` and `a506e61` add monotonic VAD-onset, segment-end and
+decision timestamps to Android candidate metadata, on-screen accepted-event
+P50/P95, exact enrolled-template SHA-256 identity, and the strict metadata-only
+`v4_android_latency_report.py` report. See `V4_ANDROID_LATENCY_MEASUREMENT.md`.
 
 **Not closed yet:** APK/unit CI establishes instrumentation readiness only.
 G2.8 requires at least 20 accepted attempts measured on the target Fold4 in a
@@ -86,8 +84,7 @@ single detector session.
 
 ## Still open / next highest-value work
 
-1. Obtain clean evaluator and APK CI for the G2.8 instrumentation.
-2. Run the documented >=20-attempt Fold4 latency session and preserve its JSON report.
-3. Replay a pinned real v4 classifier over the existing fixed audio to close G2.5.
-4. Run v3 baseline and future candidates against identical TEST A/B/C/D material.
-5. Keep Android/physical checklist items open until device evidence exists.
+1. Run the documented >=20-accepted-attempt Fold4 latency session and preserve its JSON report.
+2. Replay a pinned real v4 classifier over the existing fixed audio to close G2.5.
+3. Run v3 baseline and future candidates against identical TEST A/B/C/D material.
+4. Keep Android/physical checklist items open until device evidence exists.

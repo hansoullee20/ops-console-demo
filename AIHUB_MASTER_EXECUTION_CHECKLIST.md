@@ -52,6 +52,7 @@ Acceptable evidence:
 - G2 evaluator, recording contract, privacy-first candidate ring buffer and deterministic replay harness exist and have green CI evidence.
 - Real LiveKit v3 replay run `31669141305` and openWakeWord replay run `31670716561` are deterministic over three repeats at thresholds 0.50 and 0.06 on the exact same model/audio SHAs. G2.5 remains open only for the pinned real v4 replay.
 - G1.12/G1.13 are closed: commit `7b37c8b` freezes 425 unique bilingual scripts with pre-generation train/validation assignments; evaluator run `31677969571`, data-smoke run `31677969581` and MeloTTS run `31677969589` are green.
+- G2.8 instrumentation is ready but the gate remains open: commits `fc87823`/`a506e61`, evaluator run `31679294780` and APK run `31679460462` provide the strict report path; the target Fold4 still needs one >=20-accepted-attempt session.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -187,6 +188,7 @@ Acceptable evidence:
 
 - [ ] **G2.8 Latency metrics exist** — P1 / AI-ENG  
   DoD: P50/P95 wake latency measured on target Android device.
+  Partial evidence: commits `fc87823` and `a506e61` add monotonic VAD-onset-to-decision timestamps, on-screen P50/P95, single-session/device/model validation, exact enrolled-template SHA-256 and `v4_android_latency_report.py`; all 48 tests pass in run `31679294780` and APK run `31679460462` is green. Keep unchecked until `V4_ANDROID_LATENCY_MEASUREMENT.md` is completed on the target Fold4 with at least 20 accepted attempts.
 
 - [x] **G2.9 Statistical confidence is reported** — P1 / AI-ENG
   DoD: negative listening hours and confidence bounds accompany false-trigger rates; zero observed events is never presented as zero true rate.
