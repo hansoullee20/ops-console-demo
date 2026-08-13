@@ -7,7 +7,7 @@
 **Wake-word work:** `aihub/wakeword/`
 **Start here in a new session:** read this file first. If chat memory conflicts with Git, Git is source of truth.
 
-> **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real LiveKit replay run `31669141305` and alternative openWakeWord replay run `31670716561` used the exact same pinned v3 classifier/audio SHAs and were deterministic over three repeats per threshold. Their engine-specific scores differ, which is compatibility evidence rather than a changed v3 quality verdict. The alternative-runtime portion of G2.5 is complete; G2.5 stays open only until a pinned real v4 classifier replays the identical audio SHA. Existing Android SpeechRecognizer remains the working control/fallback.
+> **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real LiveKit replay run `31669141305` and alternative openWakeWord replay run `31670716561` used the exact same pinned v3 classifier/audio SHAs and were deterministic over three repeats per threshold. Their engine-specific scores differ, which is compatibility evidence rather than a changed v3 quality verdict. The alternative-runtime portion of G2.5 is complete; G2.5 stays open only until a pinned real v4 classifier replays the identical audio SHA. G1 audit/validation work also closed G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11; the v4 scaling gate remains blocked by G1.2, G1.5, G1.7 and G1.10. Existing Android SpeechRecognizer remains the working control/fallback.
 
 ## Active continuation log — 2026-08-13
 
@@ -23,12 +23,12 @@
 - Successful real run `31670716561`: all hashes verified and both thresholds were 3/3 deterministic. Threshold `0.50` detected once at 1280 ms with score `0.5055038929`; threshold `0.06` detected once at 560 ms with score `0.0630315244`. Unit run `31670716607` passed all 32 tests.
 - Gate impact: the G2.5 alternative-runtime portion is complete, but G2.5 stays unchecked until a pinned real v4 classifier replays the exact audio SHA. G2.16 also stays unchecked because one positive compatibility replay is not a full alternative-engine benchmark. Durable details: `aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`.
 
-### G1 gate audit — active
+### G1 gate audit — completed
 
 - Existing durable evidence supports G1.1, G1.4, G1.6, G1.8 and G1.9: run `31612771436` cleanly generated pinned Chatterbox `0.1.7` and Kokoro `0.9.4` artifacts; all 10 clips passed WAV QC/leakage; the checker explicitly reports unavailable speaker/engine holdouts as `not_evaluable`. MeloTTS run `31615755020` independently passed its explicit engine holdout, WAV QC and leakage checks.
-- Per-clip manifests already contain the G1.3 provenance fields, but `v4_dataset_schema.json` was not enforced by any workflow. Current implementation work adds a fail-closed `validate-manifest` command, requires `source_license`, tests invalid/missing provenance, and inserts validation into Kokoro, Chatterbox and MeloTTS smoke jobs.
+- Per-clip manifests already contained the G1.3 provenance fields, but `v4_dataset_schema.json` was not enforced by any workflow. Commit `844134b` adds a fail-closed `validate-manifest` command, requires `source_license`, tests invalid/missing provenance, and inserts validation into Kokoro, Chatterbox and MeloTTS smoke jobs.
 - Keep G1.2 open: top-level packages are pinned, but there is no complete transitive lock proven from clean CI. Keep G1.5 open because Chatterbox Korean positives failed human pronunciation review. Keep G1.7 open until the current `if: always()` diagnostic path is demonstrated on a post-fix failing run. Keep G1.10 open per the human-QC policy.
-- Do not mark the audited gates until the new unit test and all three real smoke jobs pass with manifest validation enabled.
+- Verification is green: evaluator run `31671445691` passed all 35 tests; data-smoke run `31671445654` passed Kokoro and Chatterbox generation, manifest validation, WAV QC, leakage and artifact upload; MeloTTS run `31671445689` passed the same contract with its explicit engine holdout. Checklist result: G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 are now closed. G1 PASS remains `NO`.
 
 ---
 
@@ -351,10 +351,10 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 ## 15. Immediate next actions
 
 1. **Alternative-runtime replay completed:** keep G2.5 unchecked only for the real v4 replay; keep G2.16 unchecked until a full shared benchmark exists.
-2. Reconcile G1.1–G1.10 against the existing smoke artifacts and human-QC notes. Mark only gates with durable clean-CI evidence; list the exact missing evidence for the rest.
-3. Close the remaining automatable G1 gaps—dependency pins, per-clip provenance, failure artifact retention, holdout reporting, WAV QC and leakage reporting—then rerun a tiny approved-source smoke corpus end to end.
-4. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5.
-5. In parallel, collect the human-owned TEST C/TEST D recordings needed for real-human and household false-trigger evidence. Do not launch large v4 generation before the G1 gate passes.
+2. **G1 audit completed:** G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 now have durable clean-CI evidence.
+3. Next AI-owned blockers: create and consume complete transitive dependency locks for G1.2, then prove `if: always()` diagnostic preservation with a controlled failing smoke for G1.7.
+4. Human/data blockers: replace or explicitly exclude the failed Chatterbox Korean positives for G1.5, and finish listening dispositions for every remaining admitted phrase/voice combination—including Kokoro English—for G1.10.
+5. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
 
 ## 16. Do not repeat
 

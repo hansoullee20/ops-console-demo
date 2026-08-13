@@ -85,46 +85,53 @@ Acceptable evidence:
 
 ## G1-A. Environment reproducibility
 
-- [ ] **G1.1 Pin Chatterbox implementation exactly** — P0 / AI-ENG  
+- [x] **G1.1 Pin Chatterbox implementation exactly** — P0 / AI-ENG
   DoD: tested package version or Git commit is pinned; API used by generator matches installed implementation; environment is reproducible from clean CI.  
-  Evidence required: commit + successful clean CI install/generation log.
+  Evidence: `v4_sources_manifest.yaml` and `okja-v4-data-smoke.yml` pin `chatterbox-tts==0.1.7` and document the tested `from_pretrained(device=device)` API. Clean run `31612771436` installed that package and generated/uploaded six real Chatterbox WAVs.
 
 - [ ] **G1.2 Pin all v4 TTS/runtime dependencies** — P0 / AI-ENG  
   DoD: Kokoro, Chatterbox, audio libs and critical transitive versions are bounded or locked.  
-  Evidence: lock/requirements file + clean CI.
+  Partial evidence: smoke workflows pin their requested top-level packages, and MeloTTS run `31615755020` captured a full resolved environment. Keep unchecked until complete Kokoro/Chatterbox/MeloTTS transitive lock files are committed and consumed by clean CI.
 
-- [ ] **G1.3 Record generator provenance per clip** — P0 / AI-ENG  
+- [x] **G1.3 Record generator provenance per clip** — P0 / AI-ENG
   DoD: manifest includes engine, engine version/commit, voice, language, script/text ID, seed, source/license, base/parent ID, file SHA-256.
+  Evidence: commit `844134b9aa363fe25e2e10265b9b61ed2cff3ea1` makes `source_license` mandatory and adds fail-closed manifest validation for required provenance, enum, SHA, numeric and finite-value constraints. Unit run `31671445691` passes 35 tests. Real smoke runs `31671445654` and `31671445689` validate the Kokoro, Chatterbox and MeloTTS manifests before leakage checks and artifact upload.
 
 ## G1-B. Smoke-corpus integrity
 
-- [ ] **G1.4 English Kokoro smoke succeeds** — P0 / AI-ENG  
+- [x] **G1.4 English Kokoro smoke succeeds** — P0 / AI-ENG
   DoD: actual WAVs generated, normalized, manifest emitted, QC passes.  
-  Evidence: successful workflow run + artifact.
+  Evidence: run `31612771436` generated four real Kokoro `0.9.4` English WAVs; all four passed mono/16 kHz WAV QC and were uploaded with raw/split/QC manifests. Run `31671445654` repeats the clean path with the enforced manifest contract.
 
 - [ ] **G1.5 Korean Chatterbox smoke succeeds** — P0 / AI-ENG  
   DoD: actual Korean WAVs generated with correct `옥자` pronunciation and manifest/QC passes.  
-  Evidence: workflow artifact + human listening note.
+  Blocker evidence: run `31612771436` generated six real Chatterbox `0.1.7` WAVs and passed automated QC, but human review in `V4_PRONUNCIATION_QC.md` rejected the Chatterbox positive pronunciation/naturalness. Keep unchecked; do not admit the failed positives to training.
 
-- [ ] **G1.6 Smoke holdout policy is valid** — P0 / AI-ENG  
+- [x] **G1.6 Smoke holdout policy is valid** — P0 / AI-ENG
   DoD: either >=3 voices allow meaningful train/val/test speaker holdout OR smoke-only checker explicitly reports speaker holdout `not_evaluable` without weakening full-corpus rules.
+  Evidence: `v4_dataset_tools.py` assigns speaker/engine test splits only from explicit holdout roles and prints absent smoke holdouts as `not_evaluable`; run `31671445654` exercises that policy for the one-voice Kokoro/Chatterbox smoke, while MeloTTS run `31671445689` exercises an explicit `test_engine` holdout.
 
 - [ ] **G1.7 Failed CI always preserves diagnostics** — P0 / AI-ENG  
   DoD: WAVs/manifests/reports upload with `if: always()` or equivalent even after QC/leakage failure.
+  Partial evidence: all three current smoke jobs use `if: always()` for summaries/environment capture and artifact upload. Keep unchecked until a post-fix intentionally failing or naturally failing run proves diagnostic artifact preservation on every job path.
 
-- [ ] **G1.8 WAV QC gate passes** — P0 / AI-ENG  
+- [x] **G1.8 WAV QC gate passes** — P0 / AI-ENG
   DoD: decode, mono/16 kHz normalization, finite samples, plausible duration, silence, clipping, DC offset/loudness and duplicate checks are reported.
+  Evidence: `v4_dataset_tools.py` checks every listed condition and fails the job on QC errors. Runs `31671445654` and `31671445689` pass the gate for all 14 real smoke WAVs across Kokoro, Chatterbox and MeloTTS.
 
-- [ ] **G1.9 Leakage gate passes** — P0 / AI-ENG  
+- [x] **G1.9 Leakage gate passes** — P0 / AI-ENG
   DoD: parent/base derivatives, normalized text/template, augmentation lineage and held-out speaker/engine policies show zero forbidden leakage.
+  Evidence: the checker rejects base/template cross-split leakage, duplicate audio hashes and held-out engine/voice overlap. Runs `31671445654` and `31671445689` pass after deterministic split assignment and manifest validation.
 
 - [ ] **G1.10 Human pronunciation QC passes** — P0 / HUMAN  
   DoD: at least one person listens to every smoke phrase/voice combination; mispronunciations are quarantined and documented.
+  Partial evidence: all MeloTTS Korean smoke clips were approved in `V4_MELOTTS_HUMAN_QC.md`; failed Chatterbox positives are quarantined in `V4_PRONUNCIATION_QC.md`. Keep unchecked until every remaining intended smoke phrase/voice combination, including Kokoro English, has an explicit listening disposition.
 
 ## G1-C. Corpus scaling gate
 
-- [ ] **G1.11 Second independent Korean TTS source approved** — P1 / AI-ENG  
+- [x] **G1.11 Second independent Korean TTS source approved** — P1 / AI-ENG
   DoD: model/weights/output license and Korean quality are verified; provenance added to manifest.
+  Evidence: `v4_sources_manifest.yaml` pins MeloTTS code commit `209145371cff8fc3bd60d7be902ea69cbdb7965a`, model revision `0207e5adfc90129a51b6b03d89be6d84360ed323`, model-file SHAs and MIT terms; clean run `31615755020` plus `V4_MELOTTS_HUMAN_QC.md` approved it for initial v4 data and engine-holdout use.
 
 - [ ] **G1.12 Owned conversation script library finalized** — P1 / AI-ENG  
   DoD: positives, general negatives, hard negatives, mention-context, device-playback negatives, truncated/near-miss cases have deterministic IDs.
