@@ -1,0 +1,38 @@
+name: Fix Okja G2 metrics workflow once
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - '.github/workflows/okja-fix-g2-metrics-workflow-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix JSON schema defs key and push
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/okja-close-g2-metrics-once.yml')
+          s=p.read_text(encoding='utf-8')
+          old="schema['definitions']['truth_event']['properties']"
+          new="schema['$defs']['truth_event']['properties']"
+          if s.count(old) != 1:
+              raise SystemExit(f'anchor count={s.count(old)}')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          git diff --check
+          git config user.name 'Okja CI'
+          git config user.email 'okja-ci@users.noreply.github.com'
+          git add .github/workflows/okja-close-g2-metrics-once.yml
+          git commit -m 'Fix G2 metric workflow schema key'
+          git pull --rebase origin aihub-voice-test
+          git push origin HEAD:aihub-voice-test
