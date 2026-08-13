@@ -165,17 +165,20 @@ Acceptable evidence:
 
 ## G2-B. Metrics and reports
 
-- [ ] **G2.6 Threshold sweep report exists** — P0 / AI-ENG  
+- [x] **G2.6 Threshold sweep report exists** — P0 / AI-ENG
   DoD: threshold vs recall/FRR/FPR-hour is automatically generated.
+  Evidence: `v4_eval.py` emits deterministic threshold sweeps with recall, miss/FRR, FPPH and false-alarms/day; CLI report smoke and unit tests passed in run `31653692637` after commit `7a8a5f033a846de262fd2d3fd48fa2765d7d7821`.
 
-- [ ] **G2.7 Condition breakdown exists** — P1 / AI-ENG  
+- [x] **G2.7 Condition breakdown exists** — P1 / AI-ENG
   DoD: metrics by phrase, speaker, distance, direction, TV/noise, self-TTS, day/night are reported.
+  Evidence: commit `7a8a5f033a846de262fd2d3fd48fa2765d7d7821` adds benchmark-contract metadata and evaluator groups for phrase, speaker, distance bucket, direction, background/TV-noise, voice level, self-TTS and day/night, including `speaker_id`/`room_id` compatibility; tests passed in run `31653692637`.
 
 - [ ] **G2.8 Latency metrics exist** — P1 / AI-ENG  
   DoD: P50/P95 wake latency measured on target Android device.
 
-- [ ] **G2.9 Statistical confidence is reported** — P1 / AI-ENG  
+- [x] **G2.9 Statistical confidence is reported** — P1 / AI-ENG
   DoD: negative listening hours and confidence bounds accompany false-trigger rates; zero observed events is never presented as zero true rate.
+  Evidence: `v4_eval.py` reports negative exposure hours, Wilson recall CI and Poisson false-positive rate CI; the zero-FP unit test verifies a non-zero 95% upper rate bound, and all evaluator tests passed in run `31653692637`.
 
 ## G2-C. Evaluation sets
 
