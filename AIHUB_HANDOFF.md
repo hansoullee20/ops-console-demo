@@ -1,13 +1,13 @@
 # AI Hub / Okja — Project Handoff
 
-**Last updated:** 2026-08-12 (KST)  
+**Last updated:** 2026-08-13 (KST)
 **Repository:** `hansoullee20/ops-console-demo`  
 **Working branch:** `aihub-voice-test`  
 **Project directory:** `aihub/`  
 **Wake-word work:** `aihub/wakeword/`  
 **Start here in a new session:** read this file first. If chat memory conflicts with Git, Git is source of truth.
 
-> **CURRENT CHECKPOINT:** Okja v3 Korean-only LiveKit WakeWord diagnostic completed and failed as a deployable model. We are deliberately NOT jumping straight into another large training run. Work is now split into three coordinated tracks: **(A) v4 wakeword/data**, **(B) reusable test/evaluation infrastructure**, and **(C) final Okja product UI/UX**. A v4 source/license manifest, v4 experiment plan, and owned conversational-script generator have been added. The next implementation phase should build the test infrastructure and tiny synthetic smoke corpus while product UI/UX is designed in parallel. Existing Android SpeechRecognizer remains the working control/fallback.
+> **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real replay run `31669141305` executed the pinned v3 ONNX against a fixed, human-approved MeloTTS `옥자` WAV three times per threshold and produced identical outputs. At threshold 0.50 it missed; at 0.06 it detected once with score 0.16584, consistent with the existing v3 failure verdict. G2.5 stays open until the identical audio SHA is replayed through v4 and another local/open engine. Existing Android SpeechRecognizer remains the working control/fallback.
 
 ---
 
@@ -137,6 +137,21 @@ trainer optimal threshold .06: Recall 85.3516%, FPPH 310.0269
 ```
 
 **Verdict: FAIL / NOT PROMISING for Android integration.** The useful-recall region produces catastrophic false positives. Do not tune threshold, add steps, or integrate v2/v3.
+
+### Deterministic real-audio replay evidence
+
+```text
+adapter/test commit: 0d6f7188fc15d05a31045944b9d4d240877d3148
+unit-test run: 31669141480 (success; 25 tests)
+real replay run: 31669141305 (success)
+runtime: livekit-wakeword 0.2.1
+model SHA-256: 3cff1a6c54e2eece99f3b61e0238a51b317019d5c1bf214e2c1bddf80998bb7b
+audio SHA-256: a9551898057bfc145002e7e4c0abffff759f450a67e706465d70a18953c5f2a0
+threshold .50: 0 detections, identical across 3 repeats
+threshold .06: 1 detection at 2000 ms, score 0.1658398509, identical across 3 repeats
+```
+
+Full record: `aihub/wakeword/V3_REAL_REPLAY_EVIDENCE.md`. This is v3-path evidence only, not completion of G2.5.
 
 ## 10. Strategy change after v3
 

@@ -48,8 +48,9 @@ Acceptable evidence:
 - Working branch exists and is canonical: `aihub-voice-test`.
 - Android SpeechRecognizer → local bridge → persistent Claude Agent SDK → Android TTS path works and remains fallback/control.
 - LiveKit v3 is rejected as deployable wakeword; do not threshold-tune it.
-- v4 smoke workflow exists, but **run #2 / ID `31596919280` completed with failure**.
-- Current v4 blockers identified: Korean Chatterbox package/API reproducibility and smoke split/holdout semantics; artifacts must be preserved even on failures.
+- MeloTTS Korean is approved for initial v4 data; smoke generation, provenance, WAV QC, split and leakage checks are green. Chatterbox remains a secondary source with quarantined pronunciation failures.
+- G2 evaluator, recording contract, privacy-first candidate ring buffer and deterministic replay harness exist and have green CI evidence.
+- Real LiveKit v3 replay run `31669141305` is deterministic over three repeats at thresholds 0.50 and 0.06. G2.5 remains open until the same audio is replayed through v4 and at least one alternative local/open engine.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -162,6 +163,7 @@ Acceptable evidence:
 
 - [ ] **G2.5 Offline deterministic replay exists** — P0 / AI-ENG  
   DoD: identical recording can be replayed through v3/v4/other engines with pinned model/threshold/version metadata.
+  Partial evidence: commit `0d6f7188fc15d05a31045944b9d4d240877d3148` adds the LiveKit v3 adapter and artifact-pinned replay workflow; unit run `31669141480` passes 25 tests. Real replay run `31669141305` verified pinned model SHA `3cff1a6c...` and audio SHA `a9551898...`, then produced identical results over three repeats at thresholds 0.50 and 0.06. See `aihub/wakeword/V3_REAL_REPLAY_EVIDENCE.md`. Keep unchecked until v4 and another local/open engine replay the same audio SHA.
 
 ## G2-B. Metrics and reports
 
