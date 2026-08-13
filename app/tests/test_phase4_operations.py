@@ -243,7 +243,14 @@ def test_requested_correction_and_cancel_never_touch_attendance(operational):
     assert conn.execute("SELECT COUNT(*) FROM attendance_days").fetchone()[0]==0
 
 
-def test_approved_employee_date_correction_has_no_cross_employee_phantoms(oper◊ÆÌ¢Gß≤⁄Óù∆≠y”=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
+def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
+        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="employee correction")
+    states={(r["employee_id"],r["work_date"]):r["status"] for r in conn.execute(
+        "SELECT employee_id,work_date,status FROM attendance_days")}
+    assert states=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
 
 
 def _insert_punch(conn,employee,date,key):
