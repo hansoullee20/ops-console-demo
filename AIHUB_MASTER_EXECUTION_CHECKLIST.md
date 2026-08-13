@@ -111,9 +111,9 @@ Acceptable evidence:
   DoD: either >=3 voices allow meaningful train/val/test speaker holdout OR smoke-only checker explicitly reports speaker holdout `not_evaluable` without weakening full-corpus rules.
   Evidence: `v4_dataset_tools.py` assigns speaker/engine test splits only from explicit holdout roles and prints absent smoke holdouts as `not_evaluable`; run `31671445654` exercises that policy for the one-voice Kokoro/Chatterbox smoke, while MeloTTS run `31671445689` exercises an explicit `test_engine` holdout.
 
-- [ ] **G1.7 Failed CI always preserves diagnostics** — P0 / AI-ENG  
+- [x] **G1.7 Failed CI always preserves diagnostics** — P0 / AI-ENG
   DoD: WAVs/manifests/reports upload with `if: always()` or equivalent even after QC/leakage failure.
-  Partial evidence: all three current smoke jobs use `if: always()` for summaries/environment capture and artifact upload. Keep unchecked until a post-fix intentionally failing or naturally failing run proves diagnostic artifact preservation on every job path.
+  Evidence: commit `c9793ea59bbd69a87cf65c1228107e020ca8c3f4` adds opt-in controlled WAV corruption after generation/split assignment. Dispatch runs `31676607342` and `31676609594` failed at `audio-qc --fail-on-qc` as intended, while every engine still captured its resolved environment, wrote a summary and uploaded generated audio plus `manifest_qc.csv` and a failure marker. Downloaded artifacts contained exactly one `unreadable:EOFError` row each (`smoke_kokoro_01`, `smoke_chatterbox_01`, `smoke_melotts_01`) with the remaining 3/5/3 rows passing. Normal push runs `31676594090` and `31676594032` remained green.
 
 - [x] **G1.8 WAV QC gate passes** — P0 / AI-ENG
   DoD: decode, mono/16 kHz normalization, finite samples, plausible duration, silence, clipping, DC offset/loudness and duplicate checks are reported.

@@ -7,7 +7,7 @@
 **Wake-word work:** `aihub/wakeword/`
 **Start here in a new session:** read this file first. If chat memory conflicts with Git, Git is source of truth.
 
-> **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real LiveKit replay run `31669141305` and alternative openWakeWord replay run `31670716561` used the exact same pinned v3 classifier/audio SHAs and were deterministic over three repeats per threshold. Their engine-specific scores differ, which is compatibility evidence rather than a changed v3 quality verdict. The alternative-runtime portion of G2.5 is complete; G2.5 stays open only until a pinned real v4 classifier replays the identical audio SHA. G1 audit/validation work also closed G1.1–G1.4, G1.6, G1.8, G1.9 and G1.11; the v4 scaling gate remains blocked by G1.5, G1.7 and G1.10. Existing Android SpeechRecognizer remains the working control/fallback.
+> **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real LiveKit replay run `31669141305` and alternative openWakeWord replay run `31670716561` used the exact same pinned v3 classifier/audio SHAs and were deterministic over three repeats per threshold. Their engine-specific scores differ, which is compatibility evidence rather than a changed v3 quality verdict. The alternative-runtime portion of G2.5 is complete; G2.5 stays open only until a pinned real v4 classifier replays the identical audio SHA. G1 audit/validation work also closed G1.1–G1.4, G1.6–G1.9 and G1.11; the v4 scaling gate remains blocked only by G1.5 and G1.10. Existing Android SpeechRecognizer remains the working control/fallback.
 
 ## Active continuation log — 2026-08-13
 
@@ -38,11 +38,11 @@
 - Lock implementation commit `ab96ecc` adds the three platform/Python-specific lock files, pins exact Python/pip versions, installs from the matching lock, runs `pip check`, and requires byte-equivalent sorted `pip freeze` output (excluding lock comments) before synthesis.
 - Closure evidence: locked data-smoke run `31676094058` passed both Kokoro and Chatterbox jobs; locked MeloTTS run `31676094114` also passed. All three completed dependency equality, generation, manifest validation, WAV QC, leakage and artifact upload. G1.2 is closed.
 
-### G1.7 failed-run diagnostics — active
+### G1.7 failed-run diagnostics — completed
 
 - Current task: add an opt-in `workflow_dispatch` input that truncates exactly one generated WAV after deterministic split assignment in each real smoke job. This exercises the actual `audio-qc --fail-on-qc` failure path without changing normal push behavior.
-- Required evidence: the controlled run must fail at WAV QC, but `manifest_qc.csv`, the failure marker, generated audio, resolved environment and summary must still upload through the existing `if: always()` steps for Kokoro, Chatterbox and MeloTTS.
-- Closure guard: workflow syntax or an artifact name alone is insufficient. Keep G1.7 unchecked until both controlled workflows run and their downloaded artifacts contain a failed QC row naming the intentionally truncated clip.
+- Controlled runs `31676607342` and `31676609594` failed at WAV QC as intended. All three jobs still captured their resolved environments, wrote summaries and uploaded generated audio, failure markers and `manifest_qc.csv` through `if: always()`.
+- Downloaded-artifact verification passed: Kokoro, Chatterbox and MeloTTS each contained exactly one `unreadable:EOFError` failed row naming the deliberately truncated clip; their summaries retained 3/4, 5/6 and 3/4 QC-pass counts. Normal push runs `31676594090` and `31676594032` remained green. G1.7 is closed.
 
 ---
 
@@ -366,8 +366,8 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 
 1. **Alternative-runtime replay completed:** keep G2.5 unchecked only for the real v4 replay; keep G2.16 unchecked until a full shared benchmark exists.
 2. **G1 audit completed:** G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 now have durable clean-CI evidence.
-3. Next AI-owned blocker: prove `if: always()` diagnostic preservation with controlled QC failures for G1.7, and retain the failing manifests/reports in uploaded artifacts.
-4. Human/data blockers: replace or explicitly exclude the failed Chatterbox Korean positives for G1.5, and finish listening dispositions for every remaining admitted phrase/voice combination—including Kokoro English—for G1.10.
+3. Remaining G1 blockers are human/data decisions: replace or explicitly exclude the failed Chatterbox Korean positives for G1.5, and finish listening dispositions for every remaining admitted phrase/voice combination—including Kokoro English—for G1.10.
+4. While those reviews are pending, continue AI-owned corpus work on the deterministic original-script library (G1.12) and pre-augmentation split enforcement (G1.13), without unlocking large generation.
 5. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
 
 ## 16. Do not repeat
