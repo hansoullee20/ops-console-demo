@@ -310,157 +310,69 @@ def approve_leave(conn: sqlite3.Connection, leave_id: int, *, actor: str = "oper
     conn.execute("UPDATE leave_requests SET status='approved',approved_by=?,approved_at=?,updated_at=? WHERE id=?",
                  (actor, now, now, leave_id))
     after = dict(_get(conn, leave_id)); _audit(conn, "leave.approve", leave_id, actor, before, after, "휴가 승인")
- …7134 tokens truncated…  old_att=conn.execute("SELECT * FROM attendance_days WHERE employee_id=? AND work_date=?",(employee_id,work_date)).fetchone()
-    if old_att and old_att["confirmed_at"] and not active: raise SafetyError("unrelated confirmed attendance already exists")
-    if active: conn.execute("UPDATE manual_attendance_adjustments SET status='superseded',ended_at=?,ended_by=?,end_reason=? WHERE id=?",(now(),actor,reason,active["id"]))
-    stamp=now()
-    conn.execute("INSERT INTO attendance_days(employee_id,work_date,status,actual_in_at,actual_out_at,source,confirmed_at,confirmed_by,review_flag,review_note) VALUES(?,?,?,?,?,'manual',?,?,NULL,?) ON CONFLICT(employee_id,work_date) DO UPDATE SET status=excluded.status,actual_in_at=excluded.actual_in_at,actual_out_at=excluded.actual_out_at,source='manual',confirmed_at=excluded.confirmed_at,confirmed_by=excluded.confirmed_by,review_flag=NULL,review_note=excluded.review_note,last_import_run_id=NULL",
-      (employee_id,work_date,resulting_status,recognized_in_at,recognized_out_at,stamp,actor,reason))
-    attendance_id=conn.execute("SELECT id FROM attendance_days WHERE employee_id=? AND work_date=?",(employee_id,work_date)).fetchone()[0]
-    aid=conn.execute("INSERT INTO manual_attendance_adjustments(employee_id,work_date,recognized_in_at,recognized_out_at,resulting_status,reason,reference_note,supersedes_adjustment_id,attendance_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      (employee_id,work_date,recognized_in_at,recognized_out_at,resulting_status,reason,reference_note,supersedes_id,attendance_id,actor)).lastrowid
-    if active:conn.execute("UPDATE manual_attendance_adjustments SET superseded_by_adjustment_id=? WHERE id=?",(aid,active["id"]))
-    after=rowdict(conn.execute("SELECT * FROM manual_attendance_adjustments WHERE id=?",(aid,)).fetchone());audit(conn,"attendance.manual_adjust", "manual_attendance_adjustments",aid,dict(active) if active else None,after,reason,actor);return after
+    _sync_balance(conn, row["employee_id"], row["leave_year"])
+    _sync_attendance(conn, row["employee_id"], set(work_calendar.working_dates(conn, row["start_date"], row["end_date"])))
+    return serialize(_get(conn, leave_id))
 
-def end_adjustment(conn,adjustment_id,status,reason,actor="operator"):
-    if status not in {"cancelled","voided"}: raise SafetyError("invalid adjustment end status")
-    row=conn.execute("SELECT * FROM manual_attendance_adjustments WHERE id=? AND status='active'",(adjustment_id,)).fetchone()
-    if not row: raise SafetyError("active adjustment not found")
-    from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,row["work_date"],row["work_date"])
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    attendance=conn.execute("SELECT * FROM attendance_days WHERE id=?",(row["attendance_id"],)).fetchone()
-    # Ownership guard: only remove this adjustment's exact manual projection.
-    owned=attendance and attendance["employee_id"]==row["employee_id"] and attendance["work_date"]==row["work_date"] and attendance["source"]=="manual" and attendance["confirmed_by"]==row["created_by"] and attendance["status"]==row["resulting_status"] and attendance["actual_in_at"]==row["recognized_in_at"] and attendance["actual_out_at"]==row["recognized_out_at"]
-    conn.execute("UPDATE manual_attendance_adjustments SET status=?,ended_at=?,ended_by=?,end_reason=? WHERE id=?",(status,now(),actor,reason,adjustment_id))
-    if owned:
-        punches=conn.execute("SELECT COUNT(*) FROM punch_events WHERE employee_id=? AND work_date=? AND rolled_back_at IS NULL",(row["employee_id"],row["work_date"])).fetchone()[0]
-        conn.execute("UPDATE attendance_days SET confirmed_at=NULL,confirmed_by=NULL WHERE id=?",(attendance["id"],))
-        if punches:
-            from app.services.xls_pipeline import derive_attendance
-            derive_attendance(conn,[(row["employee_id"],row["work_date"])])
-        else: conn.execute("UPDATE attendance_days SET status='unknown',actual_in_at=NULL,actual_out_at=NULL,source='manual',review_flag='manual_review',review_note=?,last_import_run_id=NULL WHERE id=?",("수동 근무 인정이 종료되어 확인이 필요합니다.",attendance["id"]))
-    updated=rowdict(conn.execute("SELECT * FROM manual_attendance_adjustments WHERE id=?",(adjustment_id,)).fetchone());audit(conn,f"attendance.manual_{status}","manual_attendance_adjustments",adjustment_id,dict(row),updated,reason,actor);return updated
 
-def create_schedule(conn,*,employee_id,effective_from,effective_to,weekday_mask,expected_start_time=None,expected_end_time=None,actor="operator"):
-    from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,effective_from,effective_to)
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    _validate_employee_date(conn,employee_id,effective_from)
-    if effective_to:
-        _validate_employee_date(conn,employee_id,effective_to)
-    if effective_to and effective_from>effective_to: raise SafetyError("schedule start must not follow end")
-    overlap=conn.execute("SELECT id FROM employee_work_schedules WHERE employee_id=? AND status='active' AND effective_from<=COALESCE(?, '9999-12-31') AND COALESCE(effective_to,'9999-12-31')>=?",(employee_id,effective_to,effective_from)).fetchone()
-    if overlap: raise SafetyError("schedule period overlaps an active schedule")
-    sid=conn.execute("INSERT INTO employee_work_schedules(employee_id,effective_from,effective_to,weekday_mask,expected_start_time,expected_end_time,created_by) VALUES(?,?,?,?,?,?,?)",(employee_id,effective_from,effective_to,weekday_mask,expected_start_time,expected_end_time,actor)).lastrowid
-    result=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(sid,)).fetchone());audit(conn,"schedule.create","employee_work_schedules",sid,None,result,"schedule created",actor);return result
+def correct_leave(conn: sqlite3.Connection, leave_id: int, *, employee_id: int,
+                  leave_type: str, start_date: str, end_date: str, portion: str,
+                  reason: str, evidence_received: bool = False,
+                  evidence_start_date: str | None = None, evidence_end_date: str | None = None,
+                  evidence_note: str | None = None, evidence_checked_date: str | None = None,
+                  actor: str = "operator") -> dict:
+    old = _get(conn, leave_id)
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try:
+        assert_range_open(conn, old["start_date"], old["end_date"])
+        assert_range_open(conn, start_date, end_date)
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
+    if old["status"] in {"cancelled", "rejected"}:
+        raise LeaveError("취소되거나 반려된 휴가는 정정할 수 없습니다.")
+    if start_date[:4] != end_date[:4]:
+        raise LeaveError("cross-year leave must be registered as one request per year")
+    employee = _employee(conn, employee_id); _validate_employment(employee, start_date, end_date)
+    db_type, half = _normalize_input(leave_type, portion)
+    try:
+        days = work_calendar.leave_days(conn, start_date, end_date, half or "full")
+    except work_calendar.CalendarError as exc:
+        raise LeaveError(str(exc)) from exc
+    if days <= 0: raise LeaveError("선택한 기간에 근무일이 없습니다.")
+    _assert_no_overlap(conn, employee_id, start_date, end_date, db_type, half, leave_id)
+    if evidence_start_date and evidence_end_date and evidence_end_date < evidence_start_date:
+        raise LeaveError("evidence end date cannot be before its start date")
+    before = dict(old); now = _now()
+    conn.execute(
+        """UPDATE leave_requests SET employee_id=?,leave_type=?,half_day_period=?,
+               start_date=?,end_date=?,working_day_count=?,leave_year=?,reason=?,
+               evidence_received=?,cert_start_date=?,cert_end_date=?,evidence_note=?,
+               evidence_checked_date=?,updated_at=? WHERE id=?""",
+        (employee_id, db_type, half, start_date, end_date, days, int(start_date[:4]), reason,
+         int(evidence_received), evidence_start_date, evidence_end_date, evidence_note,
+         evidence_checked_date, now, leave_id),
+    )
+    after = dict(_get(conn, leave_id)); _audit(conn, "leave.correct", leave_id, actor, before, after, reason)
+    for emp, year in {(old["employee_id"], old["leave_year"]), (employee_id, int(start_date[:4]))}:
+        _sync_balance(conn, emp, year)
+    if old["status"] == "approved":
+        old_dates = set(work_calendar.working_dates(conn, old["start_date"], old["end_date"]))
+        new_dates = set(work_calendar.working_dates(conn, start_date, end_date))
+        _sync_attendance(conn, old["employee_id"], old_dates)
+        _sync_attendance(conn, employee_id, new_dates)
+    return serialize(_get(conn, leave_id))
 
-def retire_schedule(conn,schedule_id,reason,actor="operator"):
-    if not (reason or "").strip(): raise SafetyError("reason is required")
-    row=conn.execute("SELECT * FROM employee_work_schedules WHERE id=? AND status='active'",(schedule_id,)).fetchone()
-    if not row: raise SafetyError("active schedule not found")
-    from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,row["effective_from"],row["effective_to"])
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    conn.execute("UPDATE employee_work_schedules SET status='retired',retired_at=?,retired_by=? WHERE id=?",(now(),actor,schedule_id))
-    updated=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone())
-    audit(conn,"schedule.retire","employee_work_schedules",schedule_id,dict(row),updated,reason,actor)
-    return updated
 
-def set_schedule_date(conn,*,employee_id,work_date,is_scheduled,expected_start_time=None,expected_end_time=None,label=None,actor="operator",supersedes_id=None):
-    from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,work_date,work_date)
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    _validate_employee_date(conn,employee_id,work_date)
-    active=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active'",(employee_id,work_date)).fetchone()
-    if active and active["id"]!=supersedes_id: raise SafetyError("an active date override already exists")
-    if supersedes_id and (not active or active["id"]!=supersedes_id): raise SafetyError("only active override may be superseded")
-    if active:conn.execute("UPDATE employee_schedule_dates SET status='superseded' WHERE id=?",(active["id"],))
-    oid=conn.execute("INSERT INTO employee_schedule_dates(employee_id,work_date,is_scheduled,expected_start_time,expected_end_time,label,supersedes_date_id,created_by) VALUES(?,?,?,?,?,?,?,?)",(employee_id,work_date,int(is_scheduled),expected_start_time,expected_end_time,label,supersedes_id,actor)).lastrowid
-    result=rowdict(conn.execute("SELECT * FROM employee_schedule_dates WHERE id=?",(oid,)).fetchone());audit(conn,"schedule.override","employee_schedule_dates",oid,dict(active) if active else None,result,"date override",actor);return result
-
-def cancel_schedule_date(conn,override_id,reason,actor="operator"):
-    if not (reason or "").strip(): raise SafetyError("reason is required")
-    row=conn.execute("SELECT * FROM employee_schedule_dates WHERE id=? AND status='active'",(override_id,)).fetchone()
-    if not row: raise SafetyError("active date override not found")
-    from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,row["work_date"],row["work_date"])
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    conn.execute("UPDATE employee_schedule_dates SET status='cancelled' WHERE id=?",(override_id,))
-    updated=rowdict(conn.execute("SELECT * FROM employee_schedule_dates WHERE id=?",(override_id,)).fetchone())
-    audit(conn,"schedule.override_cancel","employee_schedule_dates",override_id,dict(row),updated,reason,actor)
-    return updated
-
-def resolve_schedule(conn,employee_id,work_date):
-    employee=conn.execute("SELECT hire_date,end_date FROM employees WHERE id=?",(employee_id,)).fetchone()
-    if not employee: raise SafetyError("employee not found")
-    if work_date<employee["hire_date"] or (employee["end_date"] and work_date>employee["end_date"]):
-        return {"isScheduled":False,"source":"employment_period","expectedStart":None,"expectedEnd":None,"evidenceId":None}
-    override=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active' ORDER BY id DESC LIMIT 1",(employee_id,work_date)).fetchone()
-    if override:return {"isScheduled":bool(override["is_scheduled"]),"source":"employee_date_override","expectedStart":override["expected_start_time"],"expectedEnd":override["expected_end_time"],"evidenceId":override["id"]}
-    schedule=conn.execute("SELECT * FROM employee_work_schedules WHERE employee_id=? AND status='active' AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC,id DESC LIMIT 1",(employee_id,work_date,work_date)).fetchone()
-    if schedule:
-        scheduled=str(date.fromisoformat(work_date).weekday()) in set(schedule["weekday_mask"].split(","))
-        return {"isScheduled":scheduled,"source":"employee_schedule","expectedStart":schedule["expected_start_time"],"expectedEnd":schedule["expected_end_time"],"evidenceId":schedule["id"]}
-    calendar=conn.execute("SELECT * FROM site_calendar WHERE calendar_date=?",(work_date,)).fetchone()
-    is_working=bool(calendar["is_working"]) if calendar else date.fromisoformat(work_date).weekday()<5
-    return {"isScheduled":is_working,"source":"site_calendar","expectedStart":None,"expectedEnd":None,"evidenceId":calendar["id"] if calendar else None}
-
-def _source_observation(conn,code,work_date,import_run_id,observed,expected,scheduled,measurement):
-    conn.execute("INSERT OR IGNORE INTO source_quality_observations(observation_code,work_date,import_run_id,observed_value,expected_value,scheduled_worker_count,rule_version,measurement_json) VALUES(?,?,?,?,?,?,'1',?)",
-      (code,work_date,import_run_id,observed,expected,scheduled,json.dumps(measurement,sort_keys=True)))
-    return conn.execute("SELECT id FROM source_quality_observations WHERE observation_code=? AND work_date=? AND IFNULL(import_run_id,-1)=IFNULL(?,-1) AND rule_version='1'",(code,work_date,import_run_id)).fetchone()[0]
-
-def reconcile(conn,start,end,actor="system"):
-    created=[]
-    employees=conn.execute("SELECT * FROM employees WHERE hire_date<=? AND (end_date IS NULL OR end_date>=?)",(end,start)).fetchall()
-    day=date.fromisoformat(start);last=date.fromisoformat(end)
-    while day<=last:
-        iso=day.isoformat(); scheduled=[]
-        for e in employees:
-            if resolve_schedule(conn,e["id"],iso)["isScheduled"]:scheduled.append(e)
-        punches=conn.execute("SELECT * FROM punch_events WHERE work_date=? AND rolled_back_at IS NULL ORDER BY id",(iso,)).fetchall()
-        coverage=conn.execute("SELECT d.*,r.source_filename FROM import_run_days d JOIN import_runs r ON r.id=d.import_run_id WHERE d.work_date=? AND r.status='applied' ORDER BY d.id DESC LIMIT 1",(iso,)).fetchone()
-        expected_run=conn.execute("SELECT * FROM import_runs WHERE status='applied' AND period_start<=? AND period_end>=? ORDER BY id DESC LIMIT 1",(iso,iso)).fetchone()
-        source_wide_problem=False
-        if scheduled and coverage and coverage["raw_punch_count"]==0:
-            source_wide_problem=True
-            oid=_source_observation(conn,"covered_but_zero_events",iso,coverage["import_run_id"],0,len(scheduled),len(scheduled),{"coverageStatus":coverage["coverage_status"]})
-            created.append(ensure_exception(conn,code="covered_but_zero_events",severity="review",scope="source",work_date=iso,import_run_id=coverage["import_run_id"],summary="가져온 자료에 전체 지문 기록이 없습니다",source_ref=f"coverage:{coverage['import_run_id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
-        elif scheduled and expected_run and not coverage:
-            source_wide_problem=True
-            oid=_source_observation(conn,"expected_period_not_covered",iso,expected_run["id"],None,len(scheduled),len(scheduled),{"periodStart":expected_run["period_start"],"periodEnd":expected_run["period_end"]})
-            created.append(ensure_exception(conn,code="expected_period_not_covered",severity="review",scope="source",work_date=iso,import_run_id=expected_run["id"],summary="예상된 근무일이 가져온 자료 범위에 포함되지 않았습니다",source_ref=f"coverage:{expected_run['id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":expected_run["id"],"import_run_id":expected_run["id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
-        observed_workers={p["employee_id"] for p in punches if p["employee_id"] is not None}
-        if coverage and len(scheduled)>=4 and 0<len(observed_workers)*2<len(scheduled):
-            oid=_source_observation(conn,"source_quality_drop",iso,coverage["import_run_id"],len(observed_workers),len(scheduled),len(scheduled),{"activePunches":len(punches),"observedWorkers":len(observed_workers)})
-            created.append(ensure_exception(conn,code="source_quality_drop",severity="review",scope="source",work_date=iso,import_run_id=coverage["import_run_id"],summary="예정 인원에 비해 지문 기록 인원이 크게 적습니다",source_ref=f"coverage:{coverage['import_run_id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
-        for e in scheduled:
-            ep=[p for p in punches if p["employee_id"]==e["id"]]
-            if not ep and not source_wide_problem:
-                schedule=resolve_schedule(conn,e["id"],iso)
-                evidence=[{"evidence_type":"employee_work_schedule","entity_type":schedule["source"],"entity_id":schedule["evidenceId"],"reference_text":f"{schedule['source']}:{schedule['evidenceId'] or iso}"}]
-                if coverage:evidence.append({"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]})
-                created.append(ensure_exception(conn,code="scheduled_no_punch",severity="review",scope="employee",employee_id=e["id"],work_date=iso,summary="예정 근무일에 기록된 지문이 없습니다",detail="결근으로 판정하지 않으며 관리자 확인이 필요합니다.",evidence=evidence,actor=actor))
-            elif len(ep)==1:
-                created.append(ensure_exception(conn,code="incomplete_day",severity="review",scope="employee",employee_id=e["id"],work_date=iso,import_run_id=ep[0]["active_import_run_id"],summary="지문 기록이 한 건뿐입니다",evidence=[{"evidence_type":"fingerprint_punch","entity_type":"punch_events","entity_id":ep[0]["id"],"punch_event_id":ep[0]["id"]}],actor=actor))
-        day=date.fromordinal(day.toordinal()+1)
-    # Promote leave findings without losing the actual employee/date evidence.
-    from app.services import leave_operations, work_calendar
-    for leave in leave_operations.list_leave(conn,None,start,end):
-        for code in leave.get("findings",[]):
-            if code=="leave_attendance_conflict":
-                period_start=max(start,leave["startDate"]);period_end=min(end,leave["endDate"])
-                for iso in work_calendar.working_dates(conn,period_start,period_end):
-                    if leave_operations.approved_leave_coverage(conn,leave["employeeId"],iso)["coverage"]!="full":continue
-                    punches=conn.execute("SELECT id,active_import_run_id FROM punch_events WHERE employee_id=? AND work_date=? AND rolled_back_at IS NULL ORDER BY id",(leave["employeeId"],iso)).fetchall()
-                    if not punches:continue
-                    evidence=[{"evidence_type":"approved_leave","entity_type":"leave_requests","entity_id":leave["id"]}]+[{"evidence_type":"fingerprint_punch","entity_type":"punch_events","entity_id":p["id"],"punch_event_id":p["id"],"import_run_id":p["active_import_run_id"]} for p in punches]
-                    created.append(ensure_exception(conn,code=code,severity="review",scope="employee",employee_id=leave["employeeId"],work_date=iso,summary=code,evidence=evidence,actor=actor))
-            else:
-                created.append(ensure_exception(conn,code=code,severity="review",scope="employee",employee_id=leave["employeeId"],work_date=leave["startDate"],summary=code,evidence=[{"evidence_type":"approved_leave","entity_type":"leave_requests","entity_id":leave["id"]}],actor=actor))
-    return created
-
-def operations_read_model(conn,start,end,**filters):
-    reconcile(conn,start,end)
-    return {"startDate":start,"endDate":end,"exceptions":list_exceptions(conn,start=start,end=end,**filters),"sourceQuality":[dict(r) for r in conn.execute("SELECT * FROM source_quality_observations WHERE work_date BETWEEN ? AND ? ORDER BY id",(start,end))],"manualAdjustments":[dict(r) for r in conn.execute("SELECT * FROM manual_attendance_adjustments WHERE work_date BETWEEN ? AND ? ORDER BY id",(start,end))]}
+def cancel_leave(conn: sqlite3.Connection, leave_id: int, reason: str, *, actor: str = "operator") -> dict:
+    if len(reason.strip()) < 2: raise LeaveError("취소 이유를 입력하십시오.")
+    row = _get(conn, leave_id)
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try: assert_range_open(conn, row["start_date"], row["end_date"])
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
+    if row["status"] == "cancelled": raise LeaveError("이미 취소된 휴가입니다.")
+    before = dict(row); now = _now()
+    conn.execute("UPDATE leave_requests SET status='cancelled',cancelled_at=?,updated_at=? WHERE id=?", (now, now, leave_id))
+    after = dict(_get(conn, leave_id)); _audit(conn, "leave.cancel", leave_id, actor, before, after, reason.strip())
+    _sync_balance(conn, row["employee_id"], row["leave_year"])
+    if row["status"] == "approved":
+        _sync_attendance(conn, row["employee_id"], set(work_calendar.working_dates(conn, row["start_date"], row["end_date"])))
+    return serialize(_get(conn, leave_id))

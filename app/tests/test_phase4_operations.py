@@ -243,14 +243,7 @@ def test_requested_correction_and_cancel_never_touch_attendance(operational):
     assert conn.execute("SELECT COUNT(*) FROM attendance_days").fetchone()[0]==0
 
 
-def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
-    path,a,b,_=operational;conn=db.connect(path)
-    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
-        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="employee correction")
-    states={(r["employee_id"],r["work_date"]):r["status"] for r in conn.execute(
-        "SELECT employee_id,work_date,status FROM attendance_days")}
-    assert states=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
+def test_approved_employee_date_correction_has_no_cross_employee_phantoms(oper׮��G����ƭy�=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
 
 
 def _insert_punch(conn,employee,date,key):
@@ -283,29 +276,200 @@ def test_import_after_confirmed_leave_surfaces_conflict_without_overwrite(operat
     row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
     conn.execute("UPDATE attendance_days SET status='late',review_flag='manual_review',confirmed_at='2026-08-12T00:00:00.000Z' WHERE employee_id=?",(a,))
     before=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01…8215 tokens truncated…003e</div><div class="drawerfoot" id="dfoot"></div></aside></div><div id="toast"></div>
-<button class="ai-fab" onclick="openAI()">✦ AI 업무도우미 <span class="free">MOCK</span></button><div class="ai-panel-wrap" id="aiWrap"><div class="ai-scrim" onclick="closeAI()"></div><aside class="ai-panel"><div class="ai-head"><div class="ai-head-top"><h2>AI 업무도우미</h2><div class="local-state" id="localState">데모 응답</div><button class="ai-close" onclick="closeAI()">×</button></div><div class="ai-provider"><button class="provider-btn on" data-provider="claude" onclick="setProvider('claude')">Claude</button><button class="provider-btn" data-provider="codex" onclick="setProvider('codex')">GPT · Codex</button></div></div><div class="ai-context"><span class="ctx">운영</span><span class="ctx">직원 18명</span></div><div class="ai-chat" id="aiChat"><div class="msg ai"><div class="bubble">현재 목데이터를 기준으로 답합니다. 예: “오늘 결원 있어?”</div></div></div><div class="ai-compose"><div class="quick"><button onclick="askQuick('오늘 결원과 대체 현황 알려줘')">오늘 결원</button><button onclick="askQuick('확인 필요한 항목만 정리해줘')">확인 필요</button><button onclick="askQuick('김가람 병가에서 뭐가 문제야?')">병가 확인</button><button onclick="askQuick('오늘 업무 보고 문장 써줘')">업무보고</button></div><div class="composebox"><textarea id="aiInput" placeholder="예: 오늘 결원 있어?"></textarea><button class="send" onclick="sendAI()">↑</button></div><div class="ai-note">공개 데모 · 실제 Claude/GPT 연결 아님</div></div></aside></div>
-<script>
-// Operations data is loaded by data-source.js: from the API in operational
-// mode, or from the generated snapshot in the public demo. It is never both.
-let days=[];
-let employees=[];
-let opsMode='weekly',issuesOnly=false,selectedDay=1;function renderOps(){document.querySelectorAll('#opsView button').forEach(b=>b.classList.toggle('on',b.dataset.view===opsMode));document.getElementById('periodTitle').textContent=periodTitleFor(opsMode);let c=employees.map(e=>e.cells[selectedDay]);document.getElementById('opsBrief').innerHTML=`재직 <b>18</b> · 정상 <b>${c.filter(x=>x.type==='ok').length}</b> · 휴가/병가 <b>${c.filter(x=>['leave','sick'].includes(x.type)).length}</b> · 대체 <b>${c.filter(x=>x.type==='replacement').length}</b>`;document.getElementById('issueCount').textContent=employees.reduce((n,e)=>n+e.cells.filter(x=>x.issue).length,0);document.getElementById('issueBtn').classList.toggle('on',issuesOnly);opsMode==='weekly'?renderWeekly():opsMode==='daily'?renderDaily():renderMonthly()}
-function renderWeekly(){let list=employees.filter(e=>!issuesOnly||e.cells.some(c=>c.issue)),h='<section class="panel board"><div class="weekgrid"><div class="wrow whead"><div>직원 · 담당구역</div>';days.forEach(d=>h+=`<div class="dayhead ${d.today?'today':''}"><div>${d.dow}</div><div class="num">${d.num}</div></div>`);h+='</div>';list.forEach(e=>{h+=`<div class="wrow"><div class="person"><div class="avatar">${e.name[0]}</div><div><div class="pname">${e.name}</div><div class="zone">${e.zone}</div></div></div>`;e.cells.forEach((c,i)=>h+=`<div class="cell ${days[i].today?'today':''}" onclick='openCell(${JSON.stringify(e.name)},${JSON.stringify(e.zone)},${i},${JSON.stringify(c)})'>${c.issue?'<span class="marker"></span>':''}<div class="shift">${c.shift}</div><span class="pill ${c.type}">${c.label}</span><div class="punch">${c.punch||''}</div></div>`);h+='</div>'});document.getElementById('opsContent').innerHTML=h+'</div></section>'}
-function renderDaily(){let rows=employees.filter(e=>!issuesOnly||e.cells[selectedDay].issue).sort((a,b)=>(b.cells[selectedDay].issue?1:0)-(a.cells[selectedDay].issue?1:0)),h='<section class="panel daily"><div><div class="panelhead"><h1>8월 11일 화요일</h1></div><table><thead><tr><th>직원</th><th>구역</th><th>예정</th><th>실제</th><th>상태</th></tr></thead><tbody>';rows.forEach(e=>{let c=e.cells[selectedDay];h+=`<tr class="${c.issue?'issueRow':''}" onclick='openCell(${JSON.stringify(e.name)},${JSON.stringify(e.zone)},${selectedDay},${JSON.stringify(c)})'><td><b>${e.name}</b></td><td>${e.zone}</td><td>${c.shift}</td><td>${c.punch||'—'}</td><td><span class="tag ${c.issue?'red':c.type==='ok'?'green':c.type==='replacement'?'purple':'amber'}">${c.label}</span></td></tr>`});h+='</tbody></table></div>'+dailyAside()+'</section>';document.getElementById('opsContent').innerHTML=h}
-let monthStats={};
-function renderMonthly(){let h='<section class="panel"><div class="monthwrap"><div class="monthgrid">';['일','월','화','수','목','금','토'].forEach(d=>h+=`<div class="mcell mhead">${d}</div>`);for(let i=0;i<6;i++)h+='<div class="mcell"></div>';for(let d=1;d<=31;d++){let s=monthStats[d]||{};h+=`<div class="mcell ${d===11?'today':''}"><div class="mnum">${d}</div>${s.issue?`<span class="mchip red">확인 ${s.issue}</span>`:''}${s.leave?`<span class="mchip blue">휴가 ${s.leave}</span>`:''}${s.sick?`<span class="mchip red">병가 ${s.sick}</span>`:''}${s.replace?`<span class="mchip purple">대체 ${s.replace}</span>`:''}</div>`}document.getElementById('opsContent').innerHTML=h+'</div></div></section>'}
-document.querySelectorAll('#opsView button').forEach(b=>b.onclick=()=>{opsMode=b.dataset.view;renderOps()});function toggleIssues(){issuesOnly=!issuesOnly;renderOps()}
-function renderAttendance(){renderAttendanceGrid()}
-function renderEmployees(){document.getElementById('employeeTable').innerHTML=employees.map(e=>`<tr onclick="openGeneric('${e.name}','${e.zone}','입사 ${e.hire} · 계약 ${e.end}','연차 ${e.leave}일 · 지문 ${e.slot}')"><td><b>${e.name}</b></td><td>${e.zone}</td><td>${e.hire}</td><td>${e.end}</td><td>${e.leave}일</td><td><span class="tag ${e.state==='병가'?'red':e.state==='대체'?'purple':'green'}">${e.state}</span></td><td>${e.slot}</td></tr>`).join('')}
-document.querySelectorAll('#topNav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#topNav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));document.getElementById('page-'+b.dataset.page).classList.add('on')});
-function openCell(name,zone,i,c){dtitle.textContent=name;dsub.textContent=`${days[i].date} · ${zone}`;dbody.innerHTML=`<div class="box"><div class="kv"><div class="k">예정</div><div>${c.shift}</div><div class="k">상태</div><div><b>${c.label}</b></div><div class="k">기록</div><div>${c.punch||'—'}</div></div></div>${c.issue?`<div class="alert"><b>확인 필요</b><br>${c.detail}</div>`:''}`;dfoot.innerHTML='<button class="btn" onclick="closeDrawer()">닫기</button><button class="btn primary" onclick="toast(\'목업: 조치\')">조치하기</button>';drawerWrap.classList.add('open')}function openGeneric(title,sub,main,note){dtitle.textContent=title;dsub.textContent=sub;dbody.innerHTML=`<div class="box"><div class="kv"><div class="k">정보</div><div>${main}</div><div class="k">메모</div><div>${note}</div></div></div>`;drawerWrap.classList.add('open')}function closeDrawer(){drawerWrap.classList.remove('open')}function toast(t){let e=document.getElementById('toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',1200)}
-function openAI(){aiWrap.classList.add('open')}function closeAI(){aiWrap.classList.remove('open')}function setProvider(p){document.querySelectorAll('.provider-btn').forEach(b=>b.classList.toggle('on',b.dataset.provider===p));localState.textContent=p==='claude'?'Claude 데모':'GPT/Codex 데모'}function askQuick(q){aiInput.value=q;sendAI()}function sendAI(){let q=aiInput.value.trim();if(!q)return;aiChat.innerHTML+=`<div class="msg user"><div class="bubble">${q}</div></div>`;aiInput.value='';let a='현재 목데이터 기준으로 확인했습니다.',tool='get_current_view()';if(q.includes('결원')||q.includes('대체')){a='오늘 미배치 결원은 <b>1건</b>입니다. 박나래 담당 공학관 3층에 대체인력이 아직 배정되지 않았습니다.';tool='get_replacement_status()'}else if(q.includes('확인')){a='<b>4건</b>입니다. 김가람 병가 증빙기간, 박나래 결원, 이도연 휴가·근태 충돌, 최라온 다중 태그입니다.';tool='get_issues()'}else if(q.includes('김가람')||q.includes('병가')){a='김가람의 병가 신청은 8/4–9/11인데 진단서는 8/4–8/31까지입니다. 추가 증빙 또는 신청기간 정정이 필요합니다.';tool='get_leave(김가람)'}else if(q.includes('보고')){a='<b>업무보고 초안</b><br>8월 11일 병가 증빙 불일치 1건, 결원·대체 미배치 1건, 휴가·근태 충돌 1건, 다중 지문기록 1건을 확인하여 조치 중입니다.';tool='get_daily_summary()'}setTimeout(()=>{aiChat.innerHTML+=`<div class="msg ai"><div class="bubble"><div class="tooltrace">${tool}</div>${a}</div></div>`;aiChat.scrollTop=aiChat.scrollHeight},180)}aiInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendAI()}});
-</script><script src="./profile.js"></script>
-<!--OPS_DEMO_INJECT-->
-<script src="./data-source.js"></script>
-<script src="./import-ui.js"></script>
-<script src="./phase4-ui.js"></script>
-<script src="./safety-ui.js"></script>
-<script src="./month-close-ui.js"></script>
-</body></html>
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"confirmed.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
+    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);after=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
+    assert after==before
+    assert leave.list_leave(conn)[0]["finding"]=="leave_attendance_conflict"
+
+
+def test_rollback_leave_conflict_clears_fingerprint_times_and_owner(operational,tmp_path):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"rollback.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
+    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    xls_pipeline.rollback_import(p.import_run_id,"mapping correction",db_path=path)
+    conn=db.connect(path);attendance=conn.execute("""SELECT status,actual_in_at,actual_out_at,
+        source,review_flag,last_import_run_id FROM attendance_days""").fetchone()
+    assert tuple(attendance)==("leave",None,None,"manual",None,None)
+    assert conn.execute("SELECT COUNT(*) FROM punch_events WHERE rolled_back_at IS NULL").fetchone()[0]==0
+    leave.cancel_leave(conn,row["id"],"leave cancelled")
+    attendance=conn.execute("SELECT actual_in_at,actual_out_at,status FROM attendance_days").fetchone()
+    assert tuple(attendance)==(None,None,"unknown")
+
+
+def test_replacement_status_lifecycle_patch_and_link_validation(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-10",zone="Site A")
+    repl.set_status(conn,assignment["id"],"confirmed");repl.set_status(conn,assignment["id"],"completed")
+    with pytest.raises(repl.ReplacementError):repl.set_status(conn,assignment["id"],"planned")
+    with pytest.raises(repl.ReplacementError):repl.update_assignment(conn,assignment["id"],{"zone":"Site B"})
+    cancelled=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-11",end_date="2026-08-11",zone="Site A")
+    repl.set_status(conn,cancelled["id"],"cancelled")
+    with pytest.raises(repl.ReplacementError):repl.set_status(conn,cancelled["id"],"confirmed")
+    with TestClient(create_app()) as client:
+        assert client.post(f"/api/v1/replacement-operations/{assignment['id']}/status",
+                           json={"status":"planned"}).status_code==409
+        assert client.patch(f"/api/v1/replacement-operations/{assignment['id']}",
+                            json={"status":"planned"}).status_code==409
+
+
+def test_month_overlap_filters_and_multiday_replacement_stats(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    create(conn,a,start="2026-08-31",end="2026-09-02")
+    repl_row=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-12",zone="Site A")
+    repl.set_status(conn,repl_row["id"],"confirmed")
+    conn.commit()
+    with TestClient(create_app()) as client:
+        assert len(client.get("/api/v1/leave-operations?month=2026-08").json()["leaves"])==1
+        assert len(client.get("/api/v1/leave-operations?month=2026-09").json()["leaves"])==1
+        assert client.get("/api/v1/leave-operations?month=2026-09").json()["balanceYear"]==2026
+    from app.services import ops
+    stats=ops.month_stats(conn,2026,8)
+    assert [stats[str(day)]["replace"] for day in (10,11,12)]==[1,1,1]
+    week=ops.week_view(conn,"2026-08-10","2026-08-10")
+    worker=week["employees"][1]
+    assert [cell["type"] for cell in worker["cells"][:3]]==["replacement"]*3
+
+
+@pytest.mark.parametrize("date,is_working,expected",[
+    ("2026-08-08",None,False),
+    ("2026-08-10",False,False),
+    ("2026-08-08",True,True),
+])
+def test_leave_punch_conflict_respects_work_calendar(operational,date,is_working,expected):
+    path,a,_,_=operational;conn=db.connect(path)
+    if is_working is not None:
+        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES(?,?,?)",(date,"special",is_working))
+    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    _insert_punch(conn,a,date,"calendar-"+date)
+    item=leave.list_leave(conn)[0]
+    assert ("leave_attendance_conflict" in item["findings"]) is expected
+    from app.services import ops
+    view=ops.week_view(conn,"2026-08-07","2026-08-07")
+    cell=view["employees"][0]["cells"][(int(date[-2:])-7)]
+    assert (cell.get("issue") is True) is expected
+
+
+def test_approved_am_pm_aggregate_to_full_day(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    am=create(conn,a,"half_day","2026-08-10","2026-08-10","am")
+    pm=create(conn,a,"half_day","2026-08-10","2026-08-10","pm")
+    leave.approve_leave(conn,am["id"]);leave.approve_leave(conn,pm["id"])
+    assert leave.balance(conn,a,2026)["used"]==1.0
+    assert leave.approved_leave_coverage(conn,a,"2026-08-10")["coverage"]=="full"
+    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave",None)
+    _insert_punch(conn,a,"2026-08-10","both-halves")
+    leave._sync_attendance(conn,a,{"2026-08-10"})
+    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave","leave_attendance_conflict")
+
+
+def test_sick_mismatch_and_punch_preserve_both_findings(operational):
+    path,a,_,_=operational;conn=db.connect(path)
+    row=create(conn,a,"sick_leave","2026-08-04","2026-09-11",evidence_received=True,
+        evidence_start_date="2026-08-04",evidence_end_date="2026-08-31")
+    leave.approve_leave(conn,row["id"])
+    assert leave.list_leave(conn)[0]["findings"]==["sick_leave_evidence_mismatch"]
+    _insert_punch(conn,a,"2026-08-04","sick-both")
+    findings=leave.list_leave(conn)[0]["findings"]
+    assert findings==["sick_leave_evidence_mismatch","leave_attendance_conflict"]
+
+
+def test_replacement_edit_revalidates_link_and_allows_null_absent(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    other=conn.execute("INSERT INTO employees(employee_code,name,hire_date,status) VALUES('P4-D','Fictional D','2020-01-01','active')").lastrowid
+    linked=create(conn,a,start="2026-08-10",end="2026-08-12")
+    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
+        start_date="2026-08-10",end_date="2026-08-12",zone="A",leave_request_id=linked["id"])
+    with pytest.raises(repl.ReplacementError,match="belong"):
+        repl.update_assignment(conn,assignment["id"],{"absentEmployeeId":other})
+    with pytest.raises(repl.ReplacementError,match="covered"):
+        repl.update_assignment(conn,assignment["id"],{"startDate":"2026-08-15","endDate":"2026-08-15"})
+    loose=repl.create_assignment(conn,absent_employee_id=None,replacement_employee_id=b,
+        start_date="2026-08-13",end_date="2026-08-13",zone="A")
+    changed=repl.update_assignment(conn,loose["id"],{"zone":"B","note":"fictional"})
+    assert changed["absentEmployeeId"] is None and changed["zone"]=="B"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='replacement.update'").fetchone()[0]==1
+
+
+@pytest.mark.parametrize("payload",[
+    {"leaveType":"annual_leave","startDate":"2026-08-11","endDate":"2026-08-10","portion":"full"},
+    {"leaveType":"half_day","startDate":"2026-08-10","endDate":"2026-08-11","portion":"am"},
+])
+def test_bad_leave_calendar_inputs_are_controlled_http_errors(operational,payload):
+    path,a,_,_=operational
+    payload={"employeeId":a,**payload}
+    with TestClient(create_app()) as client:
+        response=client.post("/api/v1/leave-operations",json=payload)
+    assert response.status_code in {409,422}
+    assert db.connect(path).execute("SELECT COUNT(*) FROM leave_requests").fetchone()[0]==0
+
+
+def test_operational_ui_initial_month_is_dynamic():
+    script=Path("phase4-ui.js").read_text(encoding="utf-8")
+    assert "selectedMonth='2026-08'" not in script
+    assert "now.getFullYear()" in script and "now.getMonth()+1" in script
+
+
+def test_xls_derivation_uses_authoritative_work_calendar(operational,tmp_path):
+    path,a,_,_=operational;conn=db.connect(path)
+    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-08','special',1)")
+    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-10','holiday',0)")
+    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
+    source=build_export(tmp_path/"calendar.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{
+        8:["07:00","16:00"],10:["07:00","16:00"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path)
+    rows={r["work_date"]:dict(r) for r in conn.execute("SELECT work_date,status,review_flag FROM attendance_days WHERE work_date IN ('2026-08-08','2026-08-10')")}
+    assert rows["2026-08-08"]["review_flag"]=="leave_attendance_conflict"
+    assert rows["2026-08-10"]["status"]=="normal" and rows["2026-08-10"]["review_flag"] is None
+
+
+@pytest.mark.parametrize("date,calendar_entry,expect_conflict",[
+    ("2026-08-08",None,False),
+    ("2026-08-19",("holiday",0,"가상 휴일"),False),
+    ("2026-08-22",("special",1,"가상 토요근무"),True),
+])
+def test_xls_preview_leave_conflict_uses_work_calendar(
+    operational,tmp_path,date,calendar_entry,expect_conflict
+):
+    path,a,_,_=operational;conn=db.connect(path)
+    mapping_date="2026-01-01"
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,?,'mapped')",(a,mapping_date))
+    if calendar_entry:
+        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working,label) VALUES(?,?,?,?)",(date,*calendar_entry))
+    leave_start,leave_end=("2026-08-07","2026-08-10") if date=="2026-08-08" else (("2026-08-18","2026-08-20") if date=="2026-08-19" else (date,date))
+    row=create(conn,a,start=leave_start,end=leave_end);leave.approve_leave(conn,row["id"]);conn.commit();conn.close()
+    day=int(date[-2:]);source=build_export(tmp_path/"preview-calendar.xls",year=2026,month=8,
+        slots=[SlotSpec("001","Fictional",{day:["07:55","16:01"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    codes=[finding["code"] for finding in preview.findings]
+    assert ("leave_conflict" in codes) is expect_conflict
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);attendance=conn.execute("SELECT status,review_flag FROM attendance_days WHERE employee_id=? AND work_date=?",(a,date)).fetchone()
+    assert (attendance["review_flag"]=="leave_attendance_conflict") is expect_conflict
+
+
+@pytest.mark.parametrize("portions,expect_conflict",[(('am',),False),(('am','pm'),True)])
+def test_xls_preview_aggregates_half_day_coverage(operational,tmp_path,portions,expect_conflict):
+    path,a,_,_=operational;conn=db.connect(path)
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,))
+    for portion in portions:
+        row=create(conn,a,"half_day","2026-08-14","2026-08-14",portion);leave.approve_leave(conn,row["id"])
+    conn.commit();conn.close()
+    source=build_export(tmp_path/"preview-halves.xls",year=2026,month=8,
+        slots=[SlotSpec("001","Fictional",{14:["07:52","16:04"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    assert ("leave_conflict" in [f["code"] for f in preview.findings]) is expect_conflict
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);flag=conn.execute("SELECT review_flag FROM attendance_days WHERE employee_id=? AND work_date='2026-08-14'",(a,)).fetchone()[0]
+    assert flag == ("leave_attendance_conflict" if expect_conflict else "partial_leave_review")

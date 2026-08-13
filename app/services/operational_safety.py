@@ -79,6 +79,9 @@ def _validate_employee_date(conn,employee_id,work_date):
     if work_date<e["hire_date"] or (e["end_date"] and work_date>e["end_date"]): raise SafetyError("date is outside employment period")
 
 def create_adjustment(conn,*,employee_id,work_date,recognized_in_at=None,recognized_out_at=None,resulting_status="normal",reason,reference_note=None,actor="operator",supersedes_id=None):
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,work_date,work_date)
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     _validate_employee_date(conn,employee_id,work_date)
     if not reason.strip(): raise SafetyError("reason is required")
     active=conn.execute("SELECT * FROM manual_attendance_adjustments WHERE employee_id=? AND work_date=? AND status='active'",(employee_id,work_date)).fetchone()
@@ -100,6 +103,9 @@ def end_adjustment(conn,adjustment_id,status,reason,actor="operator"):
     if status not in {"cancelled","voided"}: raise SafetyError("invalid adjustment end status")
     row=conn.execute("SELECT * FROM manual_attendance_adjustments WHERE id=? AND status='active'",(adjustment_id,)).fetchone()
     if not row: raise SafetyError("active adjustment not found")
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["work_date"],row["work_date"])
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     attendance=conn.execute("SELECT * FROM attendance_days WHERE id=?",(row["attendance_id"],)).fetchone()
     # Ownership guard: only remove this adjustment's exact manual projection.
     owned=attendance and attendance["employee_id"]==row["employee_id"] and attendance["work_date"]==row["work_date"] and attendance["source"]=="manual" and attendance["confirmed_by"]==row["created_by"] and attendance["status"]==row["resulting_status"] and attendance["actual_in_at"]==row["recognized_in_at"] and attendance["actual_out_at"]==row["recognized_out_at"]
@@ -114,6 +120,9 @@ def end_adjustment(conn,adjustment_id,status,reason,actor="operator"):
     updated=rowdict(conn.execute("SELECT * FROM manual_attendance_adjustments WHERE id=?",(adjustment_id,)).fetchone());audit(conn,f"attendance.manual_{status}","manual_attendance_adjustments",adjustment_id,dict(row),updated,reason,actor);return updated
 
 def create_schedule(conn,*,employee_id,effective_from,effective_to,weekday_mask,expected_start_time=None,expected_end_time=None,actor="operator"):
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,effective_from,effective_to)
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     _validate_employee_date(conn,employee_id,effective_from)
     if effective_to:
         _validate_employee_date(conn,employee_id,effective_to)
@@ -127,12 +136,18 @@ def retire_schedule(conn,schedule_id,reason,actor="operator"):
     if not (reason or "").strip(): raise SafetyError("reason is required")
     row=conn.execute("SELECT * FROM employee_work_schedules WHERE id=? AND status='active'",(schedule_id,)).fetchone()
     if not row: raise SafetyError("active schedule not found")
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["effective_from"],row["effective_to"])
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     conn.execute("UPDATE employee_work_schedules SET status='retired',retired_at=?,retired_by=? WHERE id=?",(now(),actor,schedule_id))
     updated=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone())
     audit(conn,"schedule.retire","employee_work_schedules",schedule_id,dict(row),updated,reason,actor)
     return updated
 
 def set_schedule_date(conn,*,employee_id,work_date,is_scheduled,expected_start_time=None,expected_end_time=None,label=None,actor="operator",supersedes_id=None):
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,work_date,work_date)
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     _validate_employee_date(conn,employee_id,work_date)
     active=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active'",(employee_id,work_date)).fetchone()
     if active and active["id"]!=supersedes_id: raise SafetyError("an active date override already exists")
@@ -145,6 +160,9 @@ def cancel_schedule_date(conn,override_id,reason,actor="operator"):
     if not (reason or "").strip(): raise SafetyError("reason is required")
     row=conn.execute("SELECT * FROM employee_schedule_dates WHERE id=? AND status='active'",(override_id,)).fetchone()
     if not row: raise SafetyError("active date override not found")
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["work_date"],row["work_date"])
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     conn.execute("UPDATE employee_schedule_dates SET status='cancelled' WHERE id=?",(override_id,))
     updated=rowdict(conn.execute("SELECT * FROM employee_schedule_dates WHERE id=?",(override_id,)).fetchone())
     audit(conn,"schedule.override_cancel","employee_schedule_dates",override_id,dict(row),updated,reason,actor)
@@ -204,11 +222,20 @@ def reconcile(conn,start,end,actor="system"):
             elif len(ep)==1:
                 created.append(ensure_exception(conn,code="incomplete_day",severity="review",scope="employee",employee_id=e["id"],work_date=iso,import_run_id=ep[0]["active_import_run_id"],summary="지문 기록이 한 건뿐입니다",evidence=[{"evidence_type":"fingerprint_punch","entity_type":"punch_events","entity_id":ep[0]["id"],"punch_event_id":ep[0]["id"]}],actor=actor))
         day=date.fromordinal(day.toordinal()+1)
-    # Existing authoritative leave model already exposes simultaneous findings.
-    from app.services import leave_operations
+    # Promote leave findings without losing the actual employee/date evidence.
+    from app.services import leave_operations, work_calendar
     for leave in leave_operations.list_leave(conn,None,start,end):
         for code in leave.get("findings",[]):
-            created.append(ensure_exception(conn,code=code,severity="review",scope="employee",employee_id=leave["employeeId"],work_date=leave["startDate"],summary=code,evidence=[{"evidence_type":"approved_leave","entity_type":"leave_requests","entity_id":leave["id"]}],actor=actor))
+            if code=="leave_attendance_conflict":
+                period_start=max(start,leave["startDate"]);period_end=min(end,leave["endDate"])
+                for iso in work_calendar.working_dates(conn,period_start,period_end):
+                    if leave_operations.approved_leave_coverage(conn,leave["employeeId"],iso)["coverage"]!="full":continue
+                    punches=conn.execute("SELECT id,active_import_run_id FROM punch_events WHERE employee_id=? AND work_date=? AND rolled_back_at IS NULL ORDER BY id",(leave["employeeId"],iso)).fetchall()
+                    if not punches:continue
+                    evidence=[{"evidence_type":"approved_leave","entity_type":"leave_requests","entity_id":leave["id"]}]+[{"evidence_type":"fingerprint_punch","entity_type":"punch_events","entity_id":p["id"],"punch_event_id":p["id"],"import_run_id":p["active_import_run_id"]} for p in punches]
+                    created.append(ensure_exception(conn,code=code,severity="review",scope="employee",employee_id=leave["employeeId"],work_date=iso,summary=code,evidence=evidence,actor=actor))
+            else:
+                created.append(ensure_exception(conn,code=code,severity="review",scope="employee",employee_id=leave["employeeId"],work_date=leave["startDate"],summary=code,evidence=[{"evidence_type":"approved_leave","entity_type":"leave_requests","entity_id":leave["id"]}],actor=actor))
     return created
 
 def operations_read_model(conn,start,end,**filters):

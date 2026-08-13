@@ -5,6 +5,7 @@ from app import config,db,migrate
 from app.main import create_app
 from fastapi.testclient import TestClient
 from app.services import operational_safety as safety,xls_pipeline
+from app.services import leave_operations as leave
 from app.tests.fixtures.terminal_xls import SlotSpec,build_export
 
 @pytest.fixture
@@ -35,6 +36,16 @@ def test_multiple_exceptions_have_independent_lifecycle(operational):
     two=safety.ensure_exception(c,code="leave_attendance_conflict",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="충돌")
     safety.transition_exception(c,one["id"],"resolved","증빙 확인")
     assert safety.exception_detail(c,two["id"])["status"]=="open";c.close()
+
+def test_leave_conflict_exceptions_use_actual_work_dates(operational):
+    path,a,_=operational;c=db.connect(path)
+    request=leave.create_leave(c,employee_id=a,leave_type='annual_leave',start_date='2026-08-10',end_date='2026-08-14');leave.approve_leave(c,request['id'])
+    run=c.execute("INSERT INTO import_runs(source_filename,source_sha256,stored_source_path,status)VALUES('fictional.xls','leave-date-hash','x','applied')").lastrowid
+    for day in ('2026-08-11','2026-08-13'):
+        c.execute("INSERT INTO punch_events(terminal_id,terminal_slot_code,employee_id,punch_at,work_date,punch_type,raw_payload,source_filename,source_sheet,source_row_no,source_column,source_cell,occurrence_index,cell_position,source_hash,dedupe_key,import_run_id,active_import_run_id) VALUES('T','001',?,?,?,'unknown','{}','fictional.xls','근태기록',1,1,'A1',0,0,'h',?,?,?)",(a,day+'T08:00:00',day,'d'+day,run,run))
+    c.commit();safety.reconcile(c,'2026-08-10','2026-08-14')
+    dates=[r[0] for r in c.execute("SELECT work_date FROM operational_exceptions WHERE exception_code='leave_attendance_conflict' ORDER BY work_date")]
+    assert dates==['2026-08-11','2026-08-13'];c.close()
 
 def test_manual_adjustment_preserves_raw_and_supersedes_history(operational,tmp_path):
     path,a,_=operational;c=db.connect(path)
@@ -124,8 +135,10 @@ def test_phase4_to_0008_upgrade_is_additive_and_idempotent(tmp_path):
     migrations=Path(config.MIGRATIONS_DIR);old=tmp_path/'old-migrations';old.mkdir()
     for source in migrations.glob('000[1-7]_*.sql'):(old/source.name).write_bytes(source.read_bytes())
     path=tmp_path/'phase4.db';backups=tmp_path/'backups';migrate.run_migrations(path,migrations_dir=old,backups_dir=backups);c=db.connect(path);c.execute("INSERT INTO employees(employee_code,name,hire_date)VALUES('LEGACY','가상 기존','2025-01-01')");c.commit();c.close()
-    result=migrate.run_migrations(path,backups_dir=backups);assert result.applied==[8] and result.backup_path and result.backup_path.exists()
-    again=migrate.run_migrations(path,backups_dir=backups);assert not again.applied
+    current=tmp_path/'v8-migrations';current.mkdir()
+    for source in migrations.glob('000[1-8]_*.sql'):(current/source.name).write_bytes(source.read_bytes())
+    result=migrate.run_migrations(path,migrations_dir=current,backups_dir=backups);assert result.applied==[8] and result.backup_path and result.backup_path.exists()
+    again=migrate.run_migrations(path,migrations_dir=current,backups_dir=backups);assert not again.applied
     c=db.connect(path);assert c.execute("SELECT COUNT(*) FROM employees").fetchone()[0]==1;assert c.execute("SELECT COUNT(*) FROM operational_exceptions").fetchone()[0]==0;c.close()
 
 def test_http_lifecycle_adjustment_and_overlap(operational,monkeypatch):
