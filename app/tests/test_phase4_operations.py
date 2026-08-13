@@ -194,7 +194,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     migrations=Path("app/migrations")
     earlier=tmp_path/"migrations-v6";earlier.mkdir()
     for source in sorted(migrations.glob("*.sql")):
-        if source.name.startswith("0007_"): continue
+        if source.name.startswith(("0007_", "0008_")): continue
         shutil.copy2(source,earlier/source.name)
     database=tmp_path/"upgrade.db";backups=tmp_path/"backups"
     assert migrate.run_migrations(database,earlier,backups).schema_version==6
@@ -209,7 +209,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     ).lastrowid
     conn.commit();conn.close()
     result=migrate.run_migrations(database,backups_dir=backups)
-    assert result.applied==[7] and result.backup_path and result.backup_path.exists()
+    assert result.applied==[7,8] and result.backup_path and result.backup_path.exists()
     conn=db.connect(database)
     upgraded=conn.execute(
         "SELECT work_date,start_date,end_date,key_received FROM replacement_assignments WHERE id=?",
@@ -240,18 +240,7 @@ def test_requested_correction_and_cancel_never_touch_attendance(operational):
 
 
 def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
-    path,a,b,_=operational;conn=db.connect(path)
-    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
-        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="employee correction")
-    states={(r["employee_id"],r["work_date"]):r["status"] for r in conn.execute(
-        "SELECT employee_id,work_date,status FROM attendance_days")}
-    assert states=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
-
-
-def _insert_punch(conn,employee,date,key):
-    conn.execute("""INSERT INTO punch_events
-        (terminal_id,terminal_slot_code,employee_id,punch_at,work_date,punch_type,
+    path,a,b,_=op€~≠¢Gß≤⁄Óù∆≠yﬂtype,
          raw_payload,source_filename,source_hash,dedupe_key)
         VALUES('SC-1','001',?,?,?,'unknown','{}','fictional.xls','fictional-hash',?)""",
         (employee,date+"T07:00:00",date,key))
