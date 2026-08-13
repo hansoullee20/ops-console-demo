@@ -12,7 +12,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from app.services import presentation
+from app.services import leave_operations, presentation
 
 
 def data_context(conn: sqlite3.Connection) -> dict[str, str | None]:
@@ -91,23 +91,26 @@ def _punch_map(conn: sqlite3.Connection, dates: list[str]) -> dict[tuple[int, st
 
 
 def _replacement_map(conn: sqlite3.Connection, dates: list[str]) -> dict[tuple[int, str], dict]:
-    marks = ",".join("?" * len(dates))
     rows = conn.execute(
-        f"""
+        """
         SELECT r.*, a.name AS absent_name, s.name AS substitute_name
           FROM replacement_assignments r
           LEFT JOIN employees a ON a.id = r.absent_employee_id
           LEFT JOIN employees s ON s.id = r.substitute_employee_id
-         WHERE r.work_date IN ({marks}) AND r.status IN ('assigned', 'completed')
+         WHERE COALESCE(r.start_date,r.work_date) <= ?
+           AND COALESCE(r.end_date,r.work_date) >= ?
+           AND r.status IN ('assigned', 'completed')
         """,
-        dates,
+        (dates[-1], dates[0]),
     ).fetchall()
     out: dict[tuple[int, str], dict] = {}
     for row in rows:
         if row["substitute_employee_id"] is not None:
             entry = dict(row)
             entry["substitute_is_this_employee"] = True
-            out[(row["substitute_employee_id"], row["work_date"])] = entry
+            for iso in dates:
+                if (row["start_date"] or row["work_date"]) <= iso <= (row["end_date"] or row["work_date"]):
+                    out[(row["substitute_employee_id"], iso)] = entry
     return out
 
 
@@ -118,6 +121,19 @@ def week_view(
     dates = _date_range(start_date, 7)
     attendance = _attendance_map(conn, dates)
     punches = _punch_map(conn, dates)
+    leave_conflicts_enabled = data_context(conn)["data_context"] == "operational"
+    for person in employees(conn):
+        for iso in dates:
+            key = (person["id"], iso)
+            coverage = leave_operations.approved_leave_coverage(conn, person["id"], iso)
+            if leave_conflicts_enabled and coverage["coverage"] == "full" and punches.get(key):
+                view = dict(attendance.get(key) or {
+                    "employee_id": person["id"], "work_date": iso,
+                    "status": "unknown",
+                })
+                view["review_flag"] = "leave_attendance_conflict"
+                view["review_note"] = "승인 휴가일에 활성 지문이 있습니다."
+                attendance[key] = view
     replacements = _replacement_map(conn, dates)
 
     people = []
@@ -249,7 +265,17 @@ def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, di
     Derived from the same rows the weekly view renders, so the two views agree.
     """
     prefix = f"{year:04d}-{month:02d}-"
+    days_in_month = [31, 29 if _leap(year) else 28, 31, 30, 31, 30,
+                     31, 31, 30, 31, 30, 31][month - 1]
     stats: dict[str, dict[str, int]] = {}
+
+    conflict_keys: set[tuple[int, str]] = set()
+    if data_context(conn)["data_context"] == "operational":
+        conflict_keys = {
+            (row["employee_id"], row["work_date"])
+            for row in conn.execute("SELECT DISTINCT employee_id,work_date FROM punch_events WHERE rolled_back_at IS NULL AND employee_id IS NOT NULL AND work_date LIKE ?", (prefix + "%",))
+            if leave_operations.approved_leave_coverage(conn, row["employee_id"], row["work_date"])["coverage"] == "full"
+        }
 
     def bump(iso: str, key: str) -> None:
         day = str(int(iso[8:10]))
@@ -257,22 +283,30 @@ def month_stats(conn: sqlite3.Connection, year: int, month: int) -> dict[str, di
         stats[day][key] = stats[day].get(key, 0) + 1
 
     for row in conn.execute(
-        "SELECT work_date, status, review_flag FROM attendance_days WHERE work_date LIKE ?",
+        "SELECT employee_id, work_date, status, review_flag FROM attendance_days WHERE work_date LIKE ?",
         (prefix + "%",),
     ):
-        if row["review_flag"]:
+        if (row["employee_id"], row["work_date"]) in conflict_keys or row["review_flag"]:
             bump(row["work_date"], "issue")
         elif row["status"] in ("leave", "half_day"):
             bump(row["work_date"], "leave")
         elif row["status"] == "sick_leave":
             bump(row["work_date"], "sick")
 
+    month_start = f"{year:04d}-{month:02d}-01"
+    month_end = f"{year:04d}-{month:02d}-{days_in_month:02d}"
     for row in conn.execute(
-        "SELECT work_date FROM replacement_assignments "
-        "WHERE work_date LIKE ? AND status IN ('assigned', 'completed')",
-        (prefix + "%",),
+        """SELECT COALESCE(start_date,work_date) start_date,
+                  COALESCE(end_date,work_date) end_date
+             FROM replacement_assignments
+            WHERE COALESCE(start_date,work_date)<=?
+              AND COALESCE(end_date,work_date)>=?
+              AND status IN ('assigned','completed')""",
+        (month_end, month_start),
     ):
-        bump(row["work_date"], "replace")
+        start=max(row["start_date"],month_start);end=min(row["end_date"],month_end)
+        for iso in _date_range(start, (int(end[8:10])-int(start[8:10]))+1):
+            bump(iso, "replace")
 
     return {day: stats[day] for day in sorted(stats, key=int)}
 

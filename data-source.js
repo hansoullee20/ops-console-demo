@@ -330,9 +330,10 @@
     var snapshot = window.OPS_DEMO_SNAPSHOT;
     if (!snapshot) {
       showError('데모 스냅샷(demo-data.js)이 배포본에 포함되지 않았습니다.');
-      return;
+      return Promise.resolve();
     }
     apply(snapshot);
+    return Promise.resolve();
   }
 
   function bootOperational() {
@@ -341,7 +342,7 @@
     if (aiButton) aiButton.hidden = true;
     if (aiPanel) aiPanel.hidden = true;
     showLoading();
-    fetch(API_BASE + '/bootstrap', { headers: { Accept: 'application/json' } })
+    return fetch(API_BASE + '/bootstrap', { headers: { Accept: 'application/json' } })
       .then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
         return res.json();
@@ -360,8 +361,8 @@
   }
 
   window.OPS_RELOAD = function () {
-    if (MODE === 'demo') bootDemo();
-    else bootOperational();
+    if (MODE === 'demo') return bootDemo();
+    return bootOperational();
   };
 
   window.OPS_MODE_ACTIVE = MODE;

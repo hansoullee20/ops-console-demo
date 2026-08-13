@@ -18,6 +18,8 @@ NO_SHIFT = "—"
 
 # review_flag -> (cell type, label, punch text when there are no punch times)
 ISSUE_PRESENTATION = {
+    "leave_attendance_conflict": ("warn", "휴가·근태 충돌", None),
+    "partial_leave_review": ("warn", "반차 확인", None),
     "cert_period_mismatch": ("sick", "병가", "기간 불일치"),
     "vacancy_unstaffed": ("danger", "결원", "대체 미배치"),
     "leave_punch_conflict": ("warn", "휴가·근태 충돌", None),

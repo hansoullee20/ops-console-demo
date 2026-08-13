@@ -8,7 +8,7 @@ from app.schemas.health import HealthResponse
 from app.services import health as health_service
 
 APP_NAME = "ops-console-backend"
-PHASE = 3
+PHASE = 4
 
 router = APIRouter(tags=["health"])
 
