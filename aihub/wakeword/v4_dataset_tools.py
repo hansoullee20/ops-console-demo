@@ -9,11 +9,15 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import math
 import re
 import wave
 from collections import defaultdict
 from pathlib import Path
+
+
+DEFAULT_MANIFEST_SCHEMA = Path(__file__).with_name("v4_dataset_schema.json")
 
 
 def stable_bucket(value: str, modulo: int = 10000) -> int:
@@ -46,6 +50,73 @@ def assign_split(row: dict) -> str:
 
 def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^0-9A-Za-z가-힣]+", " ", value.lower())).strip()
+
+
+def load_manifest_schema(path: Path = DEFAULT_MANIFEST_SCHEMA) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def manifest_validation_errors(rows: list[dict], schema: dict) -> list[str]:
+    """Validate CSV-shaped rows against the enforceable schema constraints.
+
+    CSV values are strings, so this checks required/non-empty fields, enums,
+    regex patterns, and scalar numeric types/bounds without adding a second
+    runtime dependency solely for smoke-corpus validation.
+    """
+    if not rows:
+        return ["manifest has no rows"]
+
+    errors: list[str] = []
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+
+    for index, row in enumerate(rows, start=2):
+        clip = row.get("clip_id", "").strip() or f"CSV row {index}"
+        for field in required:
+            if not row.get(field, "").strip():
+                errors.append(f"{clip}: missing required field {field}")
+
+        for field, rules in properties.items():
+            value = row.get(field, "")
+            if value == "":
+                continue
+
+            allowed = rules.get("enum")
+            if allowed is not None and value not in allowed:
+                errors.append(f"{clip}: invalid {field} {value!r}")
+
+            pattern = rules.get("pattern")
+            if pattern and re.fullmatch(pattern, value) is None:
+                errors.append(f"{clip}: {field} does not match {pattern}")
+
+            declared = rules.get("type")
+            declared_types = declared if isinstance(declared, list) else [declared]
+            numeric_value: float | None = None
+            if "string" not in declared_types:
+                try:
+                    if "integer" in declared_types:
+                        numeric_value = float(int(value))
+                    elif "number" in declared_types:
+                        numeric_value = float(value)
+                    elif "boolean" in declared_types and value.lower() not in {
+                        "true",
+                        "false",
+                    }:
+                        raise ValueError
+                except ValueError:
+                    errors.append(f"{clip}: invalid {field} type")
+                    continue
+
+            if numeric_value is not None:
+                if not math.isfinite(numeric_value):
+                    errors.append(f"{clip}: {field} is non-finite")
+                    continue
+                if "minimum" in rules and numeric_value < rules["minimum"]:
+                    errors.append(f"{clip}: {field} is below minimum")
+                if "maximum" in rules and numeric_value > rules["maximum"]:
+                    errors.append(f"{clip}: {field} is above maximum")
+
+    return errors
 
 
 def wav_qc(path: Path) -> tuple[dict, list[str]]:
@@ -221,6 +292,17 @@ def cmd_leakage(args):
     print(f"leakage check passed for {len(rows)} rows")
 
 
+def cmd_validate(args):
+    rows = read_csv(Path(args.input))
+    errors = manifest_validation_errors(rows, load_manifest_schema(Path(args.schema)))
+    if errors:
+        print("MANIFEST VALIDATION FAILED")
+        for error in errors:
+            print("-", error)
+        raise SystemExit(4)
+    print(f"manifest validation passed for {len(rows)} rows")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -237,6 +319,10 @@ def main():
     p = sub.add_parser("check-leakage")
     p.add_argument("--input", required=True)
     p.set_defaults(func=cmd_leakage)
+    p = sub.add_parser("validate-manifest")
+    p.add_argument("--input", required=True)
+    p.add_argument("--schema", default=str(DEFAULT_MANIFEST_SCHEMA))
+    p.set_defaults(func=cmd_validate)
     args = ap.parse_args()
     args.func(args)
 

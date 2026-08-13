@@ -6,6 +6,9 @@ on:
     branches: [aihub-voice-test]
     paths:
       - 'aihub/wakeword/v4_melotts_smoke.py'
+      - 'aihub/wakeword/v4_dataset_tools.py'
+      - 'aihub/wakeword/v4_dataset_schema.json'
+      - 'aihub/wakeword/test_v4_dataset_tools.py'
       - '.github/workflows/okja-v4-melotts-smoke.yml'
 
 permissions:
@@ -78,6 +81,11 @@ jobs:
             --audio-root out/v4-smoke-melotts \
             --output out/v4-smoke-melotts/manifest_qc.csv \
             --fail-on-qc
+
+      - name: Validate manifest contract
+        run: |
+          python aihub/wakeword/v4_dataset_tools.py validate-manifest \
+            --input out/v4-smoke-melotts/manifest_qc.csv
 
       - name: Check leakage and holdout semantics
         run: |

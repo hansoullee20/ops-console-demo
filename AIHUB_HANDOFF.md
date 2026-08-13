@@ -23,6 +23,13 @@
 - Successful real run `31670716561`: all hashes verified and both thresholds were 3/3 deterministic. Threshold `0.50` detected once at 1280 ms with score `0.5055038929`; threshold `0.06` detected once at 560 ms with score `0.0630315244`. Unit run `31670716607` passed all 32 tests.
 - Gate impact: the G2.5 alternative-runtime portion is complete, but G2.5 stays unchecked until a pinned real v4 classifier replays the exact audio SHA. G2.16 also stays unchecked because one positive compatibility replay is not a full alternative-engine benchmark. Durable details: `aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`.
 
+### G1 gate audit — active
+
+- Existing durable evidence supports G1.1, G1.4, G1.6, G1.8 and G1.9: run `31612771436` cleanly generated pinned Chatterbox `0.1.7` and Kokoro `0.9.4` artifacts; all 10 clips passed WAV QC/leakage; the checker explicitly reports unavailable speaker/engine holdouts as `not_evaluable`. MeloTTS run `31615755020` independently passed its explicit engine holdout, WAV QC and leakage checks.
+- Per-clip manifests already contain the G1.3 provenance fields, but `v4_dataset_schema.json` was not enforced by any workflow. Current implementation work adds a fail-closed `validate-manifest` command, requires `source_license`, tests invalid/missing provenance, and inserts validation into Kokoro, Chatterbox and MeloTTS smoke jobs.
+- Keep G1.2 open: top-level packages are pinned, but there is no complete transitive lock proven from clean CI. Keep G1.5 open because Chatterbox Korean positives failed human pronunciation review. Keep G1.7 open until the current `if: always()` diagnostic path is demonstrated on a post-fix failing run. Keep G1.10 open per the human-QC policy.
+- Do not mark the audited gates until the new unit test and all three real smoke jobs pass with manifest validation enabled.
+
 ---
 
 ## 0. Fast restart

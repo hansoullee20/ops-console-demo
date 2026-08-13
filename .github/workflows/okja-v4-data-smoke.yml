@@ -51,6 +51,11 @@ jobs:
             --output out/v4-smoke-kokoro/manifest_qc.csv \
             --fail-on-qc
 
+      - name: Validate manifest contract
+        run: |
+          python aihub/wakeword/v4_dataset_tools.py validate-manifest \
+            --input out/v4-smoke-kokoro/manifest_qc.csv
+
       - name: Check leakage
         run: |
           python aihub/wakeword/v4_dataset_tools.py check-leakage \
@@ -124,6 +129,11 @@ jobs:
             --audio-root out/v4-smoke-chatterbox \
             --output out/v4-smoke-chatterbox/manifest_qc.csv \
             --fail-on-qc
+
+      - name: Validate manifest contract
+        run: |
+          python aihub/wakeword/v4_dataset_tools.py validate-manifest \
+            --input out/v4-smoke-chatterbox/manifest_qc.csv
 
       - name: Check leakage
         run: |
