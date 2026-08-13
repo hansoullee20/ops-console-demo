@@ -120,6 +120,10 @@ def validate_truth_event(row: dict[str, Any]) -> None:
     if row.get("distance_m") is not None:
         if not isinstance(row["distance_m"], (int, float)) or row["distance_m"] < 0:
             raise ValueError(f"{kind}: distance_m must be null or >= 0")
+    if "self_tts" in row and not isinstance(row["self_tts"], bool):
+        raise ValueError(f"{kind}: self_tts must be boolean")
+    if row.get("time_bucket") not in (None, "day", "night"):
+        raise ValueError(f"{kind}: time_bucket must be day or night")
 
 
 def validate_detection(row: dict[str, Any]) -> None:
@@ -195,10 +199,14 @@ def make_wake_marker(args: argparse.Namespace) -> dict[str, Any]:
         "distance_m": args.distance_m,
         "direction": args.direction,
         "voice_level": args.voice_level,
+        "self_tts": bool(getattr(args, "self_tts", False)),
         "mention_context": args.mention_context,
         "marked_at": datetime.now(timezone.utc).isoformat(),
         "notes": args.notes or "",
     }
+    time_bucket = getattr(args, "time_bucket", None)
+    if time_bucket is not None:
+        row["time_bucket"] = time_bucket
     validate_truth_event(row)
     return row
 
@@ -230,6 +238,8 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--distance-m", type=float)
     mark.add_argument("--direction")
     mark.add_argument("--voice-level")
+    mark.add_argument("--self-tts", action="store_true")
+    mark.add_argument("--time-bucket", choices=["day", "night"])
     mark.add_argument("--mention-context", action="store_true")
     mark.add_argument("--event-id")
     mark.add_argument("--notes")

@@ -96,6 +96,8 @@ class BenchmarkContractTests(unittest.TestCase):
             distance_m=3.0,
             direction="front",
             voice_level="normal",
+            self_tts=True,
+            time_bucket="night",
             mention_context=False,
             notes=None,
         )
@@ -103,7 +105,13 @@ class BenchmarkContractTests(unittest.TestCase):
         self.assertEqual(row["event_id"], "wake-test")
         self.assertEqual(row["phrase"], "옥자")
         self.assertTrue(row["intentional_invocation"])
+        self.assertTrue(row["self_tts"])
+        self.assertEqual(row["time_bucket"], "night")
         validate_truth_event(row)
+        with self.assertRaisesRegex(ValueError, "self_tts must be boolean"):
+            validate_truth_event(dict(row, self_tts="yes"))
+        with self.assertRaisesRegex(ValueError, "time_bucket must be day or night"):
+            validate_truth_event(dict(row, time_bucket="dusk"))
 
     def test_jsonl_validation_reports_rows(self):
         row = {

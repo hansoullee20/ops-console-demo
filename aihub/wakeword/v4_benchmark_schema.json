@@ -8,45 +8,139 @@
       "type": "object",
       "additionalProperties": true,
       "required": [
-        "schema_version", "benchmark_id", "recording_id", "test_set",
-        "device_id", "room_id", "started_at", "duration_ms",
-        "audio_filename", "sample_rate_hz", "channels", "audio_sha256",
-        "firmware_version", "firmware_git_sha", "app_version", "model_sha",
-        "consent_recorded", "retention_class", "training_eligible"
+        "schema_version",
+        "benchmark_id",
+        "recording_id",
+        "test_set",
+        "device_id",
+        "room_id",
+        "started_at",
+        "duration_ms",
+        "audio_filename",
+        "sample_rate_hz",
+        "channels",
+        "audio_sha256",
+        "firmware_version",
+        "firmware_git_sha",
+        "app_version",
+        "model_sha",
+        "consent_recorded",
+        "retention_class",
+        "training_eligible"
       ],
       "properties": {
-        "schema_version": {"const": 1},
-        "benchmark_id": {"type": "string", "minLength": 1},
-        "recording_id": {"type": "string", "minLength": 1},
-        "test_set": {"enum": ["TEST_A", "TEST_B", "TEST_C", "TEST_D"]},
-        "device_id": {"type": "string", "minLength": 1},
-        "room_id": {"type": "string", "minLength": 1},
-        "started_at": {"type": "string", "format": "date-time"},
-        "duration_ms": {"type": "integer", "minimum": 1},
-        "audio_filename": {"type": "string", "pattern": "^[^/\\\\]+\\.wav$"},
-        "sample_rate_hz": {"type": "integer", "minimum": 8000},
-        "channels": {"type": "integer", "minimum": 1, "maximum": 8},
-        "audio_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "firmware_version": {"type": "string", "minLength": 1},
-        "firmware_git_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
-        "app_version": {"type": "string", "minLength": 1},
-        "model_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
-        "consent_recorded": {"const": true},
-        "retention_class": {"enum": ["benchmark_fixed", "diagnostic_short", "temporary"]},
-        "training_eligible": {"type": "boolean"},
-        "immutable": {"type": "boolean"},
-        "notes": {"type": "string"}
+        "schema_version": {
+          "const": 1
+        },
+        "benchmark_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recording_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "test_set": {
+          "enum": [
+            "TEST_A",
+            "TEST_B",
+            "TEST_C",
+            "TEST_D"
+          ]
+        },
+        "device_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "room_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "audio_filename": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+\\.wav$"
+        },
+        "sample_rate_hz": {
+          "type": "integer",
+          "minimum": 8000
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "audio_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "firmware_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "firmware_git_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "app_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "consent_recorded": {
+          "const": true
+        },
+        "retention_class": {
+          "enum": [
+            "benchmark_fixed",
+            "diagnostic_short",
+            "temporary"
+          ]
+        },
+        "training_eligible": {
+          "type": "boolean"
+        },
+        "immutable": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"test_set": {"const": "TEST_D"}}},
+          "if": {
+            "properties": {
+              "test_set": {
+                "const": "TEST_D"
+              }
+            }
+          },
           "then": {
             "properties": {
-              "training_eligible": {"const": false},
-              "immutable": {"const": true},
-              "retention_class": {"const": "benchmark_fixed"}
+              "training_eligible": {
+                "const": false
+              },
+              "immutable": {
+                "const": true
+              },
+              "retention_class": {
+                "const": "benchmark_fixed"
+              }
             },
-            "required": ["immutable"]
+            "required": [
+              "immutable"
+            ]
           }
         }
       ]
@@ -55,52 +149,170 @@
       "type": "object",
       "additionalProperties": true,
       "required": [
-        "schema_version", "event_id", "recording_id", "timestamp_ms",
-        "intentional_invocation", "phrase", "language", "speaker_id",
-        "condition", "room_id", "background", "mention_context"
+        "schema_version",
+        "event_id",
+        "recording_id",
+        "timestamp_ms",
+        "intentional_invocation",
+        "phrase",
+        "language",
+        "speaker_id",
+        "condition",
+        "room_id",
+        "background",
+        "mention_context"
       ],
       "properties": {
-        "schema_version": {"const": 1},
-        "event_id": {"type": "string", "minLength": 1},
-        "recording_id": {"type": "string", "minLength": 1},
-        "timestamp_ms": {"type": "number", "minimum": 0},
-        "intentional_invocation": {"const": true},
-        "phrase": {"type": "string", "minLength": 1},
-        "language": {"type": "string", "minLength": 2},
-        "speaker_id": {"type": "string", "minLength": 1},
-        "condition": {"type": "string", "minLength": 1},
-        "room_id": {"type": "string", "minLength": 1},
-        "background": {"type": "string", "minLength": 1},
-        "distance_m": {"type": ["number", "null"], "minimum": 0},
-        "direction": {"type": ["string", "null"]},
-        "voice_level": {"type": ["string", "null"]},
-        "mention_context": {"type": "boolean"},
-        "notes": {"type": "string"}
+        "schema_version": {
+          "const": 1
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recording_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "intentional_invocation": {
+          "const": true
+        },
+        "phrase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2
+        },
+        "speaker_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "room_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "background": {
+          "type": "string",
+          "minLength": 1
+        },
+        "distance_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "direction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "voice_level": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mention_context": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "self_tts": {
+          "type": "boolean"
+        },
+        "time_bucket": {
+          "type": "string",
+          "enum": [
+            "day",
+            "night"
+          ]
+        }
       }
     },
     "detection": {
       "type": "object",
       "additionalProperties": true,
       "required": [
-        "schema_version", "detection_id", "recording_id", "timestamp_ms",
-        "model_name", "model_version", "model_sha", "threshold", "score",
+        "schema_version",
+        "detection_id",
+        "recording_id",
+        "timestamp_ms",
+        "model_name",
+        "model_version",
+        "model_sha",
+        "threshold",
+        "score",
         "device_id"
       ],
       "properties": {
-        "schema_version": {"const": 1},
-        "detection_id": {"type": "string", "minLength": 1},
-        "recording_id": {"type": "string", "minLength": 1},
-        "timestamp_ms": {"type": "number", "minimum": 0},
-        "model_name": {"type": "string", "minLength": 1},
-        "model_version": {"type": "string", "minLength": 1},
-        "model_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
-        "threshold": {"type": "number"},
-        "score": {"type": "number"},
-        "device_id": {"type": "string", "minLength": 1},
-        "room_id": {"type": ["string", "null"]},
-        "latency_ms": {"type": ["number", "null"]},
-        "accepted": {"type": "boolean"},
-        "metadata": {"type": "object"}
+        "schema_version": {
+          "const": 1
+        },
+        "detection_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recording_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "model_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "score": {
+          "type": "number"
+        },
+        "device_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "room_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "type": "object"
+        }
       }
     }
   }

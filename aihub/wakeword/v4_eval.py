@@ -31,6 +31,11 @@ class Truth:
     condition: str = ""
     room: str = ""
     background: str = ""
+    distance_m: float | None = None
+    direction: str = ""
+    voice_level: str = ""
+    self_tts: bool | None = None
+    time_bucket: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,10 +73,15 @@ def load_truth(path: Path) -> list[Truth]:
                 event_id=str(row.get("event_id", f"truth-{i}")),
                 timestamp_ms=float(ts),
                 phrase=str(row.get("phrase", "")),
-                speaker=str(row.get("speaker", "")),
+                speaker=str(row.get("speaker", row.get("speaker_id", ""))),
                 condition=str(row.get("condition", "")),
-                room=str(row.get("room", "")),
+                room=str(row.get("room", row.get("room_id", ""))),
                 background=str(row.get("background", "")),
+                distance_m=(float(row["distance_m"]) if row.get("distance_m") is not None else None),
+                direction=str(row.get("direction", "")),
+                voice_level=str(row.get("voice_level", "")),
+                self_tts=(row.get("self_tts") if isinstance(row.get("self_tts"), bool) else None),
+                time_bucket=str(row.get("time_bucket", "")),
             )
         )
     return sorted(out, key=lambda x: x.timestamp_ms)
@@ -167,14 +177,14 @@ def _percentile(values: list[float], p: float) -> float | None:
     return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
 
 
-def _group_metrics(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], field: str) -> dict[str, Any]:
+def _group_metrics_key(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], key_fn) -> dict[str, Any]:
     groups: dict[str, dict[str, int]] = {}
     for t, _, _ in matches:
-        key = getattr(t, field) or "unspecified"
+        key = key_fn(t) or "unspecified"
         groups.setdefault(key, {"tp": 0, "fn": 0})
         groups[key]["tp"] += 1
     for t in misses:
-        key = getattr(t, field) or "unspecified"
+        key = key_fn(t) or "unspecified"
         groups.setdefault(key, {"tp": 0, "fn": 0})
         groups[key]["fn"] += 1
     out: dict[str, Any] = {}
@@ -186,6 +196,28 @@ def _group_metrics(matches: list[tuple[Truth, Detection, float]], misses: list[T
             "miss_rate": counts["fn"] / n if n else None,
         }
     return out
+
+
+def _group_metrics(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], field: str) -> dict[str, Any]:
+    return _group_metrics_key(matches, misses, lambda t: str(getattr(t, field) or "unspecified"))
+
+
+def _distance_bucket(distance_m: float | None) -> str:
+    if distance_m is None:
+        return "unspecified"
+    if distance_m <= 1.0:
+        return "near_0_1m"
+    if distance_m <= 3.0:
+        return "mid_1_3m"
+    return "far_3m_plus"
+
+
+def _self_tts_bucket(value: bool | None) -> str:
+    if value is True:
+        return "self_tts"
+    if value is False:
+        return "not_self_tts"
+    return "unspecified"
 
 
 def evaluate(
@@ -231,6 +263,11 @@ def evaluate(
         "by_condition": _group_metrics(matches, misses, "condition"),
         "by_room": _group_metrics(matches, misses, "room"),
         "by_background": _group_metrics(matches, misses, "background"),
+        "by_distance": _group_metrics_key(matches, misses, lambda t: _distance_bucket(t.distance_m)),
+        "by_direction": _group_metrics(matches, misses, "direction"),
+        "by_voice_level": _group_metrics(matches, misses, "voice_level"),
+        "by_self_tts": _group_metrics_key(matches, misses, lambda t: _self_tts_bucket(t.self_tts)),
+        "by_time_bucket": _group_metrics(matches, misses, "time_bucket"),
         "false_positive_timestamps_ms": [d.timestamp_ms for d in fps],
         "missed_event_ids": [t.event_id for t in misses],
     }
