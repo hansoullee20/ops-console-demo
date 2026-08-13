@@ -48,6 +48,9 @@ class V4ReplayTests(unittest.TestCase):
                 threshold=0.55,
                 adapter_command=[sys.executable, str(adapter), "{audio}", "{model}", "{threshold}"],
                 repeats=3,
+                audio_source="github-actions:audio-artifact/123",
+                model_source="github-actions:model-artifact/456",
+                adapter_source="repo@example:aihub/wakeword/adapter.py",
             )
 
             expected_model_sha = hashlib.sha256(model.read_bytes()).hexdigest()
@@ -56,6 +59,12 @@ class V4ReplayTests(unittest.TestCase):
             self.assertEqual(manifest["model_sha256"], expected_model_sha)
             self.assertEqual(manifest["sample_rate_hz"], 16000)
             self.assertEqual(manifest["duration_ms"], 1000)
+            self.assertEqual(manifest["audio_source"], "github-actions:audio-artifact/123")
+            self.assertEqual(manifest["model_source"], "github-actions:model-artifact/456")
+            self.assertEqual(
+                manifest["adapter_source"],
+                "repo@example:aihub/wakeword/adapter.py",
+            )
             self.assertEqual([r["timestamp_ms"] for r in rows], [300.0, 900.0])
             self.assertTrue(all(r["engine"] == "fixture-engine" for r in rows))
             self.assertTrue(all(r["version"] == "1.2.3" for r in rows))

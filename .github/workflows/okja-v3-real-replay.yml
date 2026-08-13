@@ -1,0 +1,84 @@
+name: Okja v3 Real Replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/wakeword/v4_replay.py'
+      - 'aihub/wakeword/livekit_v3_replay_adapter.py'
+      - '.github/workflows/okja-v3-real-replay.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  replay-v3-onnx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download pinned v3 ONNX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: okja-wakeword-v3-korean-probe
+          path: replay-inputs/v3
+          github-token: ${{ github.token }}
+          repository: hansoullee20/ops-console-demo
+          run-id: '31583273747'
+
+      - name: Download pinned human-approved MeloTTS WAV artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: okja-v4-smoke-melotts
+          path: replay-inputs/audio
+          github-token: ${{ github.token }}
+          repository: hansoullee20/ops-console-demo
+          run-id: '31615755020'
+
+      - name: Verify pinned input hashes
+        run: |
+          echo '3cff1a6c54e2eece99f3b61e0238a51b317019d5c1bf214e2c1bddf80998bb7b  replay-inputs/v3/wakeword_v3_output/okja_v3_korean_probe/okja_v3_korean_probe.onnx' | sha256sum -c -
+          echo 'a9551898057bfc145002e7e4c0abffff759f450a67e706465d70a18953c5f2a0  replay-inputs/audio/audio/smoke_melotts_01.wav' | sha256sum -c -
+
+      - name: Install pinned LiveKit runtime
+        run: python -m pip install 'livekit-wakeword==0.2.1'
+
+      - name: Replay identical WAV at v3 evaluation thresholds
+        env:
+          MODEL: replay-inputs/v3/wakeword_v3_output/okja_v3_korean_probe/okja_v3_korean_probe.onnx
+          AUDIO: replay-inputs/audio/audio/smoke_melotts_01.wav
+          MODEL_SOURCE: github-actions:run-31583273747/artifact-9136765226
+          AUDIO_SOURCE: github-actions:run-31615755020/artifact-9149302273
+          ADAPTER_SOURCE: ${{ github.repository }}@${{ github.sha }}:aihub/wakeword/livekit_v3_replay_adapter.py
+        run: |
+          adapter='python aihub/wakeword/livekit_v3_replay_adapter.py --audio {audio} --model {model} --threshold {threshold} --expected-engine-version {engine_version} --frame-samples 1280 --window-frames 25 --debounce-ms 2000'
+          for threshold in 0.5 0.06; do
+            out="replay-evidence/threshold-${threshold}"
+            python aihub/wakeword/v4_replay.py \
+              --audio "$AUDIO" \
+              --model "$MODEL" \
+              --engine-id livekit-v3 \
+              --engine-version 0.2.1 \
+              --threshold "$threshold" \
+              --adapter-command "$adapter" \
+              --repeats 3 \
+              --audio-source "$AUDIO_SOURCE" \
+              --model-source "$MODEL_SOURCE" \
+              --adapter-source "$ADAPTER_SOURCE" \
+              --detections-out "$out/detections.jsonl" \
+              --manifest-out "$out/manifest.json"
+          done
+
+      - name: Upload deterministic replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: okja-v3-real-replay-${{ github.run_id }}
+          path: replay-evidence/**
+          if-no-files-found: error
+          retention-days: 30

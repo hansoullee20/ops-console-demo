@@ -208,6 +208,9 @@ def replay(
     adapter_command: str | Sequence[str],
     repeats: int = 2,
     timeout_seconds: int = 300,
+    audio_source: str | None = None,
+    model_source: str | None = None,
+    adapter_source: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if repeats < 2:
         raise ValueError("repeats must be at least 2 to verify deterministic replay")
@@ -268,6 +271,12 @@ def replay(
         "adapter_command": list(adapter_command) if not isinstance(adapter_command, str) else adapter_command,
         "detection_count": len(baseline),
     }
+    if audio_source:
+        manifest["audio_source"] = audio_source
+    if model_source:
+        manifest["model_source"] = model_source
+    if adapter_source:
+        manifest["adapter_source"] = adapter_source
     return baseline, manifest
 
 
@@ -288,6 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapter-command", required=True)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--timeout-seconds", type=int, default=300)
+    parser.add_argument("--audio-source")
+    parser.add_argument("--model-source")
+    parser.add_argument("--adapter-source")
     parser.add_argument("--detections-out", type=Path, required=True)
     parser.add_argument("--manifest-out", type=Path, required=True)
     return parser
@@ -304,6 +316,9 @@ def main() -> int:
         adapter_command=args.adapter_command,
         repeats=args.repeats,
         timeout_seconds=args.timeout_seconds,
+        audio_source=args.audio_source,
+        model_source=args.model_source,
+        adapter_source=args.adapter_source,
     )
     write_jsonl(args.detections_out, rows)
     args.manifest_out.parent.mkdir(parents=True, exist_ok=True)
