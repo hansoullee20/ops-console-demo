@@ -15,6 +15,8 @@
 - Compatibility basis: openWakeWord accepts custom ONNX classifiers, derives the temporal embedding length from the model input shape, and processes 16 kHz PCM in 1280-sample (80 ms) streaming frames. The LiveKit v3 classifier uses a 16-frame × 96-feature input.
 - Evidence policy: pin package version, model/audio hashes, thresholds, frame size and adapter source; require three identical replays before recording evidence.
 - Closure guard: this can satisfy the alternative-runtime portion only. G2.5 must remain open until a real v4 classifier also replays the identical audio SHA.
+- First real run `31669829292` failed after package installation and input SHA verification because the openWakeWord `0.6.0` wheel did not contain `melspectrogram.onnx` or `embedding_model.onnx`. This is a missing-runtime-resource failure, not a classifier incompatibility result.
+- Fix in progress: fetch those two official openWakeWord `v0.5.1` release assets separately, pin and verify both hashes, and pass their paths explicitly to the runtime. Do not use an untracked mutable download into `site-packages` as benchmark evidence.
 
 ---
 
