@@ -51,6 +51,7 @@ Acceptable evidence:
 - MeloTTS Korean is approved for initial v4 data; smoke generation, provenance, WAV QC, split and leakage checks are green. Chatterbox remains a secondary source with quarantined pronunciation failures.
 - G2 evaluator, recording contract, privacy-first candidate ring buffer and deterministic replay harness exist and have green CI evidence.
 - Real LiveKit v3 replay run `31669141305` and openWakeWord replay run `31670716561` are deterministic over three repeats at thresholds 0.50 and 0.06 on the exact same model/audio SHAs. G2.5 remains open only for the pinned real v4 replay.
+- G1.12/G1.13 are closed: commit `7b37c8b` freezes 425 unique bilingual scripts with pre-generation train/validation assignments; evaluator run `31677969571`, data-smoke run `31677969581` and MeloTTS run `31677969589` are green.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -133,11 +134,13 @@ Acceptable evidence:
   DoD: model/weights/output license and Korean quality are verified; provenance added to manifest.
   Evidence: `v4_sources_manifest.yaml` pins MeloTTS code commit `209145371cff8fc3bd60d7be902ea69cbdb7965a`, model revision `0207e5adfc90129a51b6b03d89be6d84360ed323`, model-file SHAs and MIT terms; clean run `31615755020` plus `V4_MELOTTS_HUMAN_QC.md` approved it for initial v4 data and engine-holdout use.
 
-- [ ] **G1.12 Owned conversation script library finalized** — P1 / AI-ENG  
+- [x] **G1.12 Owned conversation script library finalized** — P1 / AI-ENG
   DoD: positives, general negatives, hard negatives, mention-context, device-playback negatives, truncated/near-miss cases have deterministic IDs.
+  Evidence: commit `7b37c8b` adds all seven scenarios in Korean and English and commits a generator-identical `v4_scripts.csv` with 425 unique content-derived IDs and 425 unique `(language, normalized_text)` keys. Evaluator run `31677969571` is green.
 
-- [ ] **G1.13 Split is assigned before augmentation** — P0 / AI-ENG  
+- [x] **G1.13 Split is assigned before augmentation** — P0 / AI-ENG
   DoD: parent sample group cannot cross train/val/test after augmentation.
+  Evidence: commit `7b37c8b` freezes 345 train and 80 validation assignments at script-planning time, preserves valid preassigned splits, rejects holdout conflicts, and fails parent/template or normalized-text cross-split leakage. Data-smoke run `31677969581` and MeloTTS holdout run `31677969589` are green.
 
 - [ ] **G1.14 Large generation is explicitly unlocked** — P0  
   DoD: G1.1–G1.10 are all `[x]`. No exception.

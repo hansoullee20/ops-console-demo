@@ -44,12 +44,12 @@
 - Controlled runs `31676607342` and `31676609594` failed at WAV QC as intended. All three jobs still captured their resolved environments, wrote summaries and uploaded generated audio, failure markers and `manifest_qc.csv` through `if: always()`.
 - Downloaded-artifact verification passed: Kokoro, Chatterbox and MeloTTS each contained exactly one `unreadable:EOFError` failed row naming the deliberately truncated clip; their summaries retained 3/4, 5/6 and 3/4 QC-pass counts. Normal push runs `31676594090` and `31676594032` remained green. G1.7 is closed.
 
-### G1.12/G1.13 script and split continuation — active
+### G1.12/G1.13 script and split continuation — completed
 
-- Audit finding: `build_v4_scripts.py` lacked device-playback, truncated-wake and explicit near-miss scenarios; sequential IDs shifted when rows were inserted; random negative sampling produced duplicate normalized text under different split groups; and no split was frozen in the text library before audio generation.
-- Implementation in progress: generate only unique ordinary-negative combinations; add bilingual coverage for all seven required scenarios; derive stable IDs from language/label/scenario/normalized text; commit the generated library; and assign deterministic train/validation split, template ID and split group at script-planning time.
-- Dataset enforcement in progress: preserve valid preassigned splits, reject conflicts with explicit engine/speaker/real/household holdouts, detect normalized-text leakage in addition to base/template leakage, and test that augmented derivatives cannot cross parent splits.
-- Closure guard: keep G1.12 and G1.13 unchecked until the committed `v4_scripts.csv` exactly matches the deterministic generator and the expanded tests pass in clean CI. This work does not unlock large generation while G1.5/G1.10 remain open.
+- Implementation commit `7b37c8b` adds deterministic bilingual coverage for all seven required scenarios, stable content-derived IDs, unique normalized text, and a committed `v4_scripts.csv` that exactly matches the generator.
+- The frozen library contains 425 unique scripts: 252 Korean and 173 English; 345 are assigned to train and 80 to validation before audio generation. It includes positive wake, ordinary negative, hard phonetic negative, mention context, device playback, truncated wake and near-miss wake cases.
+- Split enforcement preserves valid preassigned splits, rejects conflicts with engine/speaker/real/household holdouts, and fails on parent/template or normalized-text crossings. The full local suite passed 43 tests.
+- Clean-CI evidence on the same commit is green: evaluator run `31677969571`, data-smoke run `31677969581` (Kokoro + Chatterbox), MeloTTS run `31677969589`, and APK run `31677969572`. G1.12 and G1.13 are closed. Large generation remains locked while G1.5/G1.10 are open.
 
 ---
 
@@ -374,7 +374,7 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 1. **Alternative-runtime replay completed:** keep G2.5 unchecked only for the real v4 replay; keep G2.16 unchecked until a full shared benchmark exists.
 2. **G1 audit completed:** G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 now have durable clean-CI evidence.
 3. Remaining G1 blockers are human/data decisions: replace or explicitly exclude the failed Chatterbox Korean positives for G1.5, and finish listening dispositions for every remaining admitted phrase/voice combination—including Kokoro English—for G1.10.
-4. While those reviews are pending, continue AI-owned corpus work on the deterministic original-script library (G1.12) and pre-augmentation split enforcement (G1.13), without unlocking large generation.
+4. G1.12/G1.13 script and split preparation is complete. While the human reviews are pending, keep G1.14 and large generation locked; do not reinterpret the completed preparation as corpus approval.
 5. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
 
 ## 16. Do not repeat
