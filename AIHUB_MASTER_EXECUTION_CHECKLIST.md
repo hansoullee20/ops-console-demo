@@ -53,6 +53,7 @@ Acceptable evidence:
 - Real LiveKit v3 replay run `31669141305` and openWakeWord replay run `31670716561` are deterministic over three repeats at thresholds 0.50 and 0.06 on the exact same model/audio SHAs. G2.5 remains open only for the pinned real v4 replay.
 - G1.12/G1.13 are closed: commit `7b37c8b` freezes 425 unique bilingual scripts with pre-generation train/validation assignments; evaluator run `31677969571`, data-smoke run `31677969581` and MeloTTS run `31677969589` are green.
 - G2.8 instrumentation is ready but the gate remains open: commits `fc87823`/`a506e61`, evaluator run `31679294780` and APK run `31679460462` provide the strict report path; the target Fold4 still needs one >=20-accepted-attempt session.
+- G3.1 is closed: commit `a1aa9c3` migrates the Android/bridge transcript round trip to the strict `okja.event.v1` envelope; contract run `31680385188` and APK run `31680385242` are green.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -233,8 +234,9 @@ Acceptable evidence:
 
 ## G3-A. Backend/UI contract
 
-- [ ] **G3.1 Versioned event envelope implemented** — P0 / AI-ENG  
+- [x] **G3.1 Versioned event envelope implemented** — P0 / AI-ENG
   Required fields: schema version, event ID, timestamps, device/profile/session/correlation IDs, source, severity, privacy/retention.
+  Evidence: commit `a1aa9c3` adds the strict `okja.event.v1` schema plus Python/Android validators and migrates the real `transcript.final` -> `assistant.response/failed` transport with device/profile/session/correlation/causation preservation and volatile privacy classification. Contract run `31680385188` and APK run `31680385242` are green.
 
 - [ ] **G3.2 Core voice events implemented** — P0  
   `wake.candidate/detected/rejected`, listening, transcript, intent, confirmation, command accepted/failed.
