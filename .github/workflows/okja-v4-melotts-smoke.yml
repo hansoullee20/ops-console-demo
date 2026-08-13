@@ -96,7 +96,9 @@ jobs:
         if: always()
         run: |
           mkdir -p out/v4-smoke-melotts
-          pip freeze > out/v4-smoke-melotts/environment.txt
+          python --version > out/v4-smoke-melotts/python-version.txt
+          python -m pip --version > out/v4-smoke-melotts/pip-version.txt
+          python -m pip freeze | LC_ALL=C sort > out/v4-smoke-melotts/environment.txt
 
       - name: Write candidate summary
         if: always()

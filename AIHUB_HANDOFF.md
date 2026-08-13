@@ -30,6 +30,12 @@
 - Keep G1.2 open: top-level packages are pinned, but there is no complete transitive lock proven from clean CI. Keep G1.5 open because Chatterbox Korean positives failed human pronunciation review. Keep G1.7 open until the current `if: always()` diagnostic path is demonstrated on a post-fix failing run. Keep G1.10 open per the human-QC policy.
 - Verification is green: evaluator run `31671445691` passed all 35 tests; data-smoke run `31671445654` passed Kokoro and Chatterbox generation, manifest validation, WAV QC, leakage and artifact upload; MeloTTS run `31671445689` passed the same contract with its explicit engine holdout. Checklist result: G1.1, G1.3, G1.4, G1.6, G1.8, G1.9 and G1.11 are now closed. G1 PASS remains `NO`.
 
+### G1.2 dependency-lock continuation — active
+
+- Current task: turn the clean-CI resolved Kokoro, Chatterbox and MeloTTS environments into committed, platform/Python-specific lock files, make each smoke job consume its lock, and rerun from clean CI before closing G1.2.
+- First step: capture sorted `pip freeze`, Python version and pip version inside every smoke artifact. Existing MeloTTS capture is expanded to the same contract; Kokoro and Chatterbox gain equivalent always-run diagnostics.
+- Closure guard: a captured environment is not yet a lock. Keep G1.2 unchecked until the committed lock files are installed by their real smoke workflows and all generation/QC/manifest/leakage steps pass.
+
 ---
 
 ## 0. Fast restart

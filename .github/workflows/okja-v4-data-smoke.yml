@@ -61,6 +61,14 @@ jobs:
           python aihub/wakeword/v4_dataset_tools.py check-leakage \
             --input out/v4-smoke-kokoro/manifest_qc.csv
 
+      - name: Capture resolved environment
+        if: always()
+        run: |
+          mkdir -p out/v4-smoke-kokoro
+          python --version > out/v4-smoke-kokoro/python-version.txt
+          python -m pip --version > out/v4-smoke-kokoro/pip-version.txt
+          python -m pip freeze | LC_ALL=C sort > out/v4-smoke-kokoro/environment.txt
+
       - name: Write smoke summary
         if: always()
         run: |
@@ -139,6 +147,14 @@ jobs:
         run: |
           python aihub/wakeword/v4_dataset_tools.py check-leakage \
             --input out/v4-smoke-chatterbox/manifest_qc.csv
+
+      - name: Capture resolved environment
+        if: always()
+        run: |
+          mkdir -p out/v4-smoke-chatterbox
+          python --version > out/v4-smoke-chatterbox/python-version.txt
+          python -m pip --version > out/v4-smoke-chatterbox/pip-version.txt
+          python -m pip freeze | LC_ALL=C sort > out/v4-smoke-chatterbox/environment.txt
 
       - name: Write smoke summary
         if: always()
