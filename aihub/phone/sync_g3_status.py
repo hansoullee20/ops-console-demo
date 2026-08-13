@@ -19,14 +19,14 @@ old_g32 = '''- [ ] **G3.2 Core voice events implemented** — P0
   `wake.candidate/detected/rejected`, listening, transcript, intent, confirmation, command accepted/failed.
   Partial evidence: commit `a1aa9c3` emits/validates wake detected, listening started, transcript final and assistant result events on the Android/bridge path; commit `f2a41f6` emits replay-safe command accepted/completed/failed events from the guarded boundary. Keep unchecked until remaining wake candidate/rejection, transcript/listening failure, intent and confirmation producers exist.
 '''
-new_g32 = '''- [x] **G3.2 Core voice events implemented** — P0  
+new_g32 = '''- [x] **G3.2 Core voice events implemented** — P0
   `wake.candidate/detected/rejected`, listening, transcript, intent, confirmation, command accepted/failed.
   Evidence: commit `88fd83f` makes the live Android recognizer lifecycle observable with wake candidate/detected/rejected, listening start/stop/failure and transcript partial/final/failure events in a bounded volatile ledger. Commit `2f2f892` adds exact bridge-side intent requested/resolved/failed and explicit two-turn confirmation requested/accepted/rejected producers while refusing to pretend a physical device action executed without an adapter. Contract run `31692595222` and APK run `31692595239` are green. Durable record: `aihub/phone/G3_2_CORE_VOICE_EVIDENCE.md`.
 '''
 
 old_g331 = '''- [ ] **G3.31 Microphone-off/offline/error states tested** — P0.
 '''
-new_g331 = '''- [x] **G3.31 Microphone-off/offline/error states tested** — P0.  
+new_g331 = '''- [x] **G3.31 Microphone-off/offline/error states tested** — P0.
   Evidence: commits through `a33117f` add explicit READY/LISTENING/THINKING/MIC_OFF/OFFLINE_DEGRADED/ERROR_RECOVERY policy and wire it into the live Android activity. MIC_OFF destroys and nulls `SpeechRecognizer`, disables manual talk and automatic wake, and permission-gates re-enable; bridge failures enter a retryable degraded state; recognizer/TTS failures enter recovery. State plus live-source integration tests pass in run `31693447185`; APK build `31693447195` is green. Durable record: `aihub/phone/G3_31_VOICE_TRUST_STATE_EVIDENCE.md`. Fold4 endurance remains separate under G3.29/G3.30/G3.33.
 '''
 
