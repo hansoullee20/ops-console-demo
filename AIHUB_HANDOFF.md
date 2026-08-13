@@ -79,6 +79,12 @@
 - Clean evidence: run `31682270351` passes 26 phone safety/contract tests plus the 48-test wake/evaluator suite; APK run `31682270376` is green. G3.5 is closed, and G6.18's keep-119-disabled requirement is mechanically satisfied.
 - Scope guard: G6.11–G6.13 retain partial state-logic evidence but remain open for integrated detect/ask/wait UI and target-device behavior. Family delivery, telephony, 119 validation and every physical emergency test also remain open.
 
+### G3.6/G3.9/G3.10 shared profile and consent schema — active
+
+- Current task: define one fail-closed schema for both senior and personal profiles, including accessibility preferences, device capability choices, caregiver notification preferences and versioned consent records.
+- Consent design in progress: essential product, health journal, caregiver sharing, camera and benchmark/research are independent exact fields; caregiver notifications require caregiver-sharing consent, and health-related sharing also requires health consent.
+- Scope guard: schema/default/test completion may close the profile/notification/consent contract items. It does not close senior runtime accessibility, profile UI, actual notifications or legal/pilot consent review.
+
 ---
 
 ## 0. Fast restart

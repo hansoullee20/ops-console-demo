@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://okja.local/contracts/okja-profile-v1.schema.json",
+  "title": "Okja shared senior/personal profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "profile_id", "mode", "display_name", "locale",
+    "timezone", "accessibility", "device_capabilities",
+    "caregiver_notifications", "consents", "created_at", "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "okja.profile.v1" },
+    "profile_id": { "$ref": "#/$defs/id" },
+    "mode": { "enum": ["senior", "personal"] },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "locale": { "enum": ["ko-KR", "en-US"] },
+    "timezone": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text_scale", "minimum_touch_target_dp", "calendar_display",
+        "quiet_hours", "night_mode", "quick_actions"
+      ],
+      "properties": {
+        "text_scale": { "enum": ["standard", "large", "extra_large"] },
+        "minimum_touch_target_dp": { "type": "integer", "minimum": 48, "maximum": 120 },
+        "calendar_display": { "enum": ["solar", "lunar", "both"] },
+        "quiet_hours": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "start_local", "end_local"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "start_local": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+            "end_local": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" }
+          }
+        },
+        "night_mode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "screen_off", "local_wake_available"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "screen_off": { "type": "boolean" },
+            "local_wake_available": { "type": "boolean" }
+          }
+        },
+        "quick_actions": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["tv", "ac", "phone_finder", "call_family", "medication", "emergency"]
+          }
+        }
+      }
+    },
+    "device_capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tv", "ac", "phone_finder", "washer"],
+      "properties": {
+        "tv": { "type": "boolean" },
+        "ac": { "type": "boolean" },
+        "phone_finder": { "type": "boolean" },
+        "washer": { "const": false }
+      }
+    },
+    "caregiver_notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled", "recipients", "events", "quiet_hours_respected",
+        "emergency_overrides_quiet_hours"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["caregiver_id", "channels"],
+            "properties": {
+              "caregiver_id": { "$ref": "#/$defs/id" },
+              "channels": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "enum": ["push", "sms", "call"] }
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["wellness", "symptom_journal", "arrival_departure", "inactivity", "emergency"],
+          "properties": {
+            "wellness": { "type": "boolean" },
+            "symptom_journal": { "type": "boolean" },
+            "arrival_departure": { "type": "boolean" },
+            "inactivity": { "type": "boolean" },
+            "emergency": { "type": "boolean" }
+          }
+        },
+        "quiet_hours_respected": { "type": "boolean" },
+        "emergency_overrides_quiet_hours": { "type": "boolean" }
+      }
+    },
+    "consents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "essential_product", "health_journal", "caregiver_sharing",
+        "camera", "benchmark_research"
+      ],
+      "properties": {
+        "essential_product": { "$ref": "#/$defs/consent" },
+        "health_journal": { "$ref": "#/$defs/consent" },
+        "caregiver_sharing": { "$ref": "#/$defs/consent" },
+        "camera": { "$ref": "#/$defs/consent" },
+        "benchmark_research": { "$ref": "#/$defs/consent" }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "updated_at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "policy_version", "updated_at"],
+      "properties": {
+        "status": { "enum": ["unset", "granted", "declined"] },
+        "policy_version": { "type": "string", "maxLength": 64 },
+        "updated_at": {
+          "oneOf": [
+            { "type": "string", "format": "date-time", "pattern": "Z$" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}
