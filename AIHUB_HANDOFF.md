@@ -11,6 +11,14 @@
 
 ## Active continuation log — 2026-08-13
 
+### G3.32 lazy/resilient bridge startup — completed
+
+- The known startup defect was confirmed: both persistent Claude clients were entered before TCP `127.0.0.1:8765` opened, so an SDK initialization timeout could make the bridge itself unavailable.
+- `okja_lazy_agent_pool.py` now keeps profile factories inert until first use. The bridge binds localhost first; only a request that actually needs the agent calls `pool.get(profile)`. Intent/confirmation responses can remain available without agent initialization.
+- Per-profile locks deduplicate concurrent first startup. Failed initialization is not cached, so a later request retries; grandma/personal initialization is independent.
+- Run `31693869837` passed lazy-pool recovery tests. Final run `31693994203` also passed a live-source guard that rejects reintroduction of eager `ClaudeSDKClient` context entry before server startup.
+- G3.32 is closed. Physical Fold4 endurance/full-cycle gates G3.29/G3.30/G3.33 remain open. Durable record: `aihub/phone/G3_32_BRIDGE_STARTUP_EVIDENCE.md`.
+
 ### G3.2/G3.31 voice lifecycle and trust-state continuation — completed
 
 - Starting parent checkpoint was evidence commit `0dc65b1`; branch already contained `88fd83f` when work resumed. That commit completed the recognizer-owned wake/listening/transcript lifecycle and bounded volatile event ledger.

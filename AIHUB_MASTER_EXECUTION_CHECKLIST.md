@@ -59,6 +59,7 @@ Acceptable evidence:
 - G3.6/G3.9/G3.10 are closed: commit `1434c3f` adds one senior/personal schema with guarded caregiver preferences and five independent consent records; run `31682851423` and APK run `31682851417` are green. Android UI/delivery remains open.
 - G3.2 is closed: `88fd83f` completes the live recognizer lifecycle and `2f2f892` adds real intent/confirmation producers; contract run `31692595222` and APK run `31692595239` are green.
 - G3.31 is closed at the software-contract level: live MIC_OFF destroys microphone access, offline bridge and recovery states are explicit, integration run `31693447185` and APK run `31693447195` are green. Physical Fold4 reliability remains G3.29/G3.30/G3.33.
+- G3.32 is closed: localhost binds before Claude client initialization; clients are lazy, per-profile and retryable after initialization failure. Runs `31693869837` and `31693994203` are green.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -309,7 +310,8 @@ Acceptable evidence:
 - [ ] **G3.30 >=20 wake attempts + full cycles measured** — P0 / HUMAN.
 - [x] **G3.31 Microphone-off/offline/error states tested** — P0.
   Evidence: commits through `a33117f` add explicit READY/LISTENING/THINKING/MIC_OFF/OFFLINE_DEGRADED/ERROR_RECOVERY policy and wire it into the live Android activity. MIC_OFF destroys and nulls `SpeechRecognizer`, disables manual talk and automatic wake, and permission-gates re-enable; bridge failures enter a retryable degraded state; recognizer/TTS failures enter recovery. State plus live-source integration tests pass in run `31693447185`; APK build `31693447195` is green. Durable record: `aihub/phone/G3_31_VOICE_TRUST_STATE_EVIDENCE.md`. Fold4 endurance remains separate under G3.29/G3.30/G3.33.
-- [ ] **G3.32 Bridge startup made lazy/resilient** — P1.
+- [x] **G3.32 Bridge startup made lazy/resilient** — P1.
+  Evidence: commits `f401413`, `0221af5` and `8ec1977` add a lazy per-profile agent pool and move Claude client initialization behind the already-bound localhost request handler. Failed initialization is not cached, concurrent first use initializes once, profiles recover independently, and a source-level CI guard prevents direct eager SDK context entry from returning. Runs `31693869837` and `31693994203` are green. Durable record: `aihub/phone/G3_32_BRIDGE_STARTUP_EVIDENCE.md`.
 - [ ] **G3.33 24 h app stability smoke completed** — P0 / HUMAN.
 
 **G3 PASS:** NO.
