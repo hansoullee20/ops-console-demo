@@ -435,3 +435,44 @@ def test_xls_derivation_uses_authoritative_work_calendar(operational,tmp_path):
     rows={r["work_date"]:dict(r) for r in conn.execute("SELECT work_date,status,review_flag FROM attendance_days WHERE work_date IN ('2026-08-08','2026-08-10')")}
     assert rows["2026-08-08"]["review_flag"]=="leave_attendance_conflict"
     assert rows["2026-08-10"]["status"]=="normal" and rows["2026-08-10"]["review_flag"] is None
+
+
+@pytest.mark.parametrize("date,calendar_entry,expect_conflict",[
+    ("2026-08-08",None,False),
+    ("2026-08-19",("holiday",0,"가상 휴일"),False),
+    ("2026-08-22",("special",1,"가상 토요근무"),True),
+])
+def test_xls_preview_leave_conflict_uses_work_calendar(
+    operational,tmp_path,date,calendar_entry,expect_conflict
+):
+    path,a,_,_=operational;conn=db.connect(path)
+    mapping_date="2026-01-01"
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,?,'mapped')",(a,mapping_date))
+    if calendar_entry:
+        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working,label) VALUES(?,?,?,?)",(date,*calendar_entry))
+    leave_start,leave_end=("2026-08-07","2026-08-10") if date=="2026-08-08" else (("2026-08-18","2026-08-20") if date=="2026-08-19" else (date,date))
+    row=create(conn,a,start=leave_start,end=leave_end);leave.approve_leave(conn,row["id"]);conn.commit();conn.close()
+    day=int(date[-2:]);source=build_export(tmp_path/"preview-calendar.xls",year=2026,month=8,
+        slots=[SlotSpec("001","Fictional",{day:["07:55","16:01"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    codes=[finding["code"] for finding in preview.findings]
+    assert ("leave_conflict" in codes) is expect_conflict
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);attendance=conn.execute("SELECT status,review_flag FROM attendance_days WHERE employee_id=? AND work_date=?",(a,date)).fetchone()
+    assert (attendance["review_flag"]=="leave_attendance_conflict") is expect_conflict
+
+
+@pytest.mark.parametrize("portions,expect_conflict",[(('am',),False),(('am','pm'),True)])
+def test_xls_preview_aggregates_half_day_coverage(operational,tmp_path,portions,expect_conflict):
+    path,a,_,_=operational;conn=db.connect(path)
+    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,))
+    for portion in portions:
+        row=create(conn,a,"half_day","2026-08-14","2026-08-14",portion);leave.approve_leave(conn,row["id"])
+    conn.commit();conn.close()
+    source=build_export(tmp_path/"preview-halves.xls",year=2026,month=8,
+        slots=[SlotSpec("001","Fictional",{14:["07:52","16:04"]})])
+    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
+    assert ("leave_conflict" in [f["code"] for f in preview.findings]) is expect_conflict
+    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
+    conn=db.connect(path);flag=conn.execute("SELECT review_flag FROM attendance_days WHERE employee_id=? AND work_date='2026-08-14'",(a,)).fetchone()[0]
+    assert flag == ("leave_attendance_conflict" if expect_conflict else "partial_leave_review")

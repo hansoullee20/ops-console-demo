@@ -481,15 +481,10 @@ def _build_preview(
                     f"입사일({mapped['hire_date']}) 이전의 기록입니다.",
                     slot_code=slot_code, work_date=work_date, employee=employee,
                 ))
-            conflict = conn.execute(
-                """
-                SELECT 1 FROM leave_requests
-                 WHERE employee_id = ? AND status = 'approved'
-                   AND start_date <= ? AND end_date >= ?
-                """,
-                (mapped["employee_id"], work_date, work_date),
-            ).fetchone()
-            if conflict:
+            leave_coverage = leave_operations.approved_leave_coverage(
+                conn, mapped["employee_id"], work_date
+            )
+            if leave_coverage["coverage"] == "full":
                 findings.append(Finding(
                     "leave_conflict", "review",
                     "승인된 휴가 기간인데 지문 기록이 있습니다. 어느 쪽도 자동으로 수정하지 않습니다.",
