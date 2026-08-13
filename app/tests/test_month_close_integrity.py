@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -450,3 +453,108 @@ def test_0011_backfills_retired_schedule_history_and_is_idempotent(tmp_path):
     assert not operational_safety.resolve_schedule(conn,employee_id,'2026-09-01')['isAuthoritative']
     conn.close()
     assert migrate.run_migrations(database,backups_dir=backups).applied==[]
+
+
+def test_closed_reconciliation_uses_frozen_result_not_new_live_preview(migrated_db,monkeypatch):
+    conn=_operational(migrated_db)
+    employee_id=_employee(conn,'FROZEN-GET')
+    operational_safety.create_schedule(
+        conn,employee_id=employee_id,effective_from='2026-08-01',
+        effective_to='2026-08-31',weekday_mask='',
+    )
+    closed=month_close.close_month(conn,'2026-08','operator','frozen reconciliation')
+    frozen_before=month_close.reconcile(conn,'2026-08')
+    conn.execute(
+        "INSERT INTO import_runs(source_filename,status,period_start,period_end) "
+        "VALUES('later-preview.xls','previewed','2026-08-01','2026-08-31')"
+    )
+    conn.commit();conn.close()
+    monkeypatch.setattr(config,'DB_PATH',migrated_db)
+    client=TestClient(create_app())
+    response=client.get('/api/v1/month-close/2026-08/reconciliation')
+    assert response.status_code==200
+    assert response.json()==frozen_before
+    assert response.json()['close']['id']==closed['id']
+    assert not [item for item in response.json()['blockingItems'] if item['code']=='pending_import']
+
+
+def test_close_snapshot_freezes_schedule_calendar_and_reconciliation_evidence(migrated_db):
+    conn=_operational(migrated_db)
+    employee_id=_employee(conn,'FROZEN-SCHEDULE')
+    schedule=operational_safety.create_schedule(
+        conn,employee_id=employee_id,effective_from='2026-08-01',
+        effective_to='2026-08-31',weekday_mask='',
+    )
+    override=operational_safety.set_schedule_date(
+        conn,employee_id=employee_id,work_date='2026-08-09',is_scheduled=False,
+        label='Fictional override',
+    )
+    conn.execute(
+        "INSERT INTO site_calendar(calendar_date,day_type,is_working,label) "
+        "VALUES('2026-08-09','holiday',0,'Fictional holiday')"
+    )
+    closed=month_close.close_month(conn,'2026-08','operator','freeze schedule evidence')
+    before=month_close.snapshot(conn,'2026-08',close_id=closed['id'])
+    record_types={item['record_type'] for item in before['items']}
+    assert {'employee','work_schedule','schedule_date','site_calendar','reconciliation'}<=record_types
+    reconciliation=next(json.loads(item['evidence_json']) for item in before['items']
+                        if item['record_type']=='reconciliation')
+    assert reconciliation['summary']['scheduledEmployeeDays']==0
+    month_close.reopen(conn,'2026-08','operator','change live schedule')
+    operational_safety.retire_schedule(
+        conn,schedule['id'],'historical correction',retirement_effective_from='2026-08-01')
+    operational_safety.cancel_schedule_date(conn,override['id'],'historical correction')
+    after=month_close.snapshot(conn,'2026-08',close_id=closed['id'])
+    assert after['items']==before['items']
+    assert after['exceptions']==before['exceptions']
+    assert after['sources']==before['sources']
+    assert after['exceptionEventIds']==before['exceptionEventIds']
+    assert after['exceptionEvidenceLinkIds']==before['exceptionEvidenceLinkIds']
+    assert after['close']['snapshot_hash']==closed['snapshot_hash']
+    conn.close()
+
+
+def test_close_and_attendance_mutation_are_serialized(migrated_db):
+    conn=_operational(migrated_db)
+    employee_id=conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,end_date,status) "
+        "VALUES('ATOMIC-RACE','Fictional Race','2026-08-10','2026-08-10','active')"
+    ).lastrowid
+    operational_safety.create_schedule(
+        conn,employee_id=employee_id,effective_from='2026-08-10',
+        effective_to='2026-08-10',weekday_mask='',
+    )
+    conn.execute(
+        "INSERT INTO attendance_days(employee_id,work_date,status,source) "
+        "VALUES(?,'2026-08-10','unknown','manual')",(employee_id,)
+    )
+    conn.commit();conn.close()
+    guard_reached=threading.Event();release_guard=threading.Event()
+
+    def mutate():
+        c=db.connect(migrated_db)
+        def trace(statement):
+            if statement.startswith('SELECT month_key FROM month_closes'):
+                guard_reached.set();release_guard.wait(5)
+        c.set_trace_callback(trace)
+        attendance.correct_attendance(
+            c,employee_id=employee_id,work_date='2026-08-10',
+            changes={'review_note':'serialized mutation'},actor_id='operator',reason='race test')
+        c.commit();c.close();return 'mutated'
+
+    def close():
+        assert guard_reached.wait(5)
+        c=db.connect(migrated_db);c.execute('BEGIN IMMEDIATE')
+        result=month_close.close_month(c,'2026-08','operator','serialized close')
+        c.commit();c.close();return result
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        mutation=pool.submit(mutate);closing=pool.submit(close)
+        assert guard_reached.wait(5);time.sleep(.1);release_guard.set()
+        assert mutation.result(timeout=10)=='mutated'
+        closed=closing.result(timeout=10)
+    c=db.connect(migrated_db)
+    frozen=month_close.snapshot(c,'2026-08',close_id=closed['id'])
+    attendance_item=next(item for item in frozen['items'] if item['record_type']=='attendance')
+    assert json.loads(attendance_item['evidence_json'])['review_note']=='serialized mutation'
+    c.close()

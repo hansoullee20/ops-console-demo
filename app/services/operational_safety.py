@@ -139,7 +139,7 @@ def retire_schedule(conn,schedule_id,reason,actor="operator",retirement_effectiv
     if not (reason or "").strip(): raise SafetyError("reason is required")
     row=conn.execute("SELECT * FROM employee_work_schedules WHERE id=? AND status='active'",(schedule_id,)).fetchone()
     if not row: raise SafetyError("active schedule not found")
-    retirement_effective_from=retirement_effective_from or date.today().isoformat()
+    retirement_effective_from=retirement_effective_from or max(date.today().isoformat(),row["effective_from"])
     try: date.fromisoformat(retirement_effective_from)
     except ValueError as exc: raise SafetyError("retirement effective date must be YYYY-MM-DD") from exc
     if retirement_effective_from<row["effective_from"]: raise SafetyError("retirement cannot precede schedule start")

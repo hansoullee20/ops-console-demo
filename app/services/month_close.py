@@ -12,8 +12,8 @@ import xlwt
 
 from app.services import operational_safety
 
-RECONCILIATION_VERSION = "2"
-POLICY_VERSION = "2"
+RECONCILIATION_VERSION = "3"
+POLICY_VERSION = "3"
 BLOCKING_CODES = {
     "scheduled_no_punch", "incomplete_day", "leave_attendance_conflict",
     "sick_leave_evidence_mismatch", "partial_leave_review",
@@ -48,6 +48,15 @@ def bounds(month: str) -> tuple[str, str]:
 
 
 def assert_range_open(conn: sqlite3.Connection, start: str, end: str | None = None) -> None:
+    # The close check and protected mutation share one SQLite write transaction.
+    # This prevents a close from committing between the SELECT and caller write.
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        else:
+            conn.execute("UPDATE app_meta SET value=value WHERE key='data_context'")
+    except sqlite3.OperationalError as exc:
+        raise MonthCloseError("a concurrent month close is in progress; retry the operation") from exc
     last_month = end[:7] if end else "9999-12"
     row = conn.execute(
         "SELECT month_key FROM month_closes WHERE status='closed' "
@@ -195,10 +204,32 @@ def reconcile(conn: sqlite3.Connection, month: str) -> dict:
     current = conn.execute(
         "SELECT * FROM month_closes WHERE month_key=? ORDER BY revision DESC LIMIT 1", (month,)
     ).fetchone()
-    # A closed month is an immutable historical result. GET reconciliation is
-    # read-only until an explicit reopen makes live re-evaluation permissible.
-    if not current or current["status"] != "closed":
-        operational_safety.reconcile(conn, start, end)
+    # Closed reconciliation is returned exclusively from the immutable close.
+    if current and current["status"] == "closed":
+        frozen = snapshot(conn, month, close_id=current["id"])
+        reconciliation = next(
+            (json.loads(item["evidence_json"]) for item in frozen["items"]
+             if item["record_type"] == "reconciliation"), None,
+        )
+        if reconciliation is None:
+            items = frozen["items"]
+            reconciliation = {"summary": {
+                "scheduledEmployeeDays": 0,
+                "normalConfirmedEmployeeDays": sum(
+                    item["record_type"] == "attendance" and item["normalized_state"] == "normal"
+                    for item in items),
+                "leaveEmployeeDays": sum(
+                    item["record_type"] == "attendance" and
+                    item["normalized_state"] in {"leave", "half_day", "sick_leave"}
+                    for item in items),
+                "reviewNeeded": 0, "sourceQualityWarnings": 0,
+            }, "blockingItems": [], "warningItems": []}
+        return {"month": month, "reconciliationStatus": "closed",
+                "summary": reconciliation["summary"],
+                "blockingItems": reconciliation["blockingItems"],
+                "warningItems": reconciliation["warningItems"],
+                "close": dict(current)}
+    operational_safety.reconcile(conn, start, end)
     active = [row for row in _month_exception_rows(conn, start, end)
               if row["status"] in {"open", "acknowledged"}]
     blockers, warnings = [], []
@@ -267,6 +298,44 @@ def _snapshot_rows(conn: sqlite3.Connection, month: str) -> list[dict]:
                          "workDate": work_date, "recordType": kind, "recordId": data["id"],
                          "normalizedState": data.get("status") or data.get("review_flag") or "evidence",
                          "evidence": data})
+    for raw in conn.execute(
+        "SELECT * FROM employees WHERE hire_date<=? AND (end_date IS NULL OR end_date>=?) ORDER BY id",
+        (end, start),
+    ):
+        data = dict(raw); rows.append({
+            "sortKey": f"employee||{data['id']:012d}", "employeeId": data["id"],
+            "workDate": None, "recordType": "employee", "recordId": data["id"],
+            "normalizedState": data["status"], "evidence": data})
+    for raw in conn.execute(
+        "SELECT * FROM employee_work_schedules WHERE effective_from<=? "
+        "AND (effective_to IS NULL OR effective_to>=?) "
+        "AND (status='active' OR retired_effective_from>?) ORDER BY id",
+        (end, start, start),
+    ):
+        data = dict(raw); rows.append({
+            "sortKey": f"work_schedule|{data['effective_from']}|{data['id']:012d}",
+            "employeeId": data["employee_id"], "workDate": data["effective_from"],
+            "recordType": "work_schedule", "recordId": data["id"],
+            "normalizedState": data["status"], "evidence": data})
+    for raw in conn.execute(
+        "SELECT * FROM employee_schedule_dates WHERE work_date BETWEEN ? AND ? "
+        "AND status='active' ORDER BY id", (start, end),
+    ):
+        data = dict(raw); rows.append({
+            "sortKey": f"schedule_date|{data['work_date']}|{data['id']:012d}",
+            "employeeId": data["employee_id"], "workDate": data["work_date"],
+            "recordType": "schedule_date", "recordId": data["id"],
+            "normalizedState": "scheduled" if data["is_scheduled"] else "not_scheduled",
+            "evidence": data})
+    for raw in conn.execute(
+        "SELECT * FROM site_calendar WHERE calendar_date BETWEEN ? AND ? ORDER BY calendar_date",
+        (start, end),
+    ):
+        data = dict(raw); rows.append({
+            "sortKey": f"site_calendar|{data['calendar_date']}|000000000000",
+            "employeeId": None, "workDate": data["calendar_date"],
+            "recordType": "site_calendar", "recordId": None,
+            "normalizedState": data["day_type"], "evidence": data})
     return sorted(rows, key=lambda row: row["sortKey"])
 
 
@@ -296,6 +365,14 @@ def close_month(conn: sqlite3.Connection, month: str, actor: str, note: str) -> 
     revision = (previous["revision"] + 1) if previous else 1
     supersedes_close_id = previous["id"] if previous else None
     rows = _snapshot_rows(conn, month)
+    rows.append({
+        "sortKey": "reconciliation||000000000000", "employeeId": None,
+        "workDate": None, "recordType": "reconciliation", "recordId": None,
+        "normalizedState": "ready",
+        "evidence": {"summary": result["summary"],
+                     "blockingItems": result["blockingItems"],
+                     "warningItems": result["warningItems"]}})
+    rows.sort(key=lambda row: row["sortKey"])
     start, end = bounds(month)
     exception_rows = _month_exception_rows(conn, start, end)
     exceptions = [{"id": row["id"], "status": row["status"],
@@ -437,7 +514,10 @@ def export_xls(conn: sqlite3.Connection, month: str, *, close_id: int | None = N
     sheet.write_merge(0, 0, 0, 6, f"제출용 근태자료 {month} (일반 형식)", title)
     labels = ["구분", "직원 ID", "근무일", "상태", "기록 ID", "스냅샷 개정", "스냅샷 해시"]
     for col, label in enumerate(labels): sheet.write(2, col, label, header)
-    for idx, item in enumerate(frozen["items"], 3):
+    submission_items = [item for item in frozen["items"] if item["record_type"] in {
+        "attendance", "leave", "replacement", "manual_adjustment", "punch"
+    }]
+    for idx, item in enumerate(submission_items, 3):
         values = [item["record_type"], item["employee_id"], item["work_date"], item["normalized_state"], item["record_id"], frozen["close"]["revision"], frozen["close"]["snapshot_hash"]]
         for col, value in enumerate(values): sheet.write(idx, col, "" if value is None else value)
     for col, width in enumerate((18, 12, 14, 20, 12, 14, 68)): sheet.col(col).width = width * 256

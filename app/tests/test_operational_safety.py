@@ -247,3 +247,21 @@ def test_finite_and_post_end_retirement_guard_only_actual_affected_range(operati
     assert post_end['status']=='retired'
     assert safety.resolve_schedule(c,b,'2026-08-31')['isAuthoritative']
     c.close()
+
+
+def test_future_effective_schedule_can_retire_without_explicit_api_date(operational,monkeypatch):
+    path,a,_=operational;monkeypatch.setattr(config,'DB_PATH',path)
+    conn=db.connect(path)
+    schedule=safety.create_schedule(
+        conn,employee_id=a,effective_from='2099-01-01',effective_to=None,weekday_mask='0')
+    conn.commit();conn.close()
+    client=TestClient(create_app())
+    response=client.post(
+        f'/api/v1/employees/{a}/schedules/{schedule["id"]}/retire',
+        json={'actor':'operator','reason':'future schedule cancelled'},
+    )
+    assert response.status_code==200
+    assert response.json()['retired_effective_from']=='2099-01-01'
+    frontend=Path('safety-ui.js').read_text(encoding='utf-8')
+    assert 'retirementEffectiveFrom:effective' in frontend
+    assert "prompt('일정 종료 적용일을 입력하세요. (YYYY-MM-DD)'" in frontend

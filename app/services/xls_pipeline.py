@@ -680,7 +680,13 @@ def apply_import(
         contributed: set[tuple[int, str]] = set()
         touched: set[tuple[int, str]] = set()
 
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
+        # Re-check under the transaction that performs the business writes.
+        # The earlier validation connection is intentionally not trusted as an
+        # atomic guard because backup creation occurs between the two.
+        from app.services.month_close import MonthCloseError, assert_range_open
+        try: assert_range_open(conn, parsed.period_start, parsed.period_end)
+        except MonthCloseError as exc: raise ImportError_(str(exc)) from exc
         for punch in parsed.punches:
             mapped = _resolve_slot(intervals, punch.slot_code, punch.work_date) or {}
             employee_id = mapped.get("employee_id")
@@ -1076,7 +1082,8 @@ def rollback_import(
 
         safe, conflicts = _rollback_conflicts(conn, import_run_id, run["finished_at"])
 
-        conn.execute("BEGIN")
+        # assert_range_open acquired the write reservation on this connection;
+        # rollback derivation and raw-event updates remain in that transaction.
         # By active_import_run_id, not import_run_id: an event first imported by
         # run 1 and reactivated by run 3 is run 3's to undo. import_run_id is
         # immutable provenance and answers a different question.
