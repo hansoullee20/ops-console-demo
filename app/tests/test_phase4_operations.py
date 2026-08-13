@@ -238,7 +238,24 @@ def test_requested_correction_and_cancel_never_touch_attendance(operational):
         assert client.put(f"/api/v1/leave-operations/{created['id']}",json={
             "employeeId":a,"leaveType":"annual_leave","startDate":"2026-08-13",
             "endDate":"2026-08-13","portion":"full","reason":"date correction"}).status_code==200
-        assert client.post(f"/api/v1/leave-operations/{created['id']ﬂ}≠¢Gß≤⁄Óù∆≠yŸpe,
+        assert client.post(f"/api/v1/leave-operations/{created['id']}/cancel",
+                           json={"reason":"request withdrawn"}).status_code==200
+    assert conn.execute("SELECT COUNT(*) FROM attendance_days").fetchone()[0]==0
+
+
+def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
+    path,a,b,_=operational;conn=db.connect(path)
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
+        start_date="2026-08-11",end_date="2026-08-11",portion="full",reason="employee correction")
+    states={(r["employee_id"],r["work_date"]):r["status"] for r in conn.execute(
+        "SELECT employee_id,work_date,status FROM attendance_days")}
+    assert states=={(a,"2026-08-10"):"unknown",(b,"2026-08-11"):"leave"}
+
+
+def _insert_punch(conn,employee,date,key):
+    conn.execute("""INSERT INTO punch_events
+        (terminal_id,terminal_slot_code,employee_id,punch_at,work_date,punch_type,
          raw_payload,source_filename,source_hash,dedupe_key)
         VALUES('SC-1','001',?,?,?,'unknown','{}','fictional.xls','fictional-hash',?)""",
         (employee,date+"T07:00:00",date,key))
