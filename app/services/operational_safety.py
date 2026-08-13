@@ -49,6 +49,9 @@ def transition_exception(conn,exception_id,to_status,note,actor="operator"):
     if to_status not in {"acknowledged","resolved","waived"}: raise SafetyError("invalid exception transition")
     row=conn.execute("SELECT * FROM operational_exceptions WHERE id=?",(exception_id,)).fetchone()
     if not row: raise SafetyError("exception not found")
+    from app.services.month_close import MonthCloseError,assert_exception_open
+    try: assert_exception_open(conn,exception_id)
+    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     allowed={"open":{"acknowledged","resolved","waived"},"acknowledged":{"resolved","waived"}}
     if to_status not in allowed.get(row["status"],set()): raise SafetyError("exception transition is not allowed")
     if to_status in {"resolved","waived"} and not (note or "").strip(): raise SafetyError("resolution note is required")

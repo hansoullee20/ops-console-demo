@@ -64,10 +64,19 @@ def get_close(month: str):
         conn.close()
 
 
-@router.get("/{month}/snapshot")
-def get_snapshot(month: str):
+@router.get("/{month}/revisions")
+def revisions(month: str):
     _allowed(); conn = db.connect(config.DB_PATH, read_only=True)
-    try: return month_close.snapshot(conn, month)
+    try: return {"month": month, "revisions": month_close.list_revisions(conn, month)}
+    except month_close.MonthCloseError as exc: raise _error(exc)
+    finally: conn.close()
+
+
+@router.get("/{month}/snapshot")
+def get_snapshot(month: str, close_id: int | None = None, revision: int | None = None):
+    _allowed(); conn = db.connect(config.DB_PATH, read_only=True)
+    try: return month_close.snapshot(conn, month, close_id=close_id, revision=revision)
+    except month_close.MonthCloseIntegrityError as exc: raise HTTPException(409, str(exc))
     except month_close.MonthCloseError as exc: raise HTTPException(404, str(exc))
     finally: conn.close()
 
@@ -85,9 +94,9 @@ def reopen(month: str, body: Action):
 
 
 @router.get("/{month}/export.xlsx")
-def export(month: str):
+def export(month: str, close_id: int | None = None, revision: int | None = None):
     _allowed(); conn = db.connect(config.DB_PATH, read_only=True)
-    try: payload = month_close.export_xls(conn, month)
+    try: payload = month_close.export_xls(conn, month, close_id=close_id, revision=revision)
     except month_close.MonthCloseError as exc: raise HTTPException(409, str(exc))
     finally: conn.close()
     return Response(payload, media_type="application/vnd.ms-excel",

@@ -12,8 +12,8 @@ import xlwt
 
 from app.services import operational_safety
 
-RECONCILIATION_VERSION = "1"
-POLICY_VERSION = "1"
+RECONCILIATION_VERSION = "2"
+POLICY_VERSION = "2"
 BLOCKING_CODES = {
     "scheduled_no_punch", "incomplete_day", "leave_attendance_conflict",
     "sick_leave_evidence_mismatch", "partial_leave_review",
@@ -27,6 +27,10 @@ class MonthCloseError(ValueError):
     def __init__(self, message: str, blocking_items: list[dict] | None = None):
         super().__init__(message)
         self.blocking_items = blocking_items or []
+
+
+class MonthCloseIntegrityError(MonthCloseError):
+    """Stored close material no longer matches its immutable digest/links."""
 
 
 def _now() -> str:
@@ -52,6 +56,67 @@ def assert_range_open(conn: sqlite3.Connection, start: str, end: str | None = No
     ).fetchone()
     if row:
         raise MonthCloseError(f"{row['month_key']} 마감 월입니다. 먼저 월을 다시 여십시오.")
+
+
+def _exception_ranges(conn: sqlite3.Connection, exception_id: int) -> list[tuple[str, str]]:
+    """Resolve the real affected periods for dated and source/entity exceptions."""
+    exception = conn.execute(
+        "SELECT work_date,import_run_id,status FROM operational_exceptions WHERE id=?",
+        (exception_id,),
+    ).fetchone()
+    if not exception:
+        return []
+    ranges: set[tuple[str, str]] = set()
+    if exception["work_date"]:
+        ranges.add((exception["work_date"], exception["work_date"]))
+    import_ids = {exception["import_run_id"]} if exception["import_run_id"] else set()
+    specs = {
+        "leave_request": ("leave_requests", "start_date", "end_date", False),
+        "leave_requests": ("leave_requests", "start_date", "end_date", False),
+        "replacement_assignment": ("replacement_assignments", "start_date", "end_date", False),
+        "replacement_assignments": ("replacement_assignments", "start_date", "end_date", False),
+        "terminal_slot": ("terminal_slots", "effective_from", "effective_to", True),
+        "terminal_slots": ("terminal_slots", "effective_from", "effective_to", True),
+        "source_quality_observation": ("source_quality_observations", "COALESCE(period_start,work_date)", "COALESCE(period_end,work_date)", False),
+        "source_quality_observations": ("source_quality_observations", "COALESCE(period_start,work_date)", "COALESCE(period_end,work_date)", False),
+    }
+    for link in conn.execute(
+        "SELECT entity_type,entity_id,import_run_id FROM exception_evidence_links WHERE exception_id=?",
+        (exception_id,),
+    ):
+        if link["import_run_id"]:
+            import_ids.add(link["import_run_id"])
+        if link["entity_type"] in {"import_run", "import_runs"} and link["entity_id"] is not None:
+            import_ids.add(link["entity_id"])
+        if link["entity_type"] in specs and link["entity_id"] is not None:
+            table, start_column, end_column, open_ended = specs[link["entity_type"]]
+            row = conn.execute(
+                f"SELECT {start_column} AS starts,{end_column} AS ends FROM {table} WHERE id=?",
+                (link["entity_id"],),
+            ).fetchone()
+            if row and row["starts"]:
+                ranges.add((row["starts"], row["ends"] or ("9999-12-31" if open_ended else row["starts"])))
+    for import_id in import_ids:
+        row = conn.execute("SELECT period_start,period_end FROM import_runs WHERE id=?", (import_id,)).fetchone()
+        if row and row["period_start"]:
+            ranges.add((row["period_start"], row["period_end"] or row["period_start"]))
+    if not ranges and exception["status"] in {"open", "acknowledged"}:
+        # Never assign an undated unresolved issue by creation month alone.
+        # Without authoritative scope evidence, conservatively treat it as
+        # global so it cannot silently disappear from reconciliation.
+        ranges.add(("0001-01-01", "9999-12-31"))
+    return sorted(ranges)
+
+
+def assert_exception_open(conn: sqlite3.Connection, exception_id: int) -> None:
+    for start, end in _exception_ranges(conn, exception_id):
+        assert_range_open(conn, start, end)
+
+
+def _month_exception_rows(conn: sqlite3.Connection, start: str, end: str) -> list[sqlite3.Row]:
+    """One authoritative attribution set shared by reconciliation and snapshotting."""
+    rows = conn.execute("SELECT * FROM operational_exceptions ORDER BY id").fetchall()
+    return [row for row in rows if any(left <= end and right >= start for left, right in _exception_ranges(conn, row["id"]))]
 
 
 def _item(row: sqlite3.Row) -> dict:
@@ -82,14 +147,11 @@ def _scheduled_employee_days(conn: sqlite3.Connection, start: str, end: str) -> 
 def reconcile(conn: sqlite3.Connection, month: str) -> dict:
     start, end = bounds(month)
     operational_safety.reconcile(conn, start, end)
-    active = conn.execute(
-        "SELECT * FROM operational_exceptions WHERE status IN ('open','acknowledged') "
-        "AND ((work_date BETWEEN ? AND ?) OR (work_date IS NULL AND created_at LIKE ?)) "
-        "ORDER BY COALESCE(work_date,''),id", (start, end, month + "%")
-    ).fetchall()
+    active = [row for row in _month_exception_rows(conn, start, end)
+              if row["status"] in {"open", "acknowledged"}]
     blockers, warnings = [], []
     for row in active:
-        (blockers if row["severity"] == "critical" or row["exception_code"] in BLOCKING_CODES else warnings).append(_item(row))
+        (blockers if row["severity"] in {"critical", "review"} or row["exception_code"] in BLOCKING_CODES else warnings).append(_item(row))
 
     for row in conn.execute(
         "SELECT id,status FROM import_runs WHERE period_start<=? AND period_end>=? "
@@ -109,7 +171,7 @@ def reconcile(conn: sqlite3.Connection, month: str) -> dict:
 
     for row in conn.execute(
         "SELECT id,start_date,status FROM replacement_assignments "
-        "WHERE start_date<=? AND end_date>=? AND status='planned' ORDER BY id", (end, start)
+        "WHERE start_date<=? AND end_date>=? AND status='candidate' ORDER BY id", (end, start)
     ):
         blockers.append({"code": "replacement_unresolved", "scope": "replacement", "employeeId": None,
                          "workDate": row["start_date"], "exceptionIds": [], "recordId": row["id"],
@@ -157,10 +219,16 @@ def _snapshot_rows(conn: sqlite3.Connection, month: str) -> list[dict]:
     return sorted(rows, key=lambda row: row["sortKey"])
 
 
-def _canonical(month: str, revision: int, rows: list, exceptions: list, sources: list) -> str:
-    return json.dumps({"month": month, "revision": revision, "items": rows,
-                       "exceptions": exceptions, "sources": sources},
-                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+def _canonical(month: str, revision: int, rows: list, exceptions: list, sources: list,
+               event_ids: list[int] | None = None, evidence_ids: list[int] | None = None,
+               supersedes_close_id: int | None = None, *, version: str = "2") -> str:
+    value = {"month": month, "revision": revision, "items": rows,
+             "exceptions": exceptions, "sources": sources}
+    if version != "1":
+        value.update({"exceptionEventIds": event_ids or [],
+                      "exceptionEvidenceLinkIds": evidence_ids or [],
+                      "supersedesCloseId": supersedes_close_id})
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def close_month(conn: sqlite3.Connection, month: str, actor: str, note: str) -> dict:
@@ -171,18 +239,37 @@ def close_month(conn: sqlite3.Connection, month: str, actor: str, note: str) -> 
     result = reconcile(conn, month)
     if result["blockingItems"]:
         raise MonthCloseError("month has unresolved blockers", result["blockingItems"])
-    revision = conn.execute("SELECT COALESCE(MAX(revision),0)+1 FROM month_closes WHERE month_key=?", (month,)).fetchone()[0]
+    previous = conn.execute(
+        "SELECT id,revision FROM month_closes WHERE month_key=? ORDER BY revision DESC LIMIT 1", (month,)
+    ).fetchone()
+    revision = (previous["revision"] + 1) if previous else 1
+    supersedes_close_id = previous["id"] if previous else None
     rows = _snapshot_rows(conn, month)
-    exceptions = [dict(row) for row in conn.execute(
-        "SELECT id,status,resolution_note FROM operational_exceptions WHERE work_date LIKE ? ORDER BY id", (month + "-%",))]
     start, end = bounds(month)
+    exception_rows = _month_exception_rows(conn, start, end)
+    exceptions = [{"id": row["id"], "status": row["status"],
+                   "resolution_note": row["resolution_note"]} for row in exception_rows]
+    exception_ids = [row["id"] for row in exception_rows]
+    event_ids: list[int] = []
+    evidence_ids: list[int] = []
+    if exception_ids:
+        placeholders = ",".join("?" for _ in exception_ids)
+        event_ids = [row[0] for row in conn.execute(
+            f"SELECT id FROM exception_events WHERE exception_id IN ({placeholders}) ORDER BY id", exception_ids)]
+        evidence_ids = [row[0] for row in conn.execute(
+            f"SELECT id FROM exception_evidence_links WHERE exception_id IN ({placeholders}) ORDER BY id", exception_ids)]
     sources = [{"type": "import_run", "id": row[0]} for row in conn.execute(
         "SELECT id FROM import_runs WHERE period_start<=? AND period_end>=? AND status='applied' ORDER BY id", (end, start))]
-    digest = hashlib.sha256(_canonical(month, revision, rows, exceptions, sources).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(_canonical(
+        month, revision, rows, exceptions, sources, event_ids, evidence_ids,
+        supersedes_close_id,
+    ).encode("utf-8")).hexdigest()
     close_id = conn.execute(
         "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
-        "closed_at,closed_by,close_note,snapshot_hash) VALUES(?,?,'closed',?,?,?,?,?,?)",
-        (month, revision, RECONCILIATION_VERSION, POLICY_VERSION, _now(), actor, note, digest),
+        "closed_at,closed_by,close_note,snapshot_hash,supersedes_close_id) "
+        "VALUES(?,?,'closed',?,?,?,?,?,?,?)",
+        (month, revision, RECONCILIATION_VERSION, POLICY_VERSION, _now(), actor, note,
+         digest, supersedes_close_id),
     ).lastrowid
     for row in rows:
         conn.execute("INSERT INTO month_close_items(close_id,sort_key,employee_id,work_date,record_type,record_id,normalized_state,evidence_json) VALUES(?,?,?,?,?,?,?,?)",
@@ -192,8 +279,16 @@ def close_month(conn: sqlite3.Connection, month: str, actor: str, note: str) -> 
                      (close_id, row["id"], row["status"], row["resolution_note"]))
     for source in sources:
         conn.execute("INSERT INTO month_close_source_links(close_id,source_type,source_id) VALUES(?,?,?)", (close_id, source["type"], source["id"]))
+    for event_id in event_ids:
+        conn.execute("INSERT INTO month_close_exception_event_links(close_id,exception_event_id) VALUES(?,?)",
+                     (close_id, event_id))
+    for evidence_id in evidence_ids:
+        conn.execute("INSERT INTO month_close_exception_evidence_links(close_id,exception_evidence_link_id) VALUES(?,?)",
+                     (close_id, evidence_id))
     conn.execute("INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,after_json,reason) VALUES('user',?,'month_close.close','month_closes',?,?,?)",
-                 (actor, close_id, json.dumps({"month": month, "revision": revision, "snapshotHash": digest}), note))
+                 (actor, close_id, json.dumps({"month": month, "revision": revision,
+                                              "snapshotHash": digest,
+                                              "supersedesCloseId": supersedes_close_id}), note))
     return get_close(conn, close_id)
 
 
@@ -221,20 +316,68 @@ def latest(conn: sqlite3.Connection, month: str) -> dict | None:
     return dict(row) if row else None
 
 
-def snapshot(conn: sqlite3.Connection, month: str) -> dict:
-    close = latest(conn, month)
+def list_revisions(conn: sqlite3.Connection, month: str) -> list[dict]:
+    bounds(month)
+    return [dict(row) for row in conn.execute(
+        "SELECT * FROM month_closes WHERE month_key=? ORDER BY revision", (month,)
+    )]
+
+
+def _select_close(conn: sqlite3.Connection, month: str, *, close_id: int | None = None,
+                  revision: int | None = None) -> dict | None:
+    bounds(month)
+    if close_id is not None:
+        row = conn.execute("SELECT * FROM month_closes WHERE month_key=? AND id=?", (month, close_id)).fetchone()
+    elif revision is not None:
+        row = conn.execute("SELECT * FROM month_closes WHERE month_key=? AND revision=?", (month, revision)).fetchone()
+    else:
+        row = conn.execute("SELECT * FROM month_closes WHERE month_key=? ORDER BY revision DESC LIMIT 1", (month,)).fetchone()
+    return dict(row) if row else None
+
+
+def snapshot(conn: sqlite3.Connection, month: str, *, close_id: int | None = None,
+             revision: int | None = None) -> dict:
+    close = _select_close(conn, month, close_id=close_id, revision=revision)
     if not close:
         raise MonthCloseError("month close not found")
     items = [dict(row) for row in conn.execute("SELECT * FROM month_close_items WHERE close_id=? ORDER BY sort_key", (close["id"],))]
     exceptions = [dict(row) for row in conn.execute("SELECT * FROM month_close_exception_links WHERE close_id=? ORDER BY exception_id", (close["id"],))]
     sources = [dict(row) for row in conn.execute("SELECT * FROM month_close_source_links WHERE close_id=? ORDER BY source_type,source_id", (close["id"],))]
-    return {"close": close, "items": items, "exceptions": exceptions, "sources": sources}
+    event_ids = [row[0] for row in conn.execute(
+        "SELECT exception_event_id FROM month_close_exception_event_links WHERE close_id=? ORDER BY exception_event_id",
+        (close["id"],))]
+    evidence_ids = [row[0] for row in conn.execute(
+        "SELECT exception_evidence_link_id FROM month_close_exception_evidence_links WHERE close_id=? ORDER BY exception_evidence_link_id",
+        (close["id"],))]
+    for source in sources:
+        if source["source_type"] != "import_run" or not conn.execute(
+            "SELECT 1 FROM import_runs WHERE id=?", (source["source_id"],)
+        ).fetchone():
+            raise MonthCloseIntegrityError("month close source link is invalid")
+    canonical_items = [{"sortKey": row["sort_key"], "employeeId": row["employee_id"],
+                        "workDate": row["work_date"], "recordType": row["record_type"],
+                        "recordId": row["record_id"], "normalizedState": row["normalized_state"],
+                        "evidence": json.loads(row["evidence_json"])} for row in items]
+    canonical_exceptions = [{"id": row["exception_id"], "status": row["status_at_close"],
+                             "resolution_note": row["resolution_note"]} for row in exceptions]
+    canonical_sources = [{"type": row["source_type"], "id": row["source_id"]} for row in sources]
+    version = close["reconciliation_version"]
+    canonical = _canonical(close["month_key"], close["revision"], canonical_items,
+                           canonical_exceptions, canonical_sources, event_ids, evidence_ids,
+                           close.get("supersedes_close_id"), version=version)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if digest != close["snapshot_hash"]:
+        raise MonthCloseIntegrityError("month close snapshot hash mismatch")
+    return {"close": close, "items": items, "exceptions": exceptions, "sources": sources,
+            "exceptionEventIds": event_ids, "exceptionEvidenceLinkIds": evidence_ids}
 
 
-def export_xls(conn: sqlite3.Connection, month: str) -> bytes:
+def export_xls(conn: sqlite3.Connection, month: str, *, close_id: int | None = None,
+               revision: int | None = None) -> bytes:
     """Build the generic submission workbook exclusively from a close snapshot."""
-    frozen = snapshot(conn, month)
-    if frozen["close"]["status"] not in {"closed", "reopened"}:
+    explicit_revision = close_id is not None or revision is not None
+    frozen = snapshot(conn, month, close_id=close_id, revision=revision)
+    if frozen["close"]["status"] != "closed" and not explicit_revision:
         raise MonthCloseError("closed snapshot not found")
     book = xlwt.Workbook(encoding="utf-8")
     sheet = book.add_sheet("제출용 근태자료")

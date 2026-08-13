@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import config, db, migrate
+from app.main import create_app
+from app.services import attendance, month_close, operational_safety
+
+
+def _operational(migrated_db):
+    conn = db.connect(migrated_db)
+    conn.execute("UPDATE app_meta SET value='operational' WHERE key='data_context'")
+    conn.commit()
+    return conn
+
+
+def _employee(conn, code="CLOSE1"):
+    return conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date) VALUES(?,?,?)",
+        (code, f"Fictional {code}", "2025-01-01"),
+    ).lastrowid
+
+
+def _exception(conn, *, code="manual_attendance_review", work_date="2026-08-10",
+               scope="employee", employee_id=None, evidence=()):
+    return operational_safety.ensure_exception(
+        conn, code=code, severity="review", scope=scope, employee_id=employee_id,
+        work_date=work_date, summary="Fictional review", evidence=evidence,
+    )
+
+
+def test_closed_month_guards_attendance_and_all_exception_transitions(migrated_db):
+    conn = _operational(migrated_db)
+    month_close.close_month(conn, "2026-08", "operator", "Fictional close")
+    employee_id = _employee(conn)
+    conn.execute(
+        "INSERT INTO attendance_days(employee_id,work_date,status,source) VALUES(?,?,'unknown','manual')",
+        (employee_id, "2026-08-10"),
+    )
+    exceptions = [_exception(conn, employee_id=employee_id, code=f"closed_guard_{state}")
+                  for state in ("ack", "resolve", "waive")]
+    with pytest.raises(attendance.AttendanceCorrectionError):
+        attendance.correct_attendance(
+            conn, employee_id=employee_id, work_date="2026-08-10",
+            changes={"review_note": "blocked"}, actor_id="operator", reason="test",
+        )
+    for item, transition in zip(exceptions, ("acknowledged", "resolved", "waived")):
+        with pytest.raises(operational_safety.SafetyError):
+            operational_safety.transition_exception(conn, item["id"], transition, "blocked")
+    month_close.reopen(conn, "2026-08", "operator", "Fictional correction")
+    attendance.correct_attendance(
+        conn, employee_id=employee_id, work_date="2026-08-10",
+        changes={"review_note": "allowed"}, actor_id="operator", reason="test",
+    )
+    for item, transition in zip(exceptions, ("acknowledged", "resolved", "waived")):
+        assert operational_safety.transition_exception(conn, item["id"], transition, "allowed")["status"] == transition
+    conn.close()
+
+
+def test_close_metadata_trigger_and_hash_integrity_gate(migrated_db):
+    conn = _operational(migrated_db)
+    close = month_close.close_month(conn, "2026-08", "operator", "Fictional close")
+    conn.commit()
+    with pytest.raises(Exception):
+        conn.execute("UPDATE month_closes SET close_note='tampered' WHERE id=?", (close["id"],))
+    conn.rollback()
+    reopened = month_close.reopen(conn, "2026-08", "operator", "Fictional reopen")
+    assert reopened["status"] == "reopened"
+    conn.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-09',1,'closed','2','2',"
+        "'2026-10-01T00:00:00Z','operator','bad hash',?)",
+        ("0" * 64,),
+    )
+    conn.commit()
+    with pytest.raises(month_close.MonthCloseIntegrityError):
+        month_close.snapshot(conn, "2026-09")
+    with pytest.raises(month_close.MonthCloseIntegrityError):
+        month_close.export_xls(conn, "2026-09")
+    conn.close()
+
+
+def test_null_date_source_mapping_replacement_attribution_and_frozen_links(migrated_db):
+    conn = _operational(migrated_db)
+    employee_id = _employee(conn)
+    import_id = conn.execute(
+        "INSERT INTO import_runs(source_filename,status,period_start,period_end) "
+        "VALUES('fictional.xls','applied','2026-08-01','2026-08-31')"
+    ).lastrowid
+    mapping_id = conn.execute(
+        "INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('901',?,'2026-08-01','mapped')",
+        (employee_id,),
+    ).lastrowid
+    replacement_id = conn.execute(
+        "INSERT INTO replacement_assignments(work_date,start_date,end_date,substitute_employee_id,status) "
+        "VALUES('2026-08-12','2026-08-12','2026-08-13',?,'assigned')",
+        (employee_id,),
+    ).lastrowid
+    specs = [
+        ("source_null", "source", [{"evidence_type": "fingerprint_xls", "entity_type": "import_run", "import_run_id": import_id}]),
+        ("mapping_null", "mapping", [{"evidence_type": "mapping", "entity_type": "terminal_slot", "entity_id": mapping_id}]),
+        ("replacement_null", "replacement", [{"evidence_type": "replacement", "entity_type": "replacement_assignment", "entity_id": replacement_id}]),
+    ]
+    ids = []
+    for code, scope, evidence in specs:
+        item = _exception(conn, code=code, scope=scope, employee_id=None, work_date=None, evidence=evidence)
+        ids.append(item["id"])
+    reconciliation = month_close.reconcile(conn, "2026-08")
+    assert {item["exceptionIds"][0] for item in reconciliation["blockingItems"]} >= set(ids)
+    active_ids = [row[0] for row in conn.execute(
+        "SELECT id FROM operational_exceptions WHERE status IN ('open','acknowledged')"
+    )]
+    for exception_id in active_ids:
+        operational_safety.transition_exception(conn, exception_id, "waived", "Fictional waiver")
+    close = month_close.close_month(conn, "2026-08", "operator", "Fictional close")
+    frozen = month_close.snapshot(conn, "2026-08")
+    assert {item["exception_id"] for item in frozen["exceptions"]} >= set(ids)
+    original_events = list(frozen["exceptionEventIds"])
+    original_evidence = list(frozen["exceptionEvidenceLinkIds"])
+    conn.execute(
+        "INSERT INTO exception_events(exception_id,event_type,note,actor) VALUES(?,'later_note','later','operator')",
+        (ids[0],),
+    )
+    conn.execute(
+        "INSERT INTO exception_evidence_links(exception_id,evidence_type,entity_type,reference_text,evidence_key,created_by) "
+        "VALUES(?,'manual_statement','note','later','later-evidence','operator')",
+        (ids[0],),
+    )
+    frozen_again = month_close.snapshot(conn, "2026-08", close_id=close["id"])
+    assert frozen_again["exceptionEventIds"] == original_events
+    assert frozen_again["exceptionEvidenceLinkIds"] == original_evidence
+    conn.close()
+
+
+def test_revision_lookup_lineage_and_export_modes_http(migrated_db, monkeypatch):
+    conn = _operational(migrated_db)
+    first = month_close.close_month(conn, "2026-08", "operator", "Revision one")
+    month_close.reopen(conn, "2026-08", "operator", "Fictional reopen")
+    conn.commit(); conn.close()
+    monkeypatch.setattr(config, "DB_PATH", migrated_db)
+    client = TestClient(create_app())
+    assert client.get("/api/v1/month-close/2026-08/export.xlsx").status_code == 409
+    assert client.get("/api/v1/month-close/2026-08/export.xlsx?revision=1").status_code == 200
+    second_response = client.post(
+        "/api/v1/month-close/2026-08/close",
+        json={"actor": "operator", "reason": "Revision two"},
+    )
+    assert second_response.status_code == 200
+    second = second_response.json()
+    assert second["revision"] == 2 and second["supersedes_close_id"] == first["id"]
+    revisions = client.get("/api/v1/month-close/2026-08/revisions").json()["revisions"]
+    assert [row["revision"] for row in revisions] == [1, 2]
+    assert client.get("/api/v1/month-close/2026-08/snapshot?revision=1").json()["close"]["id"] == first["id"]
+    assert client.get("/api/v1/month-close/2026-08/snapshot?revision=2").json()["close"]["id"] == second["id"]
+    assert client.get("/api/v1/month-close/2026-08/export.xlsx?revision=1").status_code == 200
+    assert client.get("/api/v1/month-close/2026-08/export.xlsx?revision=2").status_code == 200
+    assert client.get("/api/v1/month-close/2026-08/export.xlsx").status_code == 200
+
+
+def test_snapshot_source_link_validation(migrated_db):
+    conn = _operational(migrated_db)
+    canonical = month_close._canonical("2026-08", 1, [], [], [{"type": "unknown", "id": 999}], [], [], None)
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    close_id = conn.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-08',1,'closed','2','2',"
+        "'2026-09-01T00:00:00Z','operator','invalid source',?)", (digest,)
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO month_close_source_links(close_id,source_type,source_id) VALUES(?, 'unknown', 999)",
+        (close_id,),
+    )
+    with pytest.raises(month_close.MonthCloseIntegrityError):
+        month_close.snapshot(conn, "2026-08")
+    conn.close()
+
+
+def test_0008_to_0009_to_0010_upgrade_backfills_lineage_and_is_idempotent(tmp_path):
+    old = tmp_path / "through-v9"; old.mkdir()
+    for source in config.MIGRATIONS_DIR.glob("*.sql"):
+        if source.name.startswith("0010_"):
+            continue
+        (old / source.name).write_bytes(source.read_bytes())
+    database = tmp_path / "phase45-v9.db"; backups = tmp_path / "backups"
+    assert migrate.run_migrations(database, migrations_dir=old, backups_dir=backups).schema_version == 9
+    conn = db.connect(database)
+    empty_v1 = lambda revision: hashlib.sha256(
+        month_close._canonical("2026-08", revision, [], [], [], version="1").encode()
+    ).hexdigest()
+    first = conn.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash,reopened_at,reopened_by,reopen_reason) "
+        "VALUES('2026-08',1,'reopened','1','1','2026-09-01T00:00:00Z','operator','v1',?,"
+        "'2026-09-02T00:00:00Z','operator','correction')", (empty_v1(1),)
+    ).lastrowid
+    second = conn.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) "
+        "VALUES('2026-08',2,'closed','1','1','2026-09-03T00:00:00Z','operator','v2',?)",
+        (empty_v1(2),),
+    ).lastrowid
+    conn.commit(); conn.close()
+    result = migrate.run_migrations(database, backups_dir=backups)
+    assert result.applied == [10] and result.backup_path and result.backup_path.exists()
+    conn = db.connect(database)
+    assert conn.execute("SELECT supersedes_close_id FROM month_closes WHERE id=?", (second,)).fetchone()[0] == first
+    assert month_close.snapshot(conn, "2026-08", close_id=first)["close"]["revision"] == 1
+    assert month_close.snapshot(conn, "2026-08", close_id=second)["close"]["revision"] == 2
+    conn.close()
+    assert migrate.run_migrations(database, backups_dir=backups).applied == []
