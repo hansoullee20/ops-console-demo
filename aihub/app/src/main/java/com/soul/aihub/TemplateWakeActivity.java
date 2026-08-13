@@ -517,7 +517,7 @@ public class TemplateWakeActivity extends Activity {
                 latencyMetadata.put("device_model", Build.MODEL);
                 latencyMetadata.put("device_sdk_int", Build.VERSION.SDK_INT);
                 latencyMetadata.put("device_fingerprint", Build.FINGERPRINT);
-                latencyMetadata.put("app_version", BuildConfig.VERSION_NAME);
+                latencyMetadata.put("app_version", appVersionName());
             } catch (Exception ignored) {}
             d.markCandidate(score, threshold, hit,
                     DIAGNOSTIC_MODEL_NAME, DIAGNOSTIC_MODEL_VERSION,
@@ -575,6 +575,16 @@ public class TemplateWakeActivity extends Activity {
             return out.toString();
         } catch (Exception ignored) {
             return "";
+        }
+    }
+
+    private String appVersionName() {
+        try {
+            String versionName = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).versionName;
+            return versionName == null || versionName.isEmpty() ? "unknown" : versionName;
+        } catch (Exception ignored) {
+            return "unknown";
         }
     }
 
