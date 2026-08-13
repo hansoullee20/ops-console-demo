@@ -224,6 +224,21 @@ def _resolve_slot(
     return sorted(covering, key=lambda r: (r["effective_from"] or "", r["id"] if "id" in r.keys() else 0))[-1]
 
 
+def _employment_review(employee: dict, work_date: str) -> str | None:
+    """Return the date-scoped employment finding for a mapped punch."""
+    if employee.get("hire_date") and work_date < employee["hire_date"]:
+        return "before_hire_date"
+    if employee.get("end_date") and work_date > employee["end_date"]:
+        return "after_end_date"
+    # Current termination is not historical evidence: dates through the
+    # inclusive end date remain valid. Other non-active states still need review.
+    if employee.get("employee_status") != "active" and not (
+        employee.get("employee_status") == "terminated" and employee.get("end_date")
+    ):
+        return "inactive_employee"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # preview
 # ---------------------------------------------------------------------------
@@ -420,7 +435,9 @@ def _build_preview(
                 "원본 기록은 보존되며 직원에 연결되지 않습니다.",
                 slot_code=slot.slot_code,
             ))
-        elif mapped["employee_status"] != "active":
+        elif mapped["employee_status"] != "active" and not (
+            mapped["employee_status"] == "terminated" and mapped.get("end_date")
+        ):
             status = "inactive"
             findings.append(Finding(
                 "inactive_employee", "review",
@@ -475,10 +492,17 @@ def _build_preview(
                 slot_code=slot_code, work_date=work_date, employee=employee,
             ))
         if mapped and mapped.get("employee_id"):
-            if mapped["hire_date"] and work_date < mapped["hire_date"]:
+            employment_review = _employment_review(mapped, work_date)
+            if employment_review == "before_hire_date":
                 findings.append(Finding(
                     "before_hire_date", "review",
                     f"입사일({mapped['hire_date']}) 이전의 기록입니다.",
+                    slot_code=slot_code, work_date=work_date, employee=employee,
+                ))
+            if employment_review == "after_end_date":
+                findings.append(Finding(
+                    "after_end_date", "review",
+                    f"재직 종료일({mapped['end_date']}) 이후의 기록입니다.",
                     slot_code=slot_code, work_date=work_date, employee=employee,
                 ))
             leave_coverage = leave_operations.approved_leave_coverage(
@@ -659,9 +683,12 @@ def apply_import(
             employee_id = mapped.get("employee_id")
             if not employee_id:
                 review_flag = "unmapped_slot"
-            elif mapped.get("employee_status") != "active":
+            elif employment_review := _employment_review(mapped, punch.work_date):
                 # §F: the raw event carries the flag too, not just the preview.
-                review_flag = "inactive_employee"
+                review_flag = (
+                    "inactive_employee" if employment_review == "after_end_date"
+                    else employment_review
+                )
             else:
                 review_flag = None
             key = dedupe_key(TERMINAL_ID, punch)
@@ -817,7 +844,9 @@ def _record_coverage(conn: sqlite3.Connection, import_run_id: int, parsed) -> No
 # Review flags the importer sets on attendance_days. They describe the state of
 # the derivation, so the importer may clear its own when the state changes —
 # and nothing else's.
-IMPORT_REVIEW_FLAGS = ("incomplete_day", "import_rolled_back")
+IMPORT_REVIEW_FLAGS = (
+    "incomplete_day", "import_rolled_back", "before_hire_date", "after_end_date",
+)
 
 
 def derive_attendance(
@@ -868,6 +897,12 @@ def derive_attendance(
         if existing and existing["confirmed_at"]:
             continue
 
+        employee = conn.execute(
+            "SELECT status AS employee_status, hire_date, end_date "
+            "FROM employees WHERE id = ?",
+            (employee_id,),
+        ).fetchone()
+        employment_review = _employment_review(dict(employee), work_date) if employee else None
         leave_coverage = leave_operations.approved_leave_coverage(conn, employee_id, work_date)
 
         if not times:
@@ -901,7 +936,10 @@ def derive_attendance(
                 written += 1
             continue
 
-        if leave_coverage["coverage"] != "none":
+        if employment_review in {"before_hire_date", "after_end_date"}:
+            status = "unknown"
+            review_flag = employment_review
+        elif leave_coverage["coverage"] != "none":
             leave_type = leave_coverage["leaveType"]
             status = "half_day" if leave_coverage["coverage"] in {"am", "pm"} else "sick_leave" if leave_type == "sick" else "leave"
             review_flag = "partial_leave_review" if leave_coverage["coverage"] in {"am", "pm"} else "leave_attendance_conflict"
@@ -924,7 +962,7 @@ def derive_attendance(
                 -- keep warning about it after the missing punch arrives.
                 -- Anything a human put there is left alone.
                 review_flag = CASE
-                    WHEN attendance_days.review_flag IN (?, ?) THEN excluded.review_flag
+                    WHEN attendance_days.review_flag IN (?, ?, ?, ?) THEN excluded.review_flag
                     ELSE COALESCE(attendance_days.review_flag, excluded.review_flag)
                 END,
                 last_import_run_id = COALESCE(excluded.last_import_run_id,

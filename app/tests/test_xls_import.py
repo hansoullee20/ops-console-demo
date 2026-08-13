@@ -277,6 +277,58 @@ def test_punch_before_hire_date_is_flagged(seeded, tmp_path):
     assert any(f["code"] == "before_hire_date" for f in preview.findings)
 
 
+@pytest.mark.parametrize(
+    ("hire_date", "end_date", "status", "expected_status", "expected_flag"),
+    [
+        ("2026-07-02", None, "active", "unknown", "before_hire_date"),
+        ("2025-01-01", "2026-06-30", "terminated", "unknown", "after_end_date"),
+        ("2025-01-01", "2026-07-31", "terminated", "normal", None),
+        ("2026-07-01", None, "active", "normal", None),
+        ("2025-01-01", "2026-07-01", "terminated", "normal", None),
+    ],
+    ids=["before-hire", "after-end", "historical-terminated", "on-hire", "on-end"],
+)
+def test_attendance_uses_inclusive_employment_dates(
+    seeded, tmp_path, hire_date, end_date, status, expected_status, expected_flag
+):
+    with db.transaction(seeded) as conn:
+        conn.execute(
+            "UPDATE employees SET hire_date = ?, end_date = ?, status = ? "
+            "WHERE employee_code = 'E001'",
+            (hire_date, end_date, status),
+        )
+
+    export = build_export(
+        tmp_path / "employment-boundary.XLS",
+        slots=[SlotSpec("001", "Fictional Slot", {1: ["07:20", "16:00"]})],
+    )
+    preview = _preview(export, seeded, tmp_path)
+    if expected_flag:
+        assert any(f["code"] == expected_flag for f in preview.findings)
+    _apply(preview, seeded, tmp_path)
+
+    with db.connection(seeded) as conn:
+        punches = conn.execute(
+            "SELECT punch_at, employee_id, review_flag, source_sheet, source_cell, "
+            "       source_hash, import_run_id FROM punch_events "
+            "WHERE import_run_id = ? ORDER BY punch_at",
+            (preview.import_run_id,),
+        ).fetchall()
+        attendance = conn.execute(
+            "SELECT status, review_flag, source FROM attendance_days "
+            "WHERE work_date = '2026-07-01'"
+        ).fetchone()
+
+    assert len(punches) == 2
+    assert all(row["employee_id"] is not None for row in punches)
+    assert all(row["source_sheet"] and row["source_cell"] and row["source_hash"] for row in punches)
+    expected_raw_flag = "inactive_employee" if expected_flag == "after_end_date" else expected_flag
+    assert {row["review_flag"] for row in punches} == {expected_raw_flag}
+    assert (attendance["status"], attendance["review_flag"], attendance["source"]) == (
+        expected_status, expected_flag, "fingerprint",
+    )
+
+
 def test_inactive_employee_is_flagged(seeded, tmp_path):
     with db.transaction(seeded) as conn:
         conn.execute("UPDATE employees SET status = 'suspended' WHERE employee_code = 'E001'")
