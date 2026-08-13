@@ -1,0 +1,30 @@
+name: Sync Okja G3.32 Status
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths:
+      - 'aihub/phone/sync_g332_status.py'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aihub-voice-test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python aihub/phone/sync_g332_status.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AIHUB_MASTER_EXECUTION_CHECKLIST.md AIHUB_HANDOFF.md
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: close G3.32 with verified evidence"
+          git push origin HEAD:aihub-voice-test
