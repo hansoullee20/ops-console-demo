@@ -55,6 +55,7 @@ Acceptable evidence:
 - G2.8 instrumentation is ready but the gate remains open: commits `fc87823`/`a506e61`, evaluator run `31679294780` and APK run `31679460462` provide the strict report path; the target Fold4 still needs one >=20-accepted-attempt session.
 - G3.1 is closed: commit `a1aa9c3` migrates the Android/bridge transcript round trip to the strict `okja.event.v1` envelope; contract run `31680385188` and APK run `31680385242` are green.
 - G3.3/G3.8 are closed: commit `f2a41f6` adds a durable at-most-once device-command boundary and capability manifest for TV/AC/phone finder with washer disabled; run `31681395404` and APK run `31681395431` are green. Physical integrations remain open.
+- G3.5 is closed and G6.18 is mechanically enforced: commit `15be362` adds a persisted confirm-before-escalate state machine whose only enabled escalation channel is family notification; safety run `31682270351` and APK run `31682270376` are green.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -250,7 +251,8 @@ Acceptable evidence:
 - [ ] **G3.4 Care/family event contract implemented** — P1  
   Wellness, symptom record, arrival/departure, ETA, notification, emergency escalation events.
 
-- [ ] **G3.5 LLM cannot directly bypass guarded emergency state machine** — P0.
+- [x] **G3.5 LLM cannot directly bypass guarded emergency state machine** — P0.
+  Evidence: commit `15be362` rejects agent/LLM sources from signal and response transitions, gives agent text a non-persisted/no-state-change advisory path, and requires a case/version/channel/expiry-bound HMAC policy authorization before family escalation. Run `31682270351` passes bypass, signature, replay, dismissal and timeout tests; APK run `31682270376` is green.
 
 ## G3-B. Profile/config schema
 
@@ -377,13 +379,17 @@ Acceptable evidence:
 ## G6-C. Emergency escalation
 
 - [ ] **G6.11 Detect → ask → wait → escalate state machine implemented** — P0.
+  Partial evidence: commit `15be362` persists awaiting-confirmation, ready, escalating and resolved states and enforces confirm/timeout before authorized family escalation. Keep unchecked until integrated detection, prompt/wait timing and device UI behavior are tested.
 - [ ] **G6.12 Senior “괜찮아” dismissal path tested** — P0.
+  Partial evidence: the safe/dismiss transition is unit-tested in run `31682270351`; keep unchecked until a senior-facing voice/UI dismissal is tested on device.
 - [ ] **G6.13 No-response path tested** — P0.
+  Partial evidence: only the trusted policy timer can submit timeout and it moves the case to ready—not directly to escalation—in run `31682270351`; keep unchecked until real wait timing and notification behavior are tested.
 - [ ] **G6.14 Multiple-family urgent notification tested** — P0.
 - [ ] **G6.15 Emergency telephony behavior tested on target hardware** — P0.
 - [ ] **G6.16 Korean privacy/regulatory review completed before external pilot** — P0 / LEGAL.
 - [ ] **G6.17 NFA/119 integration assumptions verified** — P0 / LEGAL.
-- [ ] **G6.18 Automatic 119 behavior remains disabled until validated/authorized** — P0.
+- [x] **G6.18 Automatic 119 behavior remains disabled until validated/authorized** — P0.
+  Evidence: commit `15be362` allowlists only `family_notification`; `emergency_services` authorization is rejected and emitted escalation events assert `automatic_emergency_services=false`. Run `31682270351` verifies the guard. G6.15–G6.17 remain open.
 
 **G6 PASS:** NO.
 

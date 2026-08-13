@@ -72,11 +72,12 @@
 - Clean evidence: contract run `31681395404` passes 16 phone-contract tests plus the 48-test wake/evaluator suite; APK run `31681395431` is green. G3.3 and the exact capability-flag DoD in G3.8 are closed.
 - Scope guard: passing contract tests closes the G3.3 command boundary, not physical integrations. G3.15/G3.16/G4.3/G4.4 remain open until real TV, AC and phone-finder adapters and devices are tested.
 
-### G3.5 guarded emergency state machine — active
+### G3.5 guarded emergency state machine — completed
 
-- Current task: create a persisted confirm-before-escalate state machine with explicit trusted signal/response sources. Agent/LLM output receives only a non-authoritative advisory path and cannot call transition or escalation adapters.
-- Escalation design in progress: require an HMAC authorization bound to case ID, exact state version, family-notification channel and short expiry. Emergency-services/119 remains outside the allowed channel registry.
-- Scope guard: G3.5 may close after bypass/state tests and clean CI. This does not close G6 detect/ask/wait hardware behavior, family delivery, telephony, 119 validation or any physical emergency test.
+- Commit `15be362` creates a persisted confirm-before-escalate state machine with explicit trusted signal/response sources. Agent/LLM output has only a non-authoritative advisory/status path; its text is not persisted and cannot call transition or escalation adapters.
+- Escalation requires an HMAC authorization bound to case ID, exact state version, family-notification channel and short expiry. Emergency-services/119 is absent from the allowed channel registry; exact input/authorization replays return the original event and content conflicts fail.
+- Clean evidence: run `31682270351` passes 26 phone safety/contract tests plus the 48-test wake/evaluator suite; APK run `31682270376` is green. G3.5 is closed, and G6.18's keep-119-disabled requirement is mechanically satisfied.
+- Scope guard: G6.11–G6.13 retain partial state-logic evidence but remain open for integrated detect/ask/wait UI and target-device behavior. Family delivery, telephony, 119 validation and every physical emergency test also remain open.
 
 ---
 
@@ -404,7 +405,7 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 4. G1.12/G1.13 script and split preparation is complete. While the human reviews are pending, keep G1.14 and large generation locked; do not reinterpret the completed preparation as corpus approval.
 5. Install the debug APK from run `31679460462` on the Fold4 and follow `V4_ANDROID_LATENCY_MEASUREMENT.md` for one >=20-accepted-attempt session; keep G2.8 unchecked until its strict report is preserved.
 6. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
-7. G3.1/G3.3/G3.8 are complete. Next, add guarded emergency-state behavior before any care or emergency producer is connected; do not let agent text become a privileged command/event source.
+7. G3.1/G3.3/G3.5/G3.8 are complete. Next, define the shared senior/personal profile and consent schema before wiring more daily-use or care producers; agent text remains non-privileged.
 
 ## 16. Do not repeat
 
