@@ -86,11 +86,12 @@
 - Clean evidence: run `31682851423` passes 36 phone contract/config tests plus the 48-test wake/evaluator suite; APK run `31682851417` is green. G3.6, G3.9 and G3.10 are closed.
 - Scope guard: G3.7 retains partial schema/default evidence but stays open until Android applies the accessibility settings. Profile UI, actual notification delivery and legal/pilot consent review remain open.
 
-### G3.4 care/family event contract — active
+### G3.4 care/family event contract — completed
 
-- Current task: add exact event/payload contracts for wellness check-ins, non-diagnostic symptom records, estimated/confirmed arrival and departure, family ETA and the notification request/delivery/failure lifecycle.
-- Consent enforcement in progress: health records require health-journal consent; caregiver delivery and family ETA require caregiver-sharing consent; notification targets/channels/categories must be enabled in the shared profile.
-- Scope guard: G3.4 may close on contract/test/build evidence. It does not claim sensors, notifications, family UI or care workflows are integrated end to end.
+- Commit `bec1fac` adds exact `okja.event.v1` payload/source/privacy/retention contracts for wellness check-ins, non-diagnostic symptom records, estimated/confirmed/corrected arrival and departure, family ETA and notification request/delivery/failure. The existing guarded emergency events in `15be362` complete the G3.4 event families.
+- Health records require health-journal consent; symptom sharing, caregiver delivery and family ETA require caregiver-sharing consent. Notification category, caregiver and channel must be enabled in the shared profile, bounded summary codes replace arbitrary sensitive prose, and the notification subject must match the envelope causation ID.
+- Clean evidence: evaluator/contract run `31683811764` passes all phone contracts plus the 48-test wake/evaluator suite; APK run `31683811759` is green. G3.4 is closed.
+- Scope guard: sensors, provider delivery, family UI, wellness/symptom UI and end-to-end care workflows remain open under their own gates.
 
 ---
 
@@ -129,7 +130,7 @@ Provisional hardware envelope only: ARM64, 4 GB real RAM preferred, 3 GB only if
 ## 3. Working assistant path
 
 ```text
-Android SpeechRecognizer
+Android SpeechRecognize
 → command text
 → length-prefixed TCP 127.0.0.1:8765
 → Ubuntu PRoot inside Termux
@@ -196,7 +197,7 @@ Purpose: simplify to `옥자` only, increase synthetic positive volume and stren
 Commits:
 
 ```text
-cab553adce4670c9381327d7c5a4c208ae27c3d9  v3 dataset generator
+cab553adce4670c9381327d7c5a4c208ae27c3d9  v3 dataset generato
 25b6f3fc218a5b9d33f4e79b339e47709a35902b  v3 config
 a128dd9a269e2b99dd7081abcbe9edcc545379e0  v3 workflow
 ```

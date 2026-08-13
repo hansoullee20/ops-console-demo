@@ -249,8 +249,9 @@ Acceptable evidence:
   TV, AC, phone finder now; washer capability reserved/disabled until integration exists.
   Evidence: commit `f2a41f6` adds strict target/action/parameter and time validation, durable SQLite idempotency reservation/result caching, concurrent duplicate suppression, content-conflict rejection and `okja.event.v1` command accepted/completed/failed output. Washer is mechanically disabled. Run `31681395404` and APK run `31681395431` are green; physical device flows remain separate gates.
 
-- [ ] **G3.4 Care/family event contract implemented** — P1  
+- [x] **G3.4 Care/family event contract implemented** — P1
   Wellness, symptom record, arrival/departure, ETA, notification, emergency escalation events.
+  Evidence: commit `bec1fac` adds exact consent-aware payload/source/privacy/retention contracts for the non-emergency care families, including causal notification references; guarded emergency event/state contracts are in `15be362`. Evaluator/contract run `31683811764` and APK run `31683811759` are green. Sensors, provider delivery and UI remain separate gates.
 
 - [x] **G3.5 LLM cannot directly bypass guarded emergency state machine** — P0.
   Evidence: commit `15be362` rejects agent/LLM sources from signal and response transitions, gives agent text a non-persisted/no-state-change advisory path, and requires a case/version/channel/expiry-bound HMAC policy authorization before family escalation. Run `31682270351` passes bypass, signature, replay, dismissal and timeout tests; APK run `31682270376` is green.
@@ -281,11 +282,14 @@ Acceptable evidence:
 - [ ] **G3.16 AC control implemented** — P1.
 - [ ] **G3.17 Phone finder implemented for senior** — P1.
 - [ ] **G3.18 Wellness check-in implemented** — P1.
+  Partial evidence: `bec1fac` defines consent-gated prompt/response events and mechanically requires both snooze and decline; keep unchecked until the Android workflow is implemented and tested.
 - [ ] **G3.19 Symptom journal implemented as record, not diagnosis** — P1.
+  Partial evidence: `bec1fac` permits only self-reported text/body area/severity and has no diagnosis field; keep unchecked until the journal UI, storage and sharing workflow are implemented.
 - [ ] **G3.20 Night/screen-off ambient behavior implemented** — P1.
 - [ ] **G3.21 Emergency full-screen UI implemented** — P1.
 - [ ] **G3.22 Family ETA banner implemented** — P1  
   Example: family member is on the way + approximate ETA.
+  Partial evidence: `bec1fac` defines the consent-gated ETA event with bounded status, ETA and sender identity; the banner/UI is not implemented.
 
 ## G3-D. Personal/caregiver UI
 
@@ -318,6 +322,7 @@ Acceptable evidence:
 - [ ] **G4.3 Family calling + phone finder verified end-to-end** — P0.
 - [ ] **G4.4 TV/AC actions verified on real devices** — P1.
 - [ ] **G4.5 Wellness prompts can be snoozed/declined** — P0.
+  Partial evidence: the `bec1fac` event contract rejects prompts that do not offer both choices and records both outcomes; pilot UI behavior remains unverified.
 - [ ] **G4.6 Health journal sharing policy is consented and reversible** — P0 / LEGAL + HUMAN.
 - [ ] **G4.7 Night mode does not disturb sleep; wake remains available** — P0.
 - [ ] **G4.8 119 안심콜 onboarding guidance implemented** — P1.
@@ -339,6 +344,7 @@ Acceptable evidence:
 - [ ] **G5.3 Arrival/departure fusion state machine implemented** — P2 / AI-ENG.
 - [ ] **G5.4 Sensor-offline is distinct from “no activity”** — P0.
 - [ ] **G5.5 User can correct wrong arrival/departure event** — P1.
+  Partial evidence: `bec1fac` reserves an explicit `corrected` status and user/UI source, but the correction workflow is not implemented.
 
 ## G5-B. Household identity / unknown presence
 
@@ -371,6 +377,7 @@ Acceptable evidence:
 - [ ] **G6.2 Night waking estimate validated** — P3.
 - [ ] **G6.3 Bathroom-transition estimate validated without bathroom camera** — P0.
 - [ ] **G6.4 UI uses “estimated” wording where signal is inferential** — P0.
+  Partial evidence: `bec1fac` requires every presence event to be labelled estimated, confirmed or corrected; the UI wording remains unverified.
 
 ## G6-B. Fall detection research
 
@@ -448,7 +455,7 @@ Acceptable evidence:
 
 ---
 
-# Current P0 queue — execute in this order
+# Current P0 queue — execute in this orde
 
 1. [ ] **P0-01 Fix/pin Korean Chatterbox smoke environment.**
 2. [ ] **P0-02 Fix smoke holdout semantics / add enough voices.**
