@@ -7,6 +7,7 @@ import android.media.AudioRecord;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
 import android.media.ToneGenerator;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Debug;
 import android.os.Handler;
@@ -23,11 +24,15 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+
+import org.json.JSONObject;
 
 /**
  * Experimental zero-cost wake detector.
@@ -54,6 +59,7 @@ public class TemplateWakeActivity extends Activity {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<Template> templates = new ArrayList<>();
+    private final List<Long> acceptedWakeLatenciesMs = new ArrayList<>();
 
     private TextView stateText;
     private TextView scoreText;
@@ -72,6 +78,8 @@ public class TemplateWakeActivity extends Activity {
     private int detections = 0;
     private double threshold = 4.0;
     private long cooldownUntil = 0;
+    private String diagnosticSessionId = "";
+    private String diagnosticModelSha = "";
 
     private long perfStarted;
     private long perfWall;
@@ -185,6 +193,7 @@ public class TemplateWakeActivity extends Activity {
 
     private void loadTemplates() {
         templates.clear();
+        acceptedWakeLatenciesMs.clear();
         enrolled = 0;
         for (int i = 0; i < TEMPLATE_COUNT; i++) {
             File f = templateFile(i);
@@ -343,6 +352,13 @@ public class TemplateWakeActivity extends Activity {
 
     private void startDetector() {
         if (detectorRunning || recordingTemplate || templates.size() < TEMPLATE_COUNT) return;
+        diagnosticModelSha = templateSetSha256();
+        if (diagnosticModelSha.isEmpty()) {
+            stateText.setText("등록 샘플 지문 생성 실패");
+            return;
+        }
+        diagnosticSessionId = "wake-latency-" + UUID.randomUUID();
+        acceptedWakeLatenciesMs.clear();
         diagnostics = new WakeDiagnosticRingBuffer(new File(getFilesDir(), "wake_diagnostics"));
         detectorRunning = true;
         detections = 0;
@@ -386,6 +402,7 @@ public class TemplateWakeActivity extends Activity {
         short[] segment = new short[MAX_SEGMENT];
         int segLen = 0;
         boolean speaking = false;
+        long speechStartedMonotonicMs = 0;
         int silenceFrames = 0;
         double noise = 250.0;
 
@@ -411,6 +428,9 @@ public class TemplateWakeActivity extends Activity {
 
                 if (!speaking && voiced) {
                     speaking = true;
+                    long frameDurationMs = Math.round(got * 1000.0 / SAMPLE_RATE);
+                    speechStartedMonotonicMs = Math.max(
+                            0L, SystemClock.elapsedRealtime() - frameDurationMs);
                     segLen = 0;
                     silenceFrames = 0;
                     int start = prePos;
@@ -427,9 +447,11 @@ public class TemplateWakeActivity extends Activity {
                     boolean end = silenceFrames >= 15 || segLen >= segment.length;
                     if (end) {
                         if (segLen >= MIN_SEGMENT && SystemClock.elapsedRealtime() >= cooldownUntil) {
-                            evaluate(Arrays.copyOf(segment, segLen));
+                            evaluate(Arrays.copyOf(segment, segLen),
+                                    speechStartedMonotonicMs, SystemClock.elapsedRealtime());
                         }
                         speaking = false;
+                        speechStartedMonotonicMs = 0;
                         segLen = 0;
                         silenceFrames = 0;
                     }
@@ -454,7 +476,8 @@ public class TemplateWakeActivity extends Activity {
         return pos;
     }
 
-    private void evaluate(short[] raw) {
+    private void evaluate(short[] raw, long speechStartedMonotonicMs,
+                          long segmentEndedMonotonicMs) {
         short[] pcm = Mfcc.trim(raw);
         if (pcm.length < MIN_SEGMENT) return;
         double[][] feat = Mfcc.extract(pcm);
@@ -471,16 +494,51 @@ public class TemplateWakeActivity extends Activity {
         double best = distances.get(0);
         double score = distances.size() >= 2 ? (best * 0.65 + distances.get(1) * 0.35) : best;
         boolean hit = score <= threshold;
+        long decisionMonotonicMs = SystemClock.elapsedRealtime();
+        long wakeLatencyMs = Math.max(0L, decisionMonotonicMs - speechStartedMonotonicMs);
+        long postSegmentProcessingMs = Math.max(0L, decisionMonotonicMs - segmentEndedMonotonicMs);
 
         WakeDiagnosticRingBuffer d = diagnostics;
         if (d != null && (hit || score <= threshold * DIAGNOSTIC_NEAR_THRESHOLD_MULTIPLIER)) {
+            JSONObject latencyMetadata = new JSONObject();
+            try {
+                latencyMetadata.put("latency_schema_version", 1);
+                latencyMetadata.put("latency_definition", "vad_onset_to_decision_monotonic");
+                latencyMetadata.put("measurement_clock", "android.os.SystemClock.elapsedRealtime");
+                latencyMetadata.put("session_id", diagnosticSessionId);
+                latencyMetadata.put("vad_onset_monotonic_ms", speechStartedMonotonicMs);
+                latencyMetadata.put("segment_end_monotonic_ms", segmentEndedMonotonicMs);
+                latencyMetadata.put("decision_monotonic_ms", decisionMonotonicMs);
+                latencyMetadata.put("segment_duration_ms",
+                        Math.max(0L, segmentEndedMonotonicMs - speechStartedMonotonicMs));
+                latencyMetadata.put("wake_latency_ms", wakeLatencyMs);
+                latencyMetadata.put("post_segment_processing_ms", postSegmentProcessingMs);
+                latencyMetadata.put("device_manufacturer", Build.MANUFACTURER);
+                latencyMetadata.put("device_model", Build.MODEL);
+                latencyMetadata.put("device_sdk_int", Build.VERSION.SDK_INT);
+                latencyMetadata.put("device_fingerprint", Build.FINGERPRINT);
+                latencyMetadata.put("app_version", BuildConfig.VERSION_NAME);
+            } catch (Exception ignored) {}
             d.markCandidate(score, threshold, hit,
-                    DIAGNOSTIC_MODEL_NAME, DIAGNOSTIC_MODEL_VERSION, "");
+                    DIAGNOSTIC_MODEL_NAME, DIAGNOSTIC_MODEL_VERSION,
+                    diagnosticModelSha, latencyMetadata);
         }
 
+        String latencySummary = "";
+        if (hit) {
+            acceptedWakeLatenciesMs.add(wakeLatencyMs);
+            latencySummary = String.format(Locale.US,
+                    "\nlatency %d ms · P50 %.0f · P95 %.0f · n=%d",
+                    wakeLatencyMs,
+                    percentile(acceptedWakeLatenciesMs, 0.50),
+                    percentile(acceptedWakeLatenciesMs, 0.95),
+                    acceptedWakeLatenciesMs.size());
+        }
+        final String latencyLine = latencySummary;
         main.post(() -> scoreText.setText(String.format(Locale.US,
-                "%s · distance %.2f / %.2f · 감지 %d회",
-                hit ? "MATCH" : "skip", score, threshold, detections + (hit ? 1 : 0))));
+                "%s · distance %.2f / %.2f · 감지 %d회%s",
+                hit ? "MATCH" : "skip", score, threshold,
+                detections + (hit ? 1 : 0), latencyLine)));
 
         if (hit) {
             cooldownUntil = SystemClock.elapsedRealtime() + 1800;
@@ -497,6 +555,39 @@ public class TemplateWakeActivity extends Activity {
                 }, 900);
             });
         }
+    }
+
+    private String templateSetSha256() {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            for (int i = 0; i < TEMPLATE_COUNT; i++) {
+                md.update((byte) i);
+                try (FileInputStream in = new FileInputStream(templateFile(i))) {
+                    int n;
+                    while ((n = in.read(buffer)) > 0) md.update(buffer, 0, n);
+                }
+            }
+            StringBuilder out = new StringBuilder(64);
+            for (byte b : md.digest()) {
+                out.append(String.format(Locale.US, "%02x", b & 0xff));
+            }
+            return out.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static double percentile(List<Long> values, double p) {
+        if (values.isEmpty()) return Double.NaN;
+        List<Long> sorted = new ArrayList<>(values);
+        Collections.sort(sorted);
+        if (sorted.size() == 1) return sorted.get(0);
+        double index = (sorted.size() - 1) * p;
+        int lo = (int) Math.floor(index);
+        int hi = (int) Math.ceil(index);
+        if (lo == hi) return sorted.get(lo);
+        return sorted.get(lo) + (sorted.get(hi) - sorted.get(lo)) * (index - lo);
     }
 
     private static double rms(short[] x, int n) {

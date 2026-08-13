@@ -51,6 +51,12 @@
 - Split enforcement preserves valid preassigned splits, rejects conflicts with engine/speaker/real/household holdouts, and fails on parent/template or normalized-text crossings. The full local suite passed 43 tests.
 - Clean-CI evidence on the same commit is green: evaluator run `31677969571`, data-smoke run `31677969581` (Kokoro + Chatterbox), MeloTTS run `31677969589`, and APK run `31677969572`. G1.12 and G1.13 are closed. Large generation remains locked while G1.5/G1.10 are open.
 
+### G2.8 target-device latency instrumentation — active
+
+- Audit finding: the offline evaluator already reports matched-event latency, but the live Android detector did not persist a monotonic speech-onset-to-decision measurement or identify the device, app, session and enrolled template set used for the sample.
+- Implementation in progress: record monotonic VAD onset, segment end and decision timestamps for accepted/near-threshold candidates; show accepted-event P50/P95 in the diagnostic UI; fingerprint the exact enrolled template files; and add a strict metadata-only report tool for one device/session.
+- Closure guard: keep G2.8 unchecked until the instrumented debug APK records at least 20 accepted wake attempts on the target Fold4 and the report validates a single device/session/model identity. APK/unit CI proves instrumentation readiness, not physical-device latency.
+
 ---
 
 ## 0. Fast restart

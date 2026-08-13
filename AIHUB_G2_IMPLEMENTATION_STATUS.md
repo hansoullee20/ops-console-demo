@@ -29,12 +29,6 @@ Implemented:
 
 The evaluator performs one-to-one event matching, counts duplicate/unmatched detections as false positives, and reports recall/miss, FPPH, false alarms/day, latency, group breakdowns and statistical confidence.
 
-### CI evidence
-
-`Okja v4 Evaluator Tests` run `31651625304` passed after adding benchmark-contract and privacy-ring-buffer unit coverage. The immediately preceding run `31651564822` failed only because a test incorrectly expected Python's `TemporaryDirectory` root itself not to exist; the assertion was corrected to verify that the logger creates no durable audio/event files before an explicit capture.
-
-## Implemented as reference/helper but not yet closed
-
 ### G2.3 candidate ring-buffer logger
 
 Reference implementation:
@@ -50,19 +44,50 @@ Behavior:
 - candidate metadata records score, threshold and accepted/rejected state;
 - saved WAVs carry SHA-256 and JSONL event metadata.
 
-**Not closed yet:** the Android helper is not yet wired into the live wake detector's scoring loop, so target-device candidate capture has not been demonstrated.
+The Android helper is wired into the active `AudioRecord` loop and accepted or
+near-threshold scoring path. Continuous audio stays volatile; only explicit
+diagnostic windows are persisted.
 
 ### G2.4 manual missed-wake capture
 
-Both reference and Android helpers expose a manual-miss capture primitive.
+Both reference and Android helpers expose a manual-miss capture primitive. The
+active-detector-only Android control invokes it and preserves the buffered
+window.
 
-**Not closed yet:** no live Android UI/control currently invokes it, and no target-device capture has been demonstrated.
+G2.3/G2.4 implementation evidence is commit
+`e8ffd3978a42b767f01c7c0df5ebe6f6e563a354` and APK run `31652333689`.
+
+### CI evidence
+
+Evaluator run `31677969571` passed the 43-test suite after the script/split
+gate work. The latest Android ring-buffer wiring build evidence remains APK run
+`31652333689`; newer latency instrumentation must receive its own clean build
+run before it is considered ready for physical measurement.
+
+## Implemented as reference/helper but not yet closed
+
+### G2.5 deterministic offline replay
+
+LiveKit v3 and openWakeWord adapters replay the same pinned audio/model inputs
+deterministically. G2.5 stays open until a pinned real v4 classifier replays the
+same input.
+
+### G2.8 target-device latency metrics
+
+Implementation in progress adds monotonic VAD-onset, segment-end and decision
+timestamps to Android candidate metadata, on-screen accepted-event P50/P95,
+exact enrolled-template SHA-256 identity, and the strict metadata-only
+`v4_android_latency_report.py` report. See
+`V4_ANDROID_LATENCY_MEASUREMENT.md`.
+
+**Not closed yet:** APK/unit CI establishes instrumentation readiness only.
+G2.8 requires at least 20 accepted attempts measured on the target Fold4 in a
+single detector session.
 
 ## Still open / next highest-value work
 
-1. Wire the Android ring buffer to the active microphone stream and near-threshold/accepted candidate scoring point without destabilizing the existing wake fallback/control path.
-2. Add a manual missed-wake action in the diagnostic UI.
-3. Verify Android build and then target-device capture behavior.
-4. Implement G2.5 deterministic offline model replay that emits the detection JSONL contract.
-5. Run v3 baseline and future candidates against identical TEST A/B/C/D material.
-6. Reconcile `AIHUB_MASTER_EXECUTION_CHECKLIST.md` with this evidence; do not mark Android/physical items complete until device evidence exists.
+1. Obtain clean evaluator and APK CI for the G2.8 instrumentation.
+2. Run the documented >=20-attempt Fold4 latency session and preserve its JSON report.
+3. Replay a pinned real v4 classifier over the existing fixed audio to close G2.5.
+4. Run v3 baseline and future candidates against identical TEST A/B/C/D material.
+5. Keep Android/physical checklist items open until device evidence exists.

@@ -9,6 +9,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -81,8 +82,24 @@ public final class WakeDiagnosticRingBuffer {
     /** Capture accepted or near-threshold candidate audio. */
     public synchronized String markCandidate(double score, double threshold, boolean accepted,
                                              String modelName, String modelVersion, String modelSha) {
+        return markCandidate(score, threshold, accepted,
+                modelName, modelVersion, modelSha, null);
+    }
+
+    /** Capture a candidate with additional structured diagnostic metadata. */
+    public synchronized String markCandidate(double score, double threshold, boolean accepted,
+                                             String modelName, String modelVersion, String modelSha,
+                                             JSONObject additionalMetadata) {
         JSONObject metadata = new JSONObject();
         try {
+            if (additionalMetadata != null) {
+                Iterator<String> keys = additionalMetadata.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    metadata.put(key, additionalMetadata.get(key));
+                }
+            }
+            // Identity fields are reserved and cannot be replaced by extensions.
             metadata.put("model_name", safe(modelName));
             metadata.put("model_version", safe(modelVersion));
             metadata.put("model_sha", safe(modelSha));
