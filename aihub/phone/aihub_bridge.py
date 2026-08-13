@@ -18,6 +18,7 @@ from okja_event_contract import (
     parse_transcript_request,
 )
 from okja_intent_confirmation import VoiceIntentSession
+from okja_lazy_agent_pool import LazyAgentPool
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -119,28 +120,26 @@ def intent_reply(kind: str, target: str | None, action: str | None, language: st
     raise ValueError(f"unsupported intent reply kind: {kind}")
 
 
-async def main():
-    grandma_options = ClaudeAgentOptions(
-        model="haiku",
-        max_turns=1,
-        cli_path=CLI_PATH,
-    )
-    personal_options = ClaudeAgentOptions(
-        model="sonnet",
-        max_turns=1,
-        cli_path=CLI_PATH,
-    )
+def build_options() -> dict[str, ClaudeAgentOptions]:
+    return {
+        "grandma": ClaudeAgentOptions(model="haiku", max_turns=1, cli_path=CLI_PATH),
+        "personal": ClaudeAgentOptions(model="sonnet", max_turns=1, cli_path=CLI_PATH),
+    }
 
-    grandma_lock = asyncio.Lock()
-    personal_lock = asyncio.Lock()
+
+async def main():
+    options = build_options()
+    profile_locks = {name: asyncio.Lock() for name in options}
     intent_session = VoiceIntentSession()
 
     async with AsyncExitStack() as stack:
-        grandma = await stack.enter_async_context(ClaudeSDKClient(options=grandma_options))
-        print("[AI Hub] Grandma profile ready: 옥자 / ko-KR / haiku")
-
-        personal = await stack.enter_async_context(ClaudeSDKClient(options=personal_options))
-        print("[AI Hub] Personal profile ready: AI Hub / ko-KR+en-US / sonnet")
+        pool = LazyAgentPool(
+            stack,
+            {
+                name: (lambda option=option: ClaudeSDKClient(options=option))
+                for name, option in options.items()
+            },
+        )
 
         async def handle(reader, writer):
             req = None
@@ -177,15 +176,7 @@ async def main():
                     await write_packet(writer, json.dumps(response, ensure_ascii=False))
                     return
 
-                if profile == "grandma":
-                    client = grandma
-                    lock = grandma_lock
-                    model = "haiku"
-                else:
-                    client = personal
-                    lock = personal_lock
-                    model = "sonnet"
-
+                model = "haiku" if profile == "grandma" else "sonnet"
                 prompt = make_prompt(profile, language, text)
                 started = time.perf_counter()
                 print(
@@ -194,7 +185,11 @@ async def main():
                     f"{profile}/{language}/{model} request"
                 )
 
-                async with lock:
+                async with profile_locks[profile]:
+                    was_ready = pool.ready(profile)
+                    client = await pool.get(profile)
+                    if not was_ready:
+                        print(f"[AI Hub] {profile}/{model} client initialized lazily")
                     await client.query(prompt)
                     reply = await collect_reply(client)
 
@@ -226,9 +221,11 @@ async def main():
                 except Exception:
                     pass
 
+        # Critical G3.32 ordering: open localhost first. No SDK client is created
+        # until a request actually reaches pool.get(profile).
         server = await asyncio.start_server(handle, HOST, PORT)
         sockets = ", ".join(str(s.getsockname()) for s in server.sockets or [])
-        print(f"[AI Hub] listening on {sockets}")
+        print(f"[AI Hub] listening on {sockets}; agent clients initialize on first use")
         print("[AI Hub] Test APK can switch between 옥자 and AI Hub profiles")
         async with server:
             await server.serve_forever()
