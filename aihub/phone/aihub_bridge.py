@@ -17,6 +17,7 @@ from okja_event_contract import (
     assistant_response,
     parse_transcript_request,
 )
+from okja_intent_confirmation import VoiceIntentSession
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -80,6 +81,44 @@ def make_prompt(profile: str, language: str, text: str) -> str:
     )
 
 
+def _action_label(target: str, action: str, language: str) -> str:
+    if language == "en-US":
+        labels = {
+            ("tv", "power_on"): "turn the TV on",
+            ("tv", "power_off"): "turn the TV off",
+            ("ac", "power_on"): "turn the air conditioner on",
+            ("ac", "power_off"): "turn the air conditioner off",
+            ("phone_finder", "ring"): "ring your phone",
+        }
+    else:
+        labels = {
+            ("tv", "power_on"): "TV를 켜기",
+            ("tv", "power_off"): "TV를 끄기",
+            ("ac", "power_on"): "에어컨을 켜기",
+            ("ac", "power_off"): "에어컨을 끄기",
+            ("phone_finder", "ring"): "휴대폰을 찾기",
+        }
+    return labels[(target, action)]
+
+
+def intent_reply(kind: str, target: str | None, action: str | None, language: str) -> str:
+    if kind == "confirmation_requested":
+        label = _action_label(target, action, language)
+        if language == "en-US":
+            return f"Should I {label}? Say confirm or cancel."
+        return f"{label}를 진행할까요? '확인' 또는 '취소'라고 말씀해주세요."
+    if kind == "confirmation_accepted":
+        label = _action_label(target, action, language)
+        if language == "en-US":
+            return f"Confirmed to {label}. No device action was executed because the physical adapter is not connected yet."
+        return f"{label} 확인했습니다. 아직 실제 기기 어댑터가 연결되지 않아 동작은 실행하지 않았습니다."
+    if kind == "confirmation_rejected":
+        return "Cancelled." if language == "en-US" else "취소했습니다."
+    if kind == "confirmation_retry":
+        return "Please say confirm or cancel." if language == "en-US" else "'확인' 또는 '취소'라고 말씀해주세요."
+    raise ValueError(f"unsupported intent reply kind: {kind}")
+
+
 async def main():
     grandma_options = ClaudeAgentOptions(
         model="haiku",
@@ -94,6 +133,7 @@ async def main():
 
     grandma_lock = asyncio.Lock()
     personal_lock = asyncio.Lock()
+    intent_session = VoiceIntentSession()
 
     async with AsyncExitStack() as stack:
         grandma = await stack.enter_async_context(ClaudeSDKClient(options=grandma_options))
@@ -110,12 +150,30 @@ async def main():
                 profile = req["profile"]
                 language = req["language"]
                 text = req["text"]
+                envelope = req["envelope"]
 
                 if not text:
                     response = assistant_response(
-                        req["envelope"],
+                        envelope,
                         "말씀을 다시 해주세요." if profile == "grandma" else "I didn't catch that.",
                     )
+                    await write_packet(writer, json.dumps(response, ensure_ascii=False))
+                    return
+
+                decision = intent_session.process(envelope)
+                for event in decision["events"]:
+                    print(
+                        f"[AI Hub] event={event['event_type']} id={event['event_id']} "
+                        f"correlation={event['correlation_id']}"
+                    )
+                if decision["kind"] != "assistant_query":
+                    reply = intent_reply(
+                        decision["kind"],
+                        decision.get("target"),
+                        decision.get("action"),
+                        language,
+                    )
+                    response = assistant_response(envelope, reply)
                     await write_packet(writer, json.dumps(response, ensure_ascii=False))
                     return
 
@@ -130,7 +188,6 @@ async def main():
 
                 prompt = make_prompt(profile, language, text)
                 started = time.perf_counter()
-                envelope = req["envelope"]
                 print(
                     f"[AI Hub] event={envelope['event_id']} "
                     f"correlation={envelope['correlation_id']} "
