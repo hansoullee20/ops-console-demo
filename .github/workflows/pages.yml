@@ -76,7 +76,7 @@ jobs:
           set -euo pipefail
           rm -rf _site
           mkdir -p _site
-          for f in index.html profile.css profile.js data-source.js import-ui.js phase4-ui.js demo-data.js mobile.html mobile.css mobile-period.css mobile-full.css mobile.js .nojekyll; do
+          for f in index.html profile.css profile.js data-source.js import-ui.js phase4-ui.js month-close-ui.js demo-data.js mobile.html mobile.css mobile-period.css mobile-full.css mobile.js .nojekyll; do
             cp "$f" "_site/$f"
           done
           ls -la _site
