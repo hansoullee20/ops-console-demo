@@ -27,6 +27,7 @@ PUBLIC_FILES = {
     "import-ui.js": "application/javascript; charset=utf-8",
     "phase4-ui.js": "application/javascript; charset=utf-8",
     "safety-ui.js": "application/javascript; charset=utf-8",
+    "month-close-ui.js": "application/javascript; charset=utf-8",
 }
 
 

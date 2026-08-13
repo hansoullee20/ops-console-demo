@@ -82,6 +82,11 @@ def correct_attendance(
     confirmation_token: str | None = None,
 ) -> CorrectionResult:
     """Update one attendance day and record the change. Does not commit."""
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try:
+        assert_range_open(conn, work_date, work_date)
+    except MonthCloseError as exc:
+        raise AttendanceCorrectionError(str(exc)) from exc
     if not changes:
         raise AttendanceCorrectionError("a correction must change at least one field")
 

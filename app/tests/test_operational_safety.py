@@ -5,6 +5,7 @@ from app import config,db,migrate
 from app.main import create_app
 from fastapi.testclient import TestClient
 from app.services import operational_safety as safety,xls_pipeline
+from app.services import leave_operations as leave
 from app.tests.fixtures.terminal_xls import SlotSpec,build_export
 
 @pytest.fixture
@@ -36,6 +37,16 @@ def test_multiple_exceptions_have_independent_lifecycle(operational):
     safety.transition_exception(c,one["id"],"resolved","증빙 확인")
     assert safety.exception_detail(c,two["id"])["status"]=="open";c.close()
 
+def test_leave_conflict_exceptions_use_actual_work_dates(operational):
+    path,a,_=operational;c=db.connect(path)
+    request=leave.create_leave(c,employee_id=a,leave_type='annual_leave',start_date='2026-08-10',end_date='2026-08-14');leave.approve_leave(c,request['id'])
+    run=c.execute("INSERT INTO import_runs(source_filename,source_sha256,stored_source_path,status)VALUES('fictional.xls','leave-date-hash','x','applied')").lastrowid
+    for day in ('2026-08-11','2026-08-13'):
+        c.execute("INSERT INTO punch_events(terminal_id,terminal_slot_code,employee_id,punch_at,work_date,punch_type,raw_payload,source_filename,source_sheet,source_row_no,source_column,source_cell,occurrence_index,cell_position,source_hash,dedupe_key,import_run_id,active_import_run_id) VALUES('T','001',?,?,?,'unknown','{}','fictional.xls','근태기록',1,1,'A1',0,0,'h',?,?,?)",(a,day+'T08:00:00',day,'d'+day,run,run))
+    c.commit();safety.reconcile(c,'2026-08-10','2026-08-14')
+    dates=[r[0] for r in c.execute("SELECT work_date FROM operational_exceptions WHERE exception_code='leave_attendance_conflict' ORDER BY work_date")]
+    assert dates==['2026-08-11','2026-08-13'];c.close()
+
 def test_manual_adjustment_preserves_raw_and_supersedes_history(operational,tmp_path):
     path,a,_=operational;c=db.connect(path)
     first=safety.create_adjustment(c,employee_id=a,work_date="2026-08-10",recognized_in_at="08:00",recognized_out_at="16:00",reason="관리자 확인")
@@ -63,6 +74,25 @@ def test_schedule_precedence_boundaries_and_overlap(operational):
     resolved=safety.resolve_schedule(c,a,'2026-08-09');assert resolved['isScheduled'] and resolved['source']=='employee_date_override'
     assert safety.resolve_schedule(c,a,'2026-08-01')['source']=='employee_schedule'
     assert safety.resolve_schedule(c,a,'2026-08-31')['source']=='employee_schedule';c.close()
+
+def test_scheduled_no_punch_requires_authoritative_employee_schedule(operational):
+    path,a,b=operational;c=db.connect(path)
+    # Weekday fallback and an explicit working site calendar are context only.
+    c.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working,label)VALUES('2026-08-04','working',1,'Fictional site day')")
+    safety.reconcile(c,'2026-08-03','2026-08-04')
+    assert not c.execute("SELECT 1 FROM operational_exceptions WHERE exception_code='scheduled_no_punch'").fetchone()
+    # A date-scoped employee schedule is authoritative.
+    safety.create_schedule(c,employee_id=a,effective_from='2026-08-05',effective_to='2026-08-05',weekday_mask='2')
+    safety.reconcile(c,'2026-08-05','2026-08-05')
+    assert c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-05' AND exception_code='scheduled_no_punch'",(a,)).fetchone()
+    # Explicit positive/negative employee date overrides are authoritative.
+    safety.set_schedule_date(c,employee_id=b,work_date='2026-08-06',is_scheduled=True)
+    safety.set_schedule_date(c,employee_id=b,work_date='2026-08-07',is_scheduled=False)
+    safety.reconcile(c,'2026-08-06','2026-08-07')
+    assert c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-06' AND exception_code='scheduled_no_punch'",(b,)).fetchone()
+    assert not c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-07' AND exception_code='scheduled_no_punch'",(b,)).fetchone()
+    assert not c.execute("SELECT 1 FROM attendance_days WHERE status IN ('absent','unauthorized_absence','misconduct')").fetchone()
+    c.close()
 
 def test_source_quality_is_site_scoped_and_sunday_is_quiet(operational):
     path,a,_=operational;c=db.connect(path)
@@ -124,8 +154,10 @@ def test_phase4_to_0008_upgrade_is_additive_and_idempotent(tmp_path):
     migrations=Path(config.MIGRATIONS_DIR);old=tmp_path/'old-migrations';old.mkdir()
     for source in migrations.glob('000[1-7]_*.sql'):(old/source.name).write_bytes(source.read_bytes())
     path=tmp_path/'phase4.db';backups=tmp_path/'backups';migrate.run_migrations(path,migrations_dir=old,backups_dir=backups);c=db.connect(path);c.execute("INSERT INTO employees(employee_code,name,hire_date)VALUES('LEGACY','가상 기존','2025-01-01')");c.commit();c.close()
-    result=migrate.run_migrations(path,backups_dir=backups);assert result.applied==[8] and result.backup_path and result.backup_path.exists()
-    again=migrate.run_migrations(path,backups_dir=backups);assert not again.applied
+    current=tmp_path/'v8-migrations';current.mkdir()
+    for source in migrations.glob('000[1-8]_*.sql'):(current/source.name).write_bytes(source.read_bytes())
+    result=migrate.run_migrations(path,migrations_dir=current,backups_dir=backups);assert result.applied==[8] and result.backup_path and result.backup_path.exists()
+    again=migrate.run_migrations(path,migrations_dir=current,backups_dir=backups);assert not again.applied
     c=db.connect(path);assert c.execute("SELECT COUNT(*) FROM employees").fetchone()[0]==1;assert c.execute("SELECT COUNT(*) FROM operational_exceptions").fetchone()[0]==0;c.close()
 
 def test_http_lifecycle_adjustment_and_overlap(operational,monkeypatch):
@@ -159,3 +191,77 @@ def test_schedule_history_can_be_retired_and_override_cancelled(operational,monk
     assert client.post(f"/api/v1/employees/{a}/schedule-dates/{override['id']}/cancel",json={'reason':'override corrected'}).status_code==200
     history=client.get(f'/api/v1/employees/{a}/schedules').json()
     assert history['schedules'][0]['status']=='retired' and history['dateOverrides'][0]['status']=='cancelled'
+
+
+def test_retirement_preserves_historical_schedule_and_explicit_correction_wins(operational):
+    path,a,_=operational;c=db.connect(path)
+    original=safety.create_schedule(c,employee_id=a,effective_from='2026-08-01',effective_to=None,weekday_mask='0,1,2,3,4')
+    safety.retire_schedule(c,original['id'],'future schedule ended',retirement_effective_from='2026-09-01')
+    historical=safety.resolve_schedule(c,a,'2026-08-03')
+    future=safety.resolve_schedule(c,a,'2026-09-01')
+    assert historical['isAuthoritative'] and historical['source']=='employee_schedule'
+    assert not future['isAuthoritative']
+    replacement=safety.create_schedule(c,employee_id=a,effective_from='2026-09-01',effective_to=None,weekday_mask='1,2,3,4,5')
+    assert safety.resolve_schedule(c,a,'2026-09-01')['evidenceId']==replacement['id']
+
+    correction=safety.create_schedule(c,employee_id=a,effective_from='2026-08-10',effective_to='2026-08-10',weekday_mask='0')
+    # Retire from its first effective date: this is an explicit historical correction,
+    # unlike ending a schedule for future dates.
+    safety.retire_schedule(c,correction['id'],'historical correction',retirement_effective_from='2026-08-10')
+    corrected=safety.set_schedule_date(c,employee_id=a,work_date='2026-08-10',is_scheduled=False,label='corrected history')
+    resolved=safety.resolve_schedule(c,a,'2026-08-10')
+    assert resolved['source']=='employee_date_override' and resolved['evidenceId']==corrected['id']
+    c.close()
+
+
+def test_finite_and_post_end_retirement_guard_only_actual_affected_range(operational):
+    path,a,b=operational;c=db.connect(path)
+    finite=safety.create_schedule(
+        c,employee_id=a,effective_from='2026-08-01',effective_to='2026-08-31',weekday_mask='',
+    )
+    # September is outside this finite schedule's affected range. These minimal
+    # close rows isolate the service guard; snapshot behavior is tested through
+    # the complete close workflow in test_month_close_integrity.py.
+    c.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-09',1,'closed','2','2',"
+        "'2026-10-01T00:00:00Z','operator','guard fixture',?)", ('0'*64,)
+    )
+    retired=safety.retire_schedule(
+        c,finite['id'],'finite historical end',retirement_effective_from='2026-08-15',
+    )
+    assert retired['retired_effective_from']=='2026-08-15'
+
+    ended=safety.create_schedule(
+        c,employee_id=b,effective_from='2026-08-01',effective_to='2026-08-31',weekday_mask='',
+    )
+    c.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-08',1,'closed','2','2',"
+        "'2026-09-01T00:00:00Z','operator','guard fixture',?)", ('0'*64,)
+    )
+    # Retiring after effective_to changes metadata only, not any August result.
+    post_end=safety.retire_schedule(
+        c,ended['id'],'retired after natural end',retirement_effective_from='2026-09-01',
+    )
+    assert post_end['status']=='retired'
+    assert safety.resolve_schedule(c,b,'2026-08-31')['isAuthoritative']
+    c.close()
+
+
+def test_future_effective_schedule_can_retire_without_explicit_api_date(operational,monkeypatch):
+    path,a,_=operational;monkeypatch.setattr(config,'DB_PATH',path)
+    conn=db.connect(path)
+    schedule=safety.create_schedule(
+        conn,employee_id=a,effective_from='2099-01-01',effective_to=None,weekday_mask='0')
+    conn.commit();conn.close()
+    client=TestClient(create_app())
+    response=client.post(
+        f'/api/v1/employees/{a}/schedules/{schedule["id"]}/retire',
+        json={'actor':'operator','reason':'future schedule cancelled'},
+    )
+    assert response.status_code==200
+    assert response.json()['retired_effective_from']=='2099-01-01'
+    frontend=Path('safety-ui.js').read_text(encoding='utf-8')
+    assert 'retirementEffectiveFrom:effective' in frontend
+    assert "prompt('일정 종료 적용일을 입력하세요. (YYYY-MM-DD)'" in frontend

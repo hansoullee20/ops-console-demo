@@ -27,7 +27,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import config, migrate
-from app.routers import api, frontend, health, imports, phase4, safety, slots
+from app.routers import api, frontend, health, imports, month_close, phase4, safety, slots
 from app.services import import_watch
 
 logger = logging.getLogger("ops_console")
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(slots.router)
     app.include_router(phase4.router)
     app.include_router(safety.router)
+    app.include_router(month_close.router)
     # last: its catch-all /{filename} route must not shadow the API
     app.include_router(frontend.router)
     return app

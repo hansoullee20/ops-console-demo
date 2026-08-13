@@ -77,6 +77,9 @@ def create_mapping(
     terminal_id: str = "default",
     actor_id: str = "operator",
 ) -> int:
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,effective_from,effective_to)
+    except MonthCloseError as exc: raise MappingError(str(exc)) from exc
     slot_code = slot_code.strip()
     effective_to = effective_to or None
     if not slot_code or not effective_from:
@@ -112,6 +115,10 @@ def close_mapping(
     *, actor_id: str = "operator",
 ) -> None:
     row = conn.execute("SELECT * FROM terminal_slots WHERE id = ?", (mapping_id,)).fetchone()
+    from app.services.month_close import MonthCloseError,assert_range_open
+    if row:
+        try: assert_range_open(conn,row["effective_from"],effective_to)
+        except MonthCloseError as exc: raise MappingError(str(exc)) from exc
     if row is None or row["status"] == "retired":
         raise MappingError("연결 이력을 찾을 수 없습니다.")
     if row["effective_to"] is not None:
@@ -147,6 +154,10 @@ def cancel_mapping(
     if len(reason.strip()) < 2:
         raise MappingError("연결 취소 이유를 입력하십시오.")
     row = conn.execute("SELECT * FROM terminal_slots WHERE id = ?", (mapping_id,)).fetchone()
+    from app.services.month_close import MonthCloseError,assert_range_open
+    if row:
+        try: assert_range_open(conn,row["effective_from"],row["effective_to"])
+        except MonthCloseError as exc: raise MappingError(str(exc)) from exc
     if row is None or row["status"] == "retired":
         raise MappingError("취소할 연결 이력을 찾을 수 없습니다.")
     used = conn.execute(
@@ -179,6 +190,10 @@ def correct_mapping(
     if conn.execute("SELECT 1 FROM employees WHERE id = ?", (employee_id,)).fetchone() is None:
         raise MappingError("선택한 직원을 찾을 수 없습니다.")
     row = conn.execute("SELECT * FROM terminal_slots WHERE id = ?", (mapping_id,)).fetchone()
+    from app.services.month_close import MonthCloseError,assert_range_open
+    if row:
+        try: assert_range_open(conn,row["effective_from"],row["effective_to"])
+        except MonthCloseError as exc: raise MappingError(str(exc)) from exc
     if row is None or row["status"] != "mapped":
         raise MappingError("정정할 연결 이력을 찾을 수 없습니다.")
     used = conn.execute(

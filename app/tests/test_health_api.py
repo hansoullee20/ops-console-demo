@@ -165,7 +165,7 @@ def test_the_write_surface_is_deliberately_scoped():
         "/api/v1/imports", "/api/v1/terminal-slots",
         "/api/v1/leave-operations", "/api/v1/replacement-operations",
         "/api/v1/operations/exceptions", "/api/v1/attendance/manual-adjustments",
-        "/api/v1/employees/",
+        "/api/v1/employees/", "/api/v1/month-close/",
     )
     assert writable and all(path.startswith(allowed_prefixes) for path in writable), (
         f"a write endpoint outside the operational flows: {sorted(writable)}"

@@ -185,6 +185,9 @@ def create_leave(conn: sqlite3.Connection, *, employee_id: int, leave_type: str,
                  evidence_note: str | None = None,
                  evidence_checked_date: str | None = None,
                  actor: str = "operator") -> dict:
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try: assert_range_open(conn, start_date, end_date)
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
     if start_date[:4] != end_date[:4]:
         raise LeaveError("cross-year leave must be registered as one request per year")
     employee = _employee(conn, employee_id)
@@ -298,6 +301,9 @@ def _sync_attendance(conn: sqlite3.Connection, employee_id: int, dates: set[str]
 
 def approve_leave(conn: sqlite3.Connection, leave_id: int, *, actor: str = "operator") -> dict:
     row = _get(conn, leave_id)
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try: assert_range_open(conn, row["start_date"], row["end_date"])
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
     if row["status"] != "requested":
         raise LeaveError("승인 대기 중인 휴가만 승인할 수 있습니다.")
     before = dict(row); now = _now()
@@ -316,6 +322,11 @@ def correct_leave(conn: sqlite3.Connection, leave_id: int, *, employee_id: int,
                   evidence_note: str | None = None, evidence_checked_date: str | None = None,
                   actor: str = "operator") -> dict:
     old = _get(conn, leave_id)
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try:
+        assert_range_open(conn, old["start_date"], old["end_date"])
+        assert_range_open(conn, start_date, end_date)
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
     if old["status"] in {"cancelled", "rejected"}:
         raise LeaveError("취소되거나 반려된 휴가는 정정할 수 없습니다.")
     if start_date[:4] != end_date[:4]:
@@ -354,6 +365,9 @@ def correct_leave(conn: sqlite3.Connection, leave_id: int, *, employee_id: int,
 def cancel_leave(conn: sqlite3.Connection, leave_id: int, reason: str, *, actor: str = "operator") -> dict:
     if len(reason.strip()) < 2: raise LeaveError("취소 이유를 입력하십시오.")
     row = _get(conn, leave_id)
+    from app.services.month_close import MonthCloseError, assert_range_open
+    try: assert_range_open(conn, row["start_date"], row["end_date"])
+    except MonthCloseError as exc: raise LeaveError(str(exc)) from exc
     if row["status"] == "cancelled": raise LeaveError("이미 취소된 휴가입니다.")
     before = dict(row); now = _now()
     conn.execute("UPDATE leave_requests SET status='cancelled',cancelled_at=?,updated_at=? WHERE id=?", (now, now, leave_id))
