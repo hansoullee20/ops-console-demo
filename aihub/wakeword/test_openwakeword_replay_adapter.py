@@ -62,8 +62,8 @@ class OpenWakeWordReplayAdapterTests(unittest.TestCase):
             embedding.write_bytes(b"fixture")
             seen_paths = []
 
-            def factory(model_path, melspec_path, embedding_path):
-                seen_paths.append((model_path, melspec_path, embedding_path))
+            def factory(model_path, melspec_path, embedding_path, seed):
+                seen_paths.append((model_path, melspec_path, embedding_path, seed))
                 return lambda _frame: {"okja_v3": 0.75}
 
             rows = replay_wav(
@@ -71,12 +71,13 @@ class OpenWakeWordReplayAdapterTests(unittest.TestCase):
                 model_path=model,
                 melspec_model_path=melspec,
                 embedding_model_path=embedding,
+                initialization_seed=17,
                 model_name=None,
                 threshold=0.5,
                 predictor_factory=factory,
             )
 
-            self.assertEqual(seen_paths, [(model, melspec, embedding)])
+            self.assertEqual(seen_paths, [(model, melspec, embedding, 17)])
             self.assertEqual(rows[0]["model_name"], "okja_v3")
 
     def test_missing_feature_model_is_rejected(self):
@@ -95,6 +96,7 @@ class OpenWakeWordReplayAdapterTests(unittest.TestCase):
                     model_path=model,
                     melspec_model_path=root / "missing.onnx",
                     embedding_model_path=embedding,
+                    initialization_seed=0,
                     model_name=None,
                     threshold=0.5,
                     predictor_factory=lambda *_paths: lambda _frame: {},

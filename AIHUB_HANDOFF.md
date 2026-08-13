@@ -18,7 +18,8 @@
 - First real run `31669829292` failed after package installation and input SHA verification because the openWakeWord `0.6.0` wheel did not contain `melspectrogram.onnx` or `embedding_model.onnx`. This is a missing-runtime-resource failure, not a classifier incompatibility result.
 - Fix in progress: fetch those two official openWakeWord `v0.5.1` release assets separately, pin and verify both hashes, and pass their paths explicitly to the runtime. Do not use an untracked mutable download into `site-packages` as benchmark evidence.
 - Recovery adapter commit `0343ef8` requires both feature-model paths explicitly and fails closed if either is absent. Evaluator run `31670415113` passed all 32 tests.
-- Second real run `31670415071` is discovering the hashes of the two versioned release assets and exercising the corrected wiring. Do not promote its output to benchmark evidence until those observed hashes are committed as verification inputs and a fresh run passes.
+- Second real run `31670415071` loaded the explicit feature models, then failed the three-repeat determinism guard at threshold `0.50`: attempt 1 emitted one detection and attempt 2 differed. openWakeWord `0.6.0` seeds its feature buffer from four seconds of random PCM on every model construction, so this is an uncontrolled runtime-initialization result, not benchmark evidence.
+- Recovery in progress: pin `embedding_model.onnx` SHA-256 `70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f`, pin `melspectrogram.onnx` SHA-256 `ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f`, and make NumPy initialization seed `0` an explicit adapter/manifest input. Require a fresh 3/3 deterministic run before recording results.
 
 ---
 

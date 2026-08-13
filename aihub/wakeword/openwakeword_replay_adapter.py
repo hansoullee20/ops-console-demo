@@ -21,7 +21,7 @@ DEFAULT_FRAME_SAMPLES = 1280  # 80 ms at 16 kHz
 DEFAULT_DEBOUNCE_MS = 2000
 
 FramePredictor = Callable[[Sequence[int]], Mapping[str, float]]
-PredictorFactory = Callable[[Path, Path, Path], FramePredictor]
+PredictorFactory = Callable[[Path, Path, Path, int], FramePredictor]
 
 
 def installed_openwakeword_version() -> str:
@@ -46,6 +46,7 @@ def create_openwakeword_predictor(
     model_path: Path,
     melspec_model_path: Path,
     embedding_model_path: Path,
+    initialization_seed: int,
 ) -> FramePredictor:
     try:
         import numpy as np
@@ -55,6 +56,9 @@ def create_openwakeword_predictor(
             "openWakeWord inference dependencies are unavailable; install openwakeword"
         ) from exc
 
+    # openWakeWord 0.6.0 primes its feature buffer from random PCM. Pinning
+    # NumPy's seed makes that native initialization reproducible per replay.
+    np.random.seed(initialization_seed)
     model = Model(
         wakeword_models=[str(model_path)],
         inference_framework="onnx",
@@ -129,6 +133,7 @@ def replay_wav(
     model_path: Path,
     melspec_model_path: Path,
     embedding_model_path: Path,
+    initialization_seed: int,
     model_name: str | None,
     threshold: float,
     frame_samples: int = DEFAULT_FRAME_SAMPLES,
@@ -141,12 +146,15 @@ def replay_wav(
         raise ValueError(f"melspectrogram model file does not exist: {melspec_model_path}")
     if not embedding_model_path.is_file():
         raise ValueError(f"embedding model file does not exist: {embedding_model_path}")
+    if not 0 <= initialization_seed <= 2**32 - 1:
+        raise ValueError("initialization_seed must be in [0, 2**32 - 1]")
     resolved_name = model_name or model_path.stem
     samples = load_pcm16_wav(audio_path)
     predictor = predictor_factory(
         model_path,
         melspec_model_path,
         embedding_model_path,
+        initialization_seed,
     )
     return replay_stream(
         samples,
@@ -164,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--melspec-model", type=Path, required=True)
     parser.add_argument("--embedding-model", type=Path, required=True)
+    parser.add_argument("--initialization-seed", type=int, required=True)
     parser.add_argument("--model-name")
     parser.add_argument("--threshold", type=float, required=True)
     parser.add_argument("--expected-engine-version", required=True)
@@ -180,6 +189,7 @@ def main() -> int:
         model_path=args.model,
         melspec_model_path=args.melspec_model,
         embedding_model_path=args.embedding_model,
+        initialization_seed=args.initialization_seed,
         model_name=args.model_name,
         threshold=args.threshold,
         frame_samples=args.frame_samples,
