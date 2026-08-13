@@ -56,6 +56,7 @@ Acceptable evidence:
 - G3.1 is closed: commit `a1aa9c3` migrates the Android/bridge transcript round trip to the strict `okja.event.v1` envelope; contract run `31680385188` and APK run `31680385242` are green.
 - G3.3/G3.8 are closed: commit `f2a41f6` adds a durable at-most-once device-command boundary and capability manifest for TV/AC/phone finder with washer disabled; run `31681395404` and APK run `31681395431` are green. Physical integrations remain open.
 - G3.5 is closed and G6.18 is mechanically enforced: commit `15be362` adds a persisted confirm-before-escalate state machine whose only enabled escalation channel is family notification; safety run `31682270351` and APK run `31682270376` are green.
+- G3.6/G3.9/G3.10 are closed: commit `1434c3f` adds one senior/personal schema with guarded caregiver preferences and five independent consent records; run `31682851423` and APK run `31682851417` are green. Android UI/delivery remains open.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -256,14 +257,18 @@ Acceptable evidence:
 
 ## G3-B. Profile/config schema
 
-- [ ] **G3.6 One shared profile schema supports senior + personal modes** — P0.
+- [x] **G3.6 One shared profile schema supports senior + personal modes** — P0.
+  Evidence: commit `1434c3f` adds `okja.profile.v1` and one runtime validator/default factory for both modes, with identical top-level structure and tested mode-specific safe defaults. Run `31682851423` and APK run `31682851417` are green.
 - [ ] **G3.7 Senior accessibility settings implemented** — P1  
   Large type, solar+lunar date, quiet hours/night mode, simple quick actions.
+  Partial evidence: commit `1434c3f` models all settings and gives senior profiles extra-large text, 72dp targets, solar+lunar display, quiet/night mode, local wake availability and simple TV/AC/phone-finder defaults. Keep unchecked until Android consumes and visually verifies them.
 - [x] **G3.8 Device capability flags implemented** — P1
   TV=true, AC=true, washer future/hidden until connected.
   Evidence: `capability_manifest()` in commit `f2a41f6` reports TV/AC/phone finder enabled with adapter-required runtime and washer `enabled=false`/`runtime=disabled` with a reserved-until-integration reason; contract tests enforce the manifest.
-- [ ] **G3.9 Family/caregiver notification preferences implemented** — P1.
-- [ ] **G3.10 Privacy/health/camera/benchmark consents are separate fields** — P0.
+- [x] **G3.9 Family/caregiver notification preferences implemented** — P1.
+  Evidence: commit `1434c3f` validates enabled/disabled notification preferences, unique caregiver IDs/channels, per-event choices, quiet-hours behavior and caregiver/health consent dependencies. Run `31682851423` is green; actual delivery remains G3.22/G4 work.
+- [x] **G3.10 Privacy/health/camera/benchmark consents are separate fields** — P0.
+  Evidence: `okja.profile.v1` in commit `1434c3f` requires independent essential-product, health-journal, caregiver-sharing, camera and benchmark/research records with separate status, policy version and decision timestamp; tests prove mixed grant/decline choices and reject bundled/unknown consent fields.
 
 ## G3-C. Senior UI
 

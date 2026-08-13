@@ -79,11 +79,12 @@
 - Clean evidence: run `31682270351` passes 26 phone safety/contract tests plus the 48-test wake/evaluator suite; APK run `31682270376` is green. G3.5 is closed, and G6.18's keep-119-disabled requirement is mechanically satisfied.
 - Scope guard: G6.11–G6.13 retain partial state-logic evidence but remain open for integrated detect/ask/wait UI and target-device behavior. Family delivery, telephony, 119 validation and every physical emergency test also remain open.
 
-### G3.6/G3.9/G3.10 shared profile and consent schema — active
+### G3.6/G3.9/G3.10 shared profile and consent schema — completed
 
-- Current task: define one fail-closed schema for both senior and personal profiles, including accessibility preferences, device capability choices, caregiver notification preferences and versioned consent records.
-- Consent design in progress: essential product, health journal, caregiver sharing, camera and benchmark/research are independent exact fields; caregiver notifications require caregiver-sharing consent, and health-related sharing also requires health consent.
-- Scope guard: schema/default/test completion may close the profile/notification/consent contract items. It does not close senior runtime accessibility, profile UI, actual notifications or legal/pilot consent review.
+- Commit `1434c3f` defines one fail-closed schema for both senior and personal profiles, including accessibility preferences, device capability choices, caregiver notification preferences and versioned consent records. Senior defaults use extra-large text, 72dp targets, solar+lunar display, quiet/night mode, local wake availability and simple device actions.
+- Essential product, health journal, caregiver sharing, camera and benchmark/research are independent exact consent records. Caregiver notifications require caregiver-sharing consent; health-related sharing also requires health consent; washer cannot be enabled.
+- Clean evidence: run `31682851423` passes 36 phone contract/config tests plus the 48-test wake/evaluator suite; APK run `31682851417` is green. G3.6, G3.9 and G3.10 are closed.
+- Scope guard: G3.7 retains partial schema/default evidence but stays open until Android applies the accessibility settings. Profile UI, actual notification delivery and legal/pilot consent review remain open.
 
 ---
 
@@ -411,7 +412,7 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 4. G1.12/G1.13 script and split preparation is complete. While the human reviews are pending, keep G1.14 and large generation locked; do not reinterpret the completed preparation as corpus approval.
 5. Install the debug APK from run `31679460462` on the Fold4 and follow `V4_ANDROID_LATENCY_MEASUREMENT.md` for one >=20-accepted-attempt session; keep G2.8 unchecked until its strict report is preserved.
 6. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
-7. G3.1/G3.3/G3.5/G3.8 are complete. Next, define the shared senior/personal profile and consent schema before wiring more daily-use or care producers; agent text remains non-privileged.
+7. G3.1/G3.3/G3.5/G3.6/G3.8/G3.9/G3.10 are complete. Next, apply the shared profile to Android runtime/UI before claiming senior accessibility or notification delivery; agent text remains non-privileged.
 
 ## 16. Do not repeat
 
