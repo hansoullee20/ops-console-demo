@@ -1,6 +1,6 @@
 # G3.31 — Microphone-off / offline / error-state evidence
 
-Status: implemented; close only after the integration-contract CI run is green.
+Status: COMPLETE — software trust-state contract verified in CI; physical Fold4 endurance remains separate.
 
 ## Scope
 
@@ -20,7 +20,7 @@ G3.31 requires the product voice path to distinguish and test microphone-off, of
 - Policy tests: `aihub/phone/test_okja_voice_ui_states.py`.
 - Live Android wiring tests: `aihub/phone/test_android_voice_ui_integration.py` reads the actual `MainActivity.java` and fails if the MIC_OFF destruction/blocking path, permission-gated re-enable path, offline degraded path, recovery path, or shared state guards are removed.
 - Android compilation evidence before the integration-contract addition: APK run `31693035202` succeeded for the live `MainActivity` trust-state implementation.
-- Integration-contract run: `31693382427` (must be green before G3.31 is marked complete).
+- Final integration-contract run `31693447185` passed after correcting one over-specific test assertion; APK build `31693447195` also passed. The earlier run `31693382427` is retained as failed-test evidence, not product-failure evidence.
 
 ## Closure boundary
 

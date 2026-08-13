@@ -11,6 +11,15 @@
 
 ## Active continuation log — 2026-08-13
 
+### G3.2/G3.31 voice lifecycle and trust-state continuation — completed
+
+- Starting parent checkpoint was evidence commit `0dc65b1`; branch already contained `88fd83f` when work resumed. That commit completed the recognizer-owned wake/listening/transcript lifecycle and bounded volatile event ledger.
+- Commit `2f2f892` adds exact intent and explicit confirmation event contracts/producers on the real transcript bridge. Recognized TV/AC/phone-finder requests require a second spoken confirmation and remain explicitly unexecuted when no physical adapter exists. Contract run `31692595222` and APK run `31692595239` are green. G3.2 is closed; physical integrations remain separate gates.
+- G3.31 audit found the old “wake word off” control was not MIC_OFF because manual talk could still activate the recognizer. The live activity now has explicit READY/LISTENING/THINKING/MIC_OFF/OFFLINE_DEGRADED/ERROR_RECOVERY states; MIC_OFF destroys/nulls SpeechRecognizer and blocks both manual and automatic input; bridge and recognizer/TTS failures render degraded/recovery states.
+- A first live-source integration test run `31693382427` failed because the test over-specified the bridge-state assignment spelling; the implementation was correct. The assertion was corrected to verify the actual degraded-result flow. Final integration run `31693447185` and APK run `31693447195` both pass. G3.31 is closed at the software-contract level. G3.29, G3.30 and G3.33 remain open for physical Fold4 endurance/full-cycle evidence.
+- Durable records: `aihub/phone/G3_2_CORE_VOICE_EVIDENCE.md` and `aihub/phone/G3_31_VOICE_TRUST_STATE_EVIDENCE.md`.
+
+
 - Completed subtask: replay the exact pinned v3 ONNX and WAV through a second fully local/open runtime, openWakeWord `0.6.0`.
 - Compatibility basis: openWakeWord accepts custom ONNX classifiers, derives the temporal embedding length from the model input shape, and processes 16 kHz PCM in 1280-sample (80 ms) streaming frames. The LiveKit v3 classifier uses a 16-frame × 96-feature input.
 - Evidence policy: pin package version, model/audio hashes, thresholds, frame size and adapter source; require three identical replays before recording evidence.

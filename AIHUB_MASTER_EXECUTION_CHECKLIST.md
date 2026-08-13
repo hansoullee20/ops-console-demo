@@ -57,6 +57,8 @@ Acceptable evidence:
 - G3.3/G3.8 are closed: commit `f2a41f6` adds a durable at-most-once device-command boundary and capability manifest for TV/AC/phone finder with washer disabled; run `31681395404` and APK run `31681395431` are green. Physical integrations remain open.
 - G3.5 is closed and G6.18 is mechanically enforced: commit `15be362` adds a persisted confirm-before-escalate state machine whose only enabled escalation channel is family notification; safety run `31682270351` and APK run `31682270376` are green.
 - G3.6/G3.9/G3.10 are closed: commit `1434c3f` adds one senior/personal schema with guarded caregiver preferences and five independent consent records; run `31682851423` and APK run `31682851417` are green. Android UI/delivery remains open.
+- G3.2 is closed: `88fd83f` completes the live recognizer lifecycle and `2f2f892` adds real intent/confirmation producers; contract run `31692595222` and APK run `31692595239` are green.
+- G3.31 is closed at the software-contract level: live MIC_OFF destroys microphone access, offline bridge and recovery states are explicit, integration run `31693447185` and APK run `31693447195` are green. Physical Fold4 reliability remains G3.29/G3.30/G3.33.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -241,9 +243,9 @@ Acceptable evidence:
   Required fields: schema version, event ID, timestamps, device/profile/session/correlation IDs, source, severity, privacy/retention.
   Evidence: commit `a1aa9c3` adds the strict `okja.event.v1` schema plus Python/Android validators and migrates the real `transcript.final` -> `assistant.response/failed` transport with device/profile/session/correlation/causation preservation and volatile privacy classification. Contract run `31680385188` and APK run `31680385242` are green.
 
-- [ ] **G3.2 Core voice events implemented** — P0  
+- [x] **G3.2 Core voice events implemented** — P0
   `wake.candidate/detected/rejected`, listening, transcript, intent, confirmation, command accepted/failed.
-  Partial evidence: commit `a1aa9c3` emits/validates wake detected, listening started, transcript final and assistant result events on the Android/bridge path; commit `f2a41f6` emits replay-safe command accepted/completed/failed events from the guarded boundary. Keep unchecked until remaining wake candidate/rejection, transcript/listening failure, intent and confirmation producers exist.
+  Evidence: commit `88fd83f` makes the live Android recognizer lifecycle observable with wake candidate/detected/rejected, listening start/stop/failure and transcript partial/final/failure events in a bounded volatile ledger. Commit `2f2f892` adds exact bridge-side intent requested/resolved/failed and explicit two-turn confirmation requested/accepted/rejected producers while refusing to pretend a physical device action executed without an adapter. Contract run `31692595222` and APK run `31692595239` are green. Durable record: `aihub/phone/G3_2_CORE_VOICE_EVIDENCE.md`.
 
 - [x] **G3.3 Device command contract implemented and idempotent** — P0
   TV, AC, phone finder now; washer capability reserved/disabled until integration exists.
@@ -305,7 +307,8 @@ Acceptable evidence:
 
 - [ ] **G3.29 Fold4 sustained idle measurement completed** — P0 / HUMAN.
 - [ ] **G3.30 >=20 wake attempts + full cycles measured** — P0 / HUMAN.
-- [ ] **G3.31 Microphone-off/offline/error states tested** — P0.
+- [x] **G3.31 Microphone-off/offline/error states tested** — P0.
+  Evidence: commits through `a33117f` add explicit READY/LISTENING/THINKING/MIC_OFF/OFFLINE_DEGRADED/ERROR_RECOVERY policy and wire it into the live Android activity. MIC_OFF destroys and nulls `SpeechRecognizer`, disables manual talk and automatic wake, and permission-gates re-enable; bridge failures enter a retryable degraded state; recognizer/TTS failures enter recovery. State plus live-source integration tests pass in run `31693447185`; APK build `31693447195` is green. Durable record: `aihub/phone/G3_31_VOICE_TRUST_STATE_EVIDENCE.md`. Fold4 endurance remains separate under G3.29/G3.30/G3.33.
 - [ ] **G3.32 Bridge startup made lazy/resilient** — P1.
 - [ ] **G3.33 24 h app stability smoke completed** — P0 / HUMAN.
 
