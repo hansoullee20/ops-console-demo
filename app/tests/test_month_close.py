@@ -22,6 +22,7 @@ def test_reconciliation_blocking_policy_and_lifecycle(migrated_db):
     path = operational_db(migrated_db); conn = db.connect(path)
     employee = conn.execute("INSERT INTO employees(employee_code,name,hire_date,end_date) VALUES('MC1','가상마감01','2026-08-03','2026-08-03')").lastrowid
     exception = operational_safety.ensure_exception(conn, code="scheduled_no_punch", severity="review", scope="employee", employee_id=employee, work_date="2026-08-03", summary="확인 필요")
+    operational_safety.create_schedule(conn,employee_id=employee,effective_from="2026-08-03",effective_to="2026-08-03",weekday_mask="0")
     result = month_close.reconcile(conn, "2026-08")
     assert result["reconciliationStatus"] == "blocked"
     assert result["blockingItems"][0]["code"] == "scheduled_no_punch"

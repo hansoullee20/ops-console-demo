@@ -88,6 +88,10 @@ def test_close_metadata_trigger_and_hash_integrity_gate(migrated_db):
 def test_null_date_source_mapping_replacement_attribution_and_frozen_links(migrated_db):
     conn = _operational(migrated_db)
     employee_id = _employee(conn)
+    operational_safety.create_schedule(
+        conn, employee_id=employee_id, effective_from="2026-08-01",
+        effective_to="2026-08-31", weekday_mask="",
+    )
     import_id = conn.execute(
         "INSERT INTO import_runs(source_filename,status,period_start,period_end) "
         "VALUES('fictional.xls','applied','2026-08-01','2026-08-31')"
@@ -218,14 +222,18 @@ def test_0008_to_0009_to_0010_upgrade_backfills_lineage_and_is_idempotent(tmp_pa
 def test_closed_reconciliation_get_is_read_only_and_reopen_allows_reconciliation(migrated_db, monkeypatch):
     conn = _operational(migrated_db)
     employee_id = _employee(conn, "READONLY1")
+    operational_safety.create_schedule(
+        conn, employee_id=employee_id, effective_from="2026-08-01",
+        effective_to="2026-08-31", weekday_mask="",
+    )
     stable = _exception(conn, code="informational_history", work_date="2026-08-10",
                         scope="employee", employee_id=employee_id)
     conn.execute("UPDATE operational_exceptions SET severity='info' WHERE id=?", (stable["id"],))
     closed = month_close.close_month(conn, "2026-08", "operator", "Read-only close")
     # Simulate newly visible live facts without using a guarded production mutation.
     conn.execute(
-        "INSERT INTO employee_work_schedules(employee_id,effective_from,effective_to,weekday_mask,created_by) "
-        "VALUES(?,'2026-08-11','2026-08-11','1','test-fixture')", (employee_id,)
+        "INSERT INTO employee_schedule_dates(employee_id,work_date,is_scheduled,label,created_by) "
+        "VALUES(?,'2026-08-11',1,'Newly visible test fact','test-fixture')", (employee_id,)
     )
     conn.commit()
     before = {
@@ -258,5 +266,83 @@ def test_closed_reconciliation_get_is_read_only_and_reopen_allows_reconciliation
     assert conn.execute(
         "SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-11' "
         "AND exception_code='scheduled_no_punch'", (employee_id,)
+    ).fetchone()
+    conn.close()
+
+
+def test_schedule_completeness_blocks_without_adverse_employee_record(migrated_db, monkeypatch):
+    conn = _operational(migrated_db)
+    employee_id = conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,end_date,status) "
+        "VALUES('COVERAGE1','Fictional Coverage','2026-08-01','2026-08-31','active')"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO site_calendar(calendar_date,day_type,is_working,label) "
+        "VALUES('2026-08-03','working',1,'Fictional working day')"
+    )
+    conn.commit(); conn.close()
+    monkeypatch.setattr(config, "DB_PATH", migrated_db)
+    client = TestClient(create_app())
+    result = client.get("/api/v1/month-close/2026-08/reconciliation").json()
+    missing = [item for item in result["blockingItems"] if item["code"] == "schedule_coverage_incomplete"]
+    assert result["reconciliationStatus"] == "blocked"
+    assert [(item["workDate"], item["periodEnd"]) for item in missing] == [("2026-08-01", "2026-08-31")]
+    conn = db.connect(migrated_db)
+    assert not conn.execute(
+        "SELECT 1 FROM operational_exceptions WHERE exception_code='scheduled_no_punch' AND employee_id=?",
+        (employee_id,),
+    ).fetchone()
+    assert not conn.execute(
+        "SELECT 1 FROM attendance_days WHERE employee_id=? AND status IN ('absent','late','misconduct','unauthorized_absence')",
+        (employee_id,),
+    ).fetchone()
+    conn.close()
+    blocked = client.post(
+        "/api/v1/month-close/2026-08/close",
+        json={"actor": "operator", "reason": "Must remain blocked"},
+    )
+    assert blocked.status_code == 409
+    conn = db.connect(migrated_db)
+    assert conn.execute("SELECT COUNT(*) FROM month_closes").fetchone()[0] == 0
+    operational_safety.create_schedule(
+        conn, employee_id=employee_id, effective_from="2026-08-01",
+        effective_to="2026-08-15", weekday_mask="",
+    )
+    conn.commit(); conn.close()
+    partial = client.get("/api/v1/month-close/2026-08/reconciliation").json()
+    partial_missing = [item for item in partial["blockingItems"] if item["code"] == "schedule_coverage_incomplete"]
+    assert [(item["workDate"], item["periodEnd"]) for item in partial_missing] == [("2026-08-16", "2026-08-31")]
+    conn = db.connect(migrated_db)
+    operational_safety.create_schedule(
+        conn, employee_id=employee_id, effective_from="2026-08-16",
+        effective_to="2026-08-31", weekday_mask="",
+    )
+    conn.commit(); conn.close()
+    complete = client.get("/api/v1/month-close/2026-08/reconciliation").json()
+    assert not [item for item in complete["blockingItems"] if item["code"] == "schedule_coverage_incomplete"]
+    assert complete["reconciliationStatus"] == "ready"
+    assert client.post(
+        "/api/v1/month-close/2026-08/close",
+        json={"actor": "operator", "reason": "Schedule evidence complete"},
+    ).status_code == 200
+
+
+def test_single_date_override_does_not_cover_rest_of_employment_period(migrated_db):
+    conn = _operational(migrated_db)
+    employee_id = conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,end_date,status) "
+        "VALUES('COVERAGE2','Fictional Override','2026-08-10','2026-08-12','active')"
+    ).lastrowid
+    operational_safety.set_schedule_date(
+        conn, employee_id=employee_id, work_date="2026-08-11", is_scheduled=False,
+    )
+    result = month_close.reconcile(conn, "2026-08")
+    missing = [item for item in result["blockingItems"]
+               if item["code"] == "schedule_coverage_incomplete" and item["employeeId"] == employee_id]
+    assert [(item["workDate"], item["periodEnd"]) for item in missing] == [
+        ("2026-08-10", "2026-08-10"), ("2026-08-12", "2026-08-12")]
+    assert not conn.execute(
+        "SELECT 1 FROM operational_exceptions WHERE employee_id=? AND exception_code='scheduled_no_punch'",
+        (employee_id,),
     ).fetchone()
     conn.close()

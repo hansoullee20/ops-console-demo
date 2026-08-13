@@ -145,6 +145,51 @@ def _scheduled_employee_days(conn: sqlite3.Connection, start: str, end: str) -> 
     return count
 
 
+def _schedule_coverage_blockers(conn: sqlite3.Connection, start: str, end: str) -> list[dict]:
+    """Report employment dates lacking authoritative employee schedule evidence.
+
+    These are operational completeness blockers, never attendance conclusions.
+    A date is covered by an active date override or an active date-scoped work
+    schedule, including schedule weekdays that explicitly resolve to non-work.
+    Site calendar and weekday fallback do not establish employee coverage.
+    """
+    blockers: list[dict] = []
+    employees = conn.execute(
+        "SELECT id,hire_date,end_date FROM employees WHERE hire_date<=? "
+        "AND (end_date IS NULL OR end_date>=?) ORDER BY id", (end, start)
+    ).fetchall()
+    for employee in employees:
+        first = max(date.fromisoformat(start), date.fromisoformat(employee["hire_date"]))
+        last = min(date.fromisoformat(end), date.fromisoformat(employee["end_date"] or end))
+        missing: list[date] = []
+        cursor = first
+        while cursor <= last:
+            resolved = operational_safety.resolve_schedule(conn, employee["id"], cursor.isoformat())
+            if not resolved["isAuthoritative"]:
+                missing.append(cursor)
+            cursor += timedelta(days=1)
+        if not missing:
+            continue
+        ranges: list[tuple[date, date]] = []
+        range_start = range_end = missing[0]
+        for uncovered in missing[1:]:
+            if uncovered == range_end + timedelta(days=1):
+                range_end = uncovered
+            else:
+                ranges.append((range_start, range_end))
+                range_start = range_end = uncovered
+        ranges.append((range_start, range_end))
+        for range_start, range_end in ranges:
+            blockers.append({
+                "code": "schedule_coverage_incomplete", "scope": "schedule",
+                "employeeId": employee["id"], "workDate": range_start.isoformat(),
+                "periodEnd": range_end.isoformat(), "exceptionIds": [],
+                "reason": "이 직원·기간의 근무예정일을 판단할 권위 있는 개인 일정 근거가 없어 월 근태 완전성을 검증할 수 없습니다.",
+                "status": "open", "severity": "review",
+            })
+    return blockers
+
+
 def reconcile(conn: sqlite3.Connection, month: str) -> dict:
     start, end = bounds(month)
     current = conn.execute(
@@ -159,6 +204,8 @@ def reconcile(conn: sqlite3.Connection, month: str) -> dict:
     blockers, warnings = [], []
     for row in active:
         (blockers if row["severity"] in {"critical", "review"} or row["exception_code"] in BLOCKING_CODES else warnings).append(_item(row))
+
+    blockers.extend(_schedule_coverage_blockers(conn, start, end))
 
     for row in conn.execute(
         "SELECT id,status FROM import_runs WHERE period_start<=? AND period_end>=? "
