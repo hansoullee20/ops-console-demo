@@ -12,6 +12,8 @@ on:
       - 'aihub/wakeword/test_v4_benchmark_contract.py'
       - 'aihub/wakeword/v4_ring_buffer_logger.py'
       - 'aihub/wakeword/test_v4_ring_buffer_logger.py'
+      - 'aihub/wakeword/v4_replay.py'
+      - 'aihub/wakeword/test_v4_replay.py'
       - '.github/workflows/okja-v4-eval-tests.yml'
 
 permissions:
@@ -26,6 +28,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run evaluator, benchmark-contract, and ring-buffer unit tests
+      - name: Run evaluator, benchmark-contract, ring-buffer, and replay unit tests
         working-directory: aihub/wakeword
-        run: python -m unittest -v test_v4_eval.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py
+        run: python -m unittest -v test_v4_eval.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py test_v4_replay.py
