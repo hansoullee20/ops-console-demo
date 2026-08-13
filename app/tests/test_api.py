@@ -155,16 +155,22 @@ MUTATION_ALLOWLIST = {
     ("patch", "/api/v1/replacement-operations/{assignment_id}"),
     ("patch", "/api/v1/replacement-operations/{assignment_id}/checklist"),
     ("post", "/api/v1/replacement-operations/{assignment_id}/status"),
+    ("post", "/api/v1/operations/exceptions/{exception_id}/acknowledge"),
+    ("post", "/api/v1/operations/exceptions/{exception_id}/resolve"),
+    ("post", "/api/v1/operations/exceptions/{exception_id}/waive"),
+    ("post", "/api/v1/attendance/manual-adjustments"),
+    ("post", "/api/v1/attendance/manual-adjustments/{adjustment_id}/supersede"),
+    ("post", "/api/v1/attendance/manual-adjustments/{adjustment_id}/cancel"),
+    ("post", "/api/v1/attendance/manual-adjustments/{adjustment_id}/void"),
+    ("post", "/api/v1/employees/{employee_id}/schedules"),
+    ("post", "/api/v1/employees/{employee_id}/schedules/{schedule_id}/retire"),
+    ("post", "/api/v1/employees/{employee_id}/schedule-dates"),
+    ("post", "/api/v1/employees/{employee_id}/schedule-dates/{override_id}/cancel"),
 }
 
 
 def test_only_deliberately_allowlisted_operational_routes_can_write(client):
-    """Phase 4 adds leave and replacement writes to the pinned surface.
-
-    The attendance correction service exists and is tested, but stays off HTTP
-    until the UI needs attendance editing. A new mutation endpoint has to be
-    added here deliberately.
-    """
+    """Every operational mutation remains explicitly pinned."""
     schema = create_app().openapi()["paths"]
     exposed = {
         (method.lower(), path)
@@ -178,7 +184,7 @@ def test_only_deliberately_allowlisted_operational_routes_can_write(client):
 def test_frontend_is_served_by_allowlist_only(client):
     assert client.get("/").status_code == 200
     assert "text/html" in client.get("/").headers["content-type"]
-    for asset in ("profile.css", "profile.js", "data-source.js"):
+    for asset in ("profile.css", "profile.js", "data-source.js", "safety-ui.js"):
         assert client.get(f"/{asset}").status_code == 200
 
     # the operational host must not serve the fictional snapshot at all

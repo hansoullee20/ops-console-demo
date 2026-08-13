@@ -194,7 +194,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     migrations=Path("app/migrations")
     earlier=tmp_path/"migrations-v6";earlier.mkdir()
     for source in sorted(migrations.glob("*.sql")):
-        if source.name.startswith("0007_"): continue
+        if source.name.startswith(("0007_", "0008_")): continue
         shutil.copy2(source,earlier/source.name)
     database=tmp_path/"upgrade.db";backups=tmp_path/"backups"
     assert migrate.run_migrations(database,earlier,backups).schema_version==6
@@ -209,7 +209,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     ).lastrowid
     conn.commit();conn.close()
     result=migrate.run_migrations(database,backups_dir=backups)
-    assert result.applied==[7] and result.backup_path and result.backup_path.exists()
+    assert result.applied==[7,8] and result.backup_path and result.backup_path.exists()
     conn=db.connect(database)
     upgraded=conn.execute(
         "SELECT work_date,start_date,end_date,key_received FROM replacement_assignments WHERE id=?",
