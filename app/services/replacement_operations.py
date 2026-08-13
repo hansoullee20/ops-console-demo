@@ -95,6 +95,9 @@ def list_assignments(conn, month_start=None, month_end=None):
 
 def create_assignment(conn, *, absent_employee_id, replacement_employee_id, start_date, end_date,
                       zone, shift="day", leave_request_id=None, note=None, status="planned", actor="operator"):
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,start_date,end_date)
+    except MonthCloseError as exc: raise ReplacementError(str(exc)) from exc
     if end_date < start_date: raise ReplacementError("종료일은 시작일보다 빠를 수 없습니다.")
     if absent_employee_id == replacement_employee_id: raise ReplacementError("결원 직원과 대체근무자는 같을 수 없습니다.")
     substitute=_employee(conn,replacement_employee_id); _validate_employee(substitute,start_date,end_date)
@@ -115,6 +118,9 @@ def create_assignment(conn, *, absent_employee_id, replacement_employee_id, star
 
 def update_assignment(conn, assignment_id, changes, *, actor="operator", reason="대체근무 변경"):
     row=_get(conn,assignment_id); before=dict(row)
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["start_date"],row["end_date"])
+    except MonthCloseError as exc: raise ReplacementError(str(exc)) from exc
     if row["status"] in {"completed","cancelled"}:
         raise ReplacementError("completed or cancelled assignments cannot be changed")
     if "status" in changes:
@@ -124,6 +130,8 @@ def update_assignment(conn, assignment_id, changes, *, actor="operator", reason=
     for key,column in allowed.items():
         if key in changes: values[column]=API_TO_DB.get(changes[key],changes[key]) if key=="status" else changes[key]
     start,end=values["start_date"] or values["work_date"],values["end_date"] or values["work_date"]
+    try: assert_range_open(conn,start,end)
+    except MonthCloseError as exc: raise ReplacementError(str(exc)) from exc
     if end<start: raise ReplacementError("종료일은 시작일보다 빠를 수 없습니다.")
     if values["absent_employee_id"] is not None:
         _validate_absent(_employee(conn,values["absent_employee_id"]),start,end)
@@ -145,6 +153,9 @@ def update_assignment(conn, assignment_id, changes, *, actor="operator", reason=
 
 def patch_checklist(conn, assignment_id, changes, *, actor="operator"):
     row=_get(conn,assignment_id); before=dict(row)
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["start_date"],row["end_date"])
+    except MonthCloseError as exc: raise ReplacementError(str(exc)) from exc
     if row["status"] in {"completed","cancelled"}:
         raise ReplacementError("completed or cancelled assignments cannot be changed")
     mapping={"keyReceived":"key_received","uniformReady":"uniform_ready","orientationDone":"orientation_done"}
@@ -162,6 +173,9 @@ def patch_checklist(conn, assignment_id, changes, *, actor="operator"):
 def set_status(conn, assignment_id, status, *, actor="operator", reason=None):
     if status not in API_TO_DB: raise ReplacementError("대체근무 상태가 올바르지 않습니다.")
     row=_get(conn,assignment_id); before=dict(row); now=_now()
+    from app.services.month_close import MonthCloseError,assert_range_open
+    try: assert_range_open(conn,row["start_date"],row["end_date"])
+    except MonthCloseError as exc: raise ReplacementError(str(exc)) from exc
     target=API_TO_DB[status]
     if target not in TRANSITIONS.get(row["status"],set()):
         raise ReplacementError("this replacement status transition is not allowed")

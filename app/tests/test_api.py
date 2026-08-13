@@ -166,6 +166,8 @@ MUTATION_ALLOWLIST = {
     ("post", "/api/v1/employees/{employee_id}/schedules/{schedule_id}/retire"),
     ("post", "/api/v1/employees/{employee_id}/schedule-dates"),
     ("post", "/api/v1/employees/{employee_id}/schedule-dates/{override_id}/cancel"),
+    ("post", "/api/v1/month-close/{month}/close"),
+    ("post", "/api/v1/month-close/{month}/reopen"),
 }
 
 
@@ -184,7 +186,7 @@ def test_only_deliberately_allowlisted_operational_routes_can_write(client):
 def test_frontend_is_served_by_allowlist_only(client):
     assert client.get("/").status_code == 200
     assert "text/html" in client.get("/").headers["content-type"]
-    for asset in ("profile.css", "profile.js", "data-source.js", "safety-ui.js"):
+    for asset in ("profile.css", "profile.js", "data-source.js", "safety-ui.js", "month-close-ui.js"):
         assert client.get(f"/{asset}").status_code == 200
 
     # the operational host must not serve the fictional snapshot at all
