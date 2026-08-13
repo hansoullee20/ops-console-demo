@@ -17,6 +17,8 @@
 - Closure guard: this can satisfy the alternative-runtime portion only. G2.5 must remain open until a real v4 classifier also replays the identical audio SHA.
 - First real run `31669829292` failed after package installation and input SHA verification because the openWakeWord `0.6.0` wheel did not contain `melspectrogram.onnx` or `embedding_model.onnx`. This is a missing-runtime-resource failure, not a classifier incompatibility result.
 - Fix in progress: fetch those two official openWakeWord `v0.5.1` release assets separately, pin and verify both hashes, and pass their paths explicitly to the runtime. Do not use an untracked mutable download into `site-packages` as benchmark evidence.
+- Recovery adapter commit `0343ef8` requires both feature-model paths explicitly and fails closed if either is absent. Evaluator run `31670415113` passed all 32 tests.
+- Second real run `31670415071` is discovering the hashes of the two versioned release assets and exercising the corrected wiring. Do not promote its output to benchmark evidence until those observed hashes are committed as verification inputs and a fresh run passes.
 
 ---
 
