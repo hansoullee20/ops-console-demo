@@ -212,3 +212,38 @@ def test_retirement_preserves_historical_schedule_and_explicit_correction_wins(o
     resolved=safety.resolve_schedule(c,a,'2026-08-10')
     assert resolved['source']=='employee_date_override' and resolved['evidenceId']==corrected['id']
     c.close()
+
+
+def test_finite_and_post_end_retirement_guard_only_actual_affected_range(operational):
+    path,a,b=operational;c=db.connect(path)
+    finite=safety.create_schedule(
+        c,employee_id=a,effective_from='2026-08-01',effective_to='2026-08-31',weekday_mask='',
+    )
+    # September is outside this finite schedule's affected range. These minimal
+    # close rows isolate the service guard; snapshot behavior is tested through
+    # the complete close workflow in test_month_close_integrity.py.
+    c.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-09',1,'closed','2','2',"
+        "'2026-10-01T00:00:00Z','operator','guard fixture',?)", ('0'*64,)
+    )
+    retired=safety.retire_schedule(
+        c,finite['id'],'finite historical end',retirement_effective_from='2026-08-15',
+    )
+    assert retired['retired_effective_from']=='2026-08-15'
+
+    ended=safety.create_schedule(
+        c,employee_id=b,effective_from='2026-08-01',effective_to='2026-08-31',weekday_mask='',
+    )
+    c.execute(
+        "INSERT INTO month_closes(month_key,revision,status,reconciliation_version,policy_version,"
+        "closed_at,closed_by,close_note,snapshot_hash) VALUES('2026-08',1,'closed','2','2',"
+        "'2026-09-01T00:00:00Z','operator','guard fixture',?)", ('0'*64,)
+    )
+    # Retiring after effective_to changes metadata only, not any August result.
+    post_end=safety.retire_schedule(
+        c,ended['id'],'retired after natural end',retirement_effective_from='2026-09-01',
+    )
+    assert post_end['status']=='retired'
+    assert safety.resolve_schedule(c,b,'2026-08-31')['isAuthoritative']
+    c.close()

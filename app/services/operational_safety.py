@@ -144,9 +144,14 @@ def retire_schedule(conn,schedule_id,reason,actor="operator",retirement_effectiv
     except ValueError as exc: raise SafetyError("retirement effective date must be YYYY-MM-DD") from exc
     if retirement_effective_from<row["effective_from"]: raise SafetyError("retirement cannot precede schedule start")
     from app.services.month_close import MonthCloseError,assert_range_open
-    affected_end=row["effective_to"] if row["effective_to"] and row["effective_to"]>=retirement_effective_from else retirement_effective_from
-    try: assert_range_open(conn,retirement_effective_from,affected_end)
-    except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
+    # Retirement changes resolution from its effective date through the
+    # schedule's original end. An open-ended schedule therefore has an
+    # open-ended affected range and every closed future month must be checked.
+    # A retirement after a finite schedule ended changes no historical
+    # applicability, so it needs no closed-month range guard.
+    if row["effective_to"] is None or retirement_effective_from<=row["effective_to"]:
+        try: assert_range_open(conn,retirement_effective_from,row["effective_to"])
+        except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
     conn.execute("UPDATE employee_work_schedules SET status='retired',retired_at=?,retired_by=?,retired_effective_from=? WHERE id=?",(now(),actor,retirement_effective_from,schedule_id))
     updated=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone())
     audit(conn,"schedule.retire","employee_work_schedules",schedule_id,dict(row),updated,reason,actor)

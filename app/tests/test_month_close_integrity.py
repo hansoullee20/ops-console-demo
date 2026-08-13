@@ -375,6 +375,54 @@ def test_retired_schedule_remains_authoritative_when_historical_month_reopens(mi
     conn.close()
 
 
+def test_open_ended_retirement_checks_every_affected_closed_month(migrated_db,monkeypatch):
+    conn=_operational(migrated_db)
+    employee_id=conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,status) "
+        "VALUES('RETIRE-GUARD','Fictional Guard','2026-08-01','active')"
+    ).lastrowid
+    schedule=operational_safety.create_schedule(
+        conn,employee_id=employee_id,effective_from='2026-08-01',
+        effective_to=None,weekday_mask='',
+    )
+    august=month_close.close_month(conn,'2026-08','operator','August close')
+    september=month_close.close_month(conn,'2026-09','operator','September close')
+    september_before=month_close.snapshot(conn,'2026-09',close_id=september['id'])
+    month_close.reopen(conn,'2026-08','operator','August correction')
+    conn.commit();conn.close()
+
+    monkeypatch.setattr(config,'DB_PATH',migrated_db)
+    client=TestClient(create_app())
+    blocked=client.post(
+        f'/api/v1/employees/{employee_id}/schedules/{schedule["id"]}/retire',
+        json={'actor':'operator','reason':'historical correction',
+              'retirementEffectiveFrom':'2026-08-15'},
+    )
+    assert blocked.status_code==409
+    conn=db.connect(migrated_db)
+    unchanged=conn.execute(
+        "SELECT status,retired_effective_from FROM employee_work_schedules WHERE id=?",
+        (schedule['id'],),
+    ).fetchone()
+    assert tuple(unchanged)==('active',None)
+    september_after=month_close.snapshot(conn,'2026-09',close_id=september['id'])
+    assert september_after==september_before
+    assert september_after['close']['snapshot_hash']==september['snapshot_hash']
+
+    month_close.reopen(conn,'2026-09','operator','Affected future month correction')
+    conn.commit();conn.close()
+    allowed=client.post(
+        f'/api/v1/employees/{employee_id}/schedules/{schedule["id"]}/retire',
+        json={'actor':'operator','reason':'historical correction',
+              'retirementEffectiveFrom':'2026-08-15'},
+    )
+    assert allowed.status_code==200
+    conn=db.connect(migrated_db)
+    assert operational_safety.resolve_schedule(conn,employee_id,'2026-08-14')['isAuthoritative']
+    assert not operational_safety.resolve_schedule(conn,employee_id,'2026-08-15')['isAuthoritative']
+    conn.close()
+
+
 def test_0011_backfills_retired_schedule_history_and_is_idempotent(tmp_path):
     migrations = Path(config.MIGRATIONS_DIR)
     through10 = tmp_path/'through-v10'; through10.mkdir()
