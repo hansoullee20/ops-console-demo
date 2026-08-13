@@ -29,8 +29,10 @@ class AndroidVoiceUiIntegrationTests(unittest.TestCase):
 
     def test_bridge_failure_has_explicit_degraded_state(self):
         source = self.source
-        self.assertIn("VoiceUiState.State.OFFLINE_DEGRADED", source)
-        self.assertIn("bridgeDegraded=true", source)
+        self.assertIn("boolean degraded=false", source)
+        self.assertIn("degraded=true", source)
+        self.assertIn("bridgeDegraded=degradedResult", source)
+        self.assertIn("degradedResult?VoiceUiState.State.OFFLINE_DEGRADED", source)
         self.assertIn("offlinePrompt()", source)
         self.assertNotIn("브리지/이벤트 오류:", source)
 
