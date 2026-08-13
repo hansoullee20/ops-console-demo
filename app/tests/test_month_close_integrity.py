@@ -184,10 +184,10 @@ def test_snapshot_source_link_validation(migrated_db):
     conn.close()
 
 
-def test_0008_to_0009_to_0010_upgrade_backfills_lineage_and_is_idempotent(tmp_path):
+def test_0008_to_0009_to_0010_to_0011_upgrade_backfills_lineage_and_is_idempotent(tmp_path):
     old = tmp_path / "through-v9"; old.mkdir()
     for source in config.MIGRATIONS_DIR.glob("*.sql"):
-        if source.name.startswith("0010_"):
+        if source.name.startswith(("0010_", "0011_")):
             continue
         (old / source.name).write_bytes(source.read_bytes())
     database = tmp_path / "phase45-v9.db"; backups = tmp_path / "backups"
@@ -210,7 +210,7 @@ def test_0008_to_0009_to_0010_upgrade_backfills_lineage_and_is_idempotent(tmp_pa
     ).lastrowid
     conn.commit(); conn.close()
     result = migrate.run_migrations(database, backups_dir=backups)
-    assert result.applied == [10] and result.backup_path and result.backup_path.exists()
+    assert result.applied == [10, 11] and result.backup_path and result.backup_path.exists()
     conn = db.connect(database)
     assert conn.execute("SELECT supersedes_close_id FROM month_closes WHERE id=?", (second,)).fetchone()[0] == first
     assert month_close.snapshot(conn, "2026-08", close_id=first)["close"]["revision"] == 1
@@ -346,3 +346,59 @@ def test_single_date_override_does_not_cover_rest_of_employment_period(migrated_
         (employee_id,),
     ).fetchone()
     conn.close()
+
+
+def test_retired_schedule_remains_authoritative_when_historical_month_reopens(migrated_db):
+    conn = _operational(migrated_db)
+    employee_id = conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,end_date,status) "
+        "VALUES('HISTORY1','Fictional History','2026-08-01',NULL,'active')"
+    ).lastrowid
+    schedule = operational_safety.create_schedule(
+        conn, employee_id=employee_id, effective_from='2026-08-01',
+        effective_to=None, weekday_mask='',
+    )
+    assert not [item for item in month_close.reconcile(conn,'2026-08')['blockingItems']
+                if item['code']=='schedule_coverage_incomplete']
+    month_close.close_month(conn,'2026-08','operator','historical schedule close')
+    # A September retirement changes September onward, not August history.
+    operational_safety.retire_schedule(
+        conn, schedule['id'], 'future retirement',
+        retirement_effective_from='2026-09-01',
+    )
+    month_close.reopen(conn,'2026-08','operator','historical verification')
+    reopened = month_close.reconcile(conn,'2026-08')
+    assert not [item for item in reopened['blockingItems']
+                if item['code']=='schedule_coverage_incomplete']
+    assert operational_safety.resolve_schedule(conn,employee_id,'2026-08-31')['isAuthoritative']
+    assert not operational_safety.resolve_schedule(conn,employee_id,'2026-09-01')['isAuthoritative']
+    conn.close()
+
+
+def test_0011_backfills_retired_schedule_history_and_is_idempotent(tmp_path):
+    migrations = Path(config.MIGRATIONS_DIR)
+    through10 = tmp_path/'through-v10'; through10.mkdir()
+    for source in migrations.glob('*.sql'):
+        if not source.name.startswith('0011_'):
+            (through10/source.name).write_bytes(source.read_bytes())
+    database=tmp_path/'v10.db';backups=tmp_path/'backups'
+    assert migrate.run_migrations(database,migrations_dir=through10,backups_dir=backups).schema_version==10
+    conn=db.connect(database)
+    employee_id=conn.execute(
+        "INSERT INTO employees(employee_code,name,hire_date,status) VALUES('LEGACY-SCHEDULE','Fictional Legacy','2025-01-01','active')"
+    ).lastrowid
+    schedule_id=conn.execute(
+        "INSERT INTO employee_work_schedules(employee_id,effective_from,effective_to,weekday_mask,status,created_by,retired_at,retired_by) "
+        "VALUES(?,'2026-08-01',NULL,'0,1,2,3,4','retired','legacy','2026-09-01T12:00:00Z','legacy')",
+        (employee_id,),
+    ).lastrowid
+    conn.commit();conn.close()
+    result=migrate.run_migrations(database,backups_dir=backups)
+    assert result.applied==[11] and result.backup_path and result.backup_path.exists()
+    conn=db.connect(database)
+    row=conn.execute("SELECT retired_effective_from FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone()
+    assert row[0]=='2026-09-01'
+    assert operational_safety.resolve_schedule(conn,employee_id,'2026-08-31')['isAuthoritative']
+    assert not operational_safety.resolve_schedule(conn,employee_id,'2026-09-01')['isAuthoritative']
+    conn.close()
+    assert migrate.run_migrations(database,backups_dir=backups).applied==[]

@@ -191,3 +191,24 @@ def test_schedule_history_can_be_retired_and_override_cancelled(operational,monk
     assert client.post(f"/api/v1/employees/{a}/schedule-dates/{override['id']}/cancel",json={'reason':'override corrected'}).status_code==200
     history=client.get(f'/api/v1/employees/{a}/schedules').json()
     assert history['schedules'][0]['status']=='retired' and history['dateOverrides'][0]['status']=='cancelled'
+
+
+def test_retirement_preserves_historical_schedule_and_explicit_correction_wins(operational):
+    path,a,_=operational;c=db.connect(path)
+    original=safety.create_schedule(c,employee_id=a,effective_from='2026-08-01',effective_to=None,weekday_mask='0,1,2,3,4')
+    safety.retire_schedule(c,original['id'],'future schedule ended',retirement_effective_from='2026-09-01')
+    historical=safety.resolve_schedule(c,a,'2026-08-03')
+    future=safety.resolve_schedule(c,a,'2026-09-01')
+    assert historical['isAuthoritative'] and historical['source']=='employee_schedule'
+    assert not future['isAuthoritative']
+    replacement=safety.create_schedule(c,employee_id=a,effective_from='2026-09-01',effective_to=None,weekday_mask='1,2,3,4,5')
+    assert safety.resolve_schedule(c,a,'2026-09-01')['evidenceId']==replacement['id']
+
+    correction=safety.create_schedule(c,employee_id=a,effective_from='2026-08-10',effective_to='2026-08-10',weekday_mask='0')
+    # Retire from its first effective date: this is an explicit historical correction,
+    # unlike ending a schedule for future dates.
+    safety.retire_schedule(c,correction['id'],'historical correction',retirement_effective_from='2026-08-10')
+    corrected=safety.set_schedule_date(c,employee_id=a,work_date='2026-08-10',is_scheduled=False,label='corrected history')
+    resolved=safety.resolve_schedule(c,a,'2026-08-10')
+    assert resolved['source']=='employee_date_override' and resolved['evidenceId']==corrected['id']
+    c.close()

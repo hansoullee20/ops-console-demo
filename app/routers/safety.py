@@ -16,7 +16,7 @@ class Adjustment(BaseModel):
     employeeId:int;workDate:date;recognizedInAt:str|None=None;recognizedOutAt:str|None=None
     resultingStatus:str="normal";reason:str=Field(min_length=2,max_length=500);referenceNote:str|None=None;supersedesId:int|None=None
 class EndAdjustment(BaseModel):reason:str=Field(min_length=2,max_length=500);actor:str="operator"
-class EndSchedule(BaseModel):reason:str=Field(min_length=2,max_length=500);actor:str="operator"
+class EndSchedule(BaseModel):reason:str=Field(min_length=2,max_length=500);actor:str="operator";retirementEffectiveFrom:date|None=None
 class Schedule(BaseModel):
     effectiveFrom:date;effectiveTo:date|None=None;weekdayMask:str;expectedStartTime:str|None=None;expectedEndTime:str|None=None;actor:str="operator"
 class DateOverride(BaseModel):
@@ -103,7 +103,7 @@ def schedule_retire(employee_id:int,schedule_id:int,body:EndSchedule):
         with c:
             row=c.execute("SELECT employee_id FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone()
             if not row or row[0]!=employee_id:raise safety.SafetyError("schedule not found")
-            return safety.retire_schedule(c,schedule_id,body.reason,body.actor)
+            return safety.retire_schedule(c,schedule_id,body.reason,body.actor,str(body.retirementEffectiveFrom) if body.retirementEffectiveFrom else None)
     except safety.SafetyError as exc:raise err(exc)
     finally:c.close()
 @router.post("/employees/{employee_id}/schedule-dates",status_code=201)

@@ -108,7 +108,7 @@ def test_0009_upgrade_is_additive_backed_up_and_idempotent(tmp_path):
     conn.execute("INSERT INTO employees(employee_code,name,hire_date) VALUES('LEGACY45','가상기존','2025-01-01')")
     conn.commit(); before = conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]; conn.close()
     result = migrate.run_migrations(path, backups_dir=backups)
-    assert result.applied == [9, 10] and result.backup_path and result.backup_path.exists()
+    assert result.applied == [9, 10, 11] and result.backup_path and result.backup_path.exists()
     conn = db.connect(path)
     assert conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == before
     assert conn.execute("SELECT COUNT(*) FROM month_closes").fetchone()[0] == 0

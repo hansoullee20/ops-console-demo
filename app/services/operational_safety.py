@@ -135,14 +135,19 @@ def create_schedule(conn,*,employee_id,effective_from,effective_to,weekday_mask,
     sid=conn.execute("INSERT INTO employee_work_schedules(employee_id,effective_from,effective_to,weekday_mask,expected_start_time,expected_end_time,created_by) VALUES(?,?,?,?,?,?,?)",(employee_id,effective_from,effective_to,weekday_mask,expected_start_time,expected_end_time,actor)).lastrowid
     result=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(sid,)).fetchone());audit(conn,"schedule.create","employee_work_schedules",sid,None,result,"schedule created",actor);return result
 
-def retire_schedule(conn,schedule_id,reason,actor="operator"):
+def retire_schedule(conn,schedule_id,reason,actor="operator",retirement_effective_from=None):
     if not (reason or "").strip(): raise SafetyError("reason is required")
     row=conn.execute("SELECT * FROM employee_work_schedules WHERE id=? AND status='active'",(schedule_id,)).fetchone()
     if not row: raise SafetyError("active schedule not found")
+    retirement_effective_from=retirement_effective_from or date.today().isoformat()
+    try: date.fromisoformat(retirement_effective_from)
+    except ValueError as exc: raise SafetyError("retirement effective date must be YYYY-MM-DD") from exc
+    if retirement_effective_from<row["effective_from"]: raise SafetyError("retirement cannot precede schedule start")
     from app.services.month_close import MonthCloseError,assert_range_open
-    try: assert_range_open(conn,row["effective_from"],row["effective_to"])
+    affected_end=row["effective_to"] if row["effective_to"] and row["effective_to"]>=retirement_effective_from else retirement_effective_from
+    try: assert_range_open(conn,retirement_effective_from,affected_end)
     except MonthCloseError as exc: raise SafetyError(str(exc)) from exc
-    conn.execute("UPDATE employee_work_schedules SET status='retired',retired_at=?,retired_by=? WHERE id=?",(now(),actor,schedule_id))
+    conn.execute("UPDATE employee_work_schedules SET status='retired',retired_at=?,retired_by=?,retired_effective_from=? WHERE id=?",(now(),actor,retirement_effective_from,schedule_id))
     updated=rowdict(conn.execute("SELECT * FROM employee_work_schedules WHERE id=?",(schedule_id,)).fetchone())
     audit(conn,"schedule.retire","employee_work_schedules",schedule_id,dict(row),updated,reason,actor)
     return updated
@@ -178,7 +183,10 @@ def resolve_schedule(conn,employee_id,work_date):
         return {"isScheduled":False,"isAuthoritative":False,"source":"employment_period","expectedStart":None,"expectedEnd":None,"evidenceId":None}
     override=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active' ORDER BY id DESC LIMIT 1",(employee_id,work_date)).fetchone()
     if override:return {"isScheduled":bool(override["is_scheduled"]),"isAuthoritative":True,"source":"employee_date_override","expectedStart":override["expected_start_time"],"expectedEnd":override["expected_end_time"],"evidenceId":override["id"]}
-    schedule=conn.execute("SELECT * FROM employee_work_schedules WHERE employee_id=? AND status='active' AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC,id DESC LIMIT 1",(employee_id,work_date,work_date)).fetchone()
+    schedule=conn.execute("SELECT * FROM employee_work_schedules WHERE employee_id=? "
+      "AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) "
+      "AND (status='active' OR (status='retired' AND retired_effective_from>?)) "
+      "ORDER BY effective_from DESC,id DESC LIMIT 1",(employee_id,work_date,work_date,work_date)).fetchone()
     if schedule:
         scheduled=str(date.fromisoformat(work_date).weekday()) in set(schedule["weekday_mask"].split(","))
         return {"isScheduled":scheduled,"isAuthoritative":True,"source":"employee_schedule","expectedStart":schedule["expected_start_time"],"expectedEnd":schedule["expected_end_time"],"evidenceId":schedule["id"]}

@@ -194,7 +194,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     migrations=Path("app/migrations")
     earlier=tmp_path/"migrations-v6";earlier.mkdir()
     for source in sorted(migrations.glob("*.sql")):
-        if source.name.startswith(("0007_", "0008_", "0009_", "0010_")): continue
+        if source.name.startswith(("0007_", "0008_", "0009_", "0010_", "0011_")): continue
         shutil.copy2(source,earlier/source.name)
     database=tmp_path/"upgrade.db";backups=tmp_path/"backups"
     assert migrate.run_migrations(database,earlier,backups).schema_version==6
@@ -210,7 +210,7 @@ def test_0007_upgrades_phase35_data_with_backup_and_no_loss(tmp_path):
     conn.commit();conn.close()
     through8=tmp_path/"migrations-v8";through8.mkdir()
     for source in sorted(migrations.glob("*.sql")):
-        if source.name.startswith(("0009_", "0010_")): continue
+        if source.name.startswith(("0009_", "0010_", "0011_")): continue
         shutil.copy2(source,through8/source.name)
     result=migrate.run_migrations(database,migrations_dir=through8,backups_dir=backups)
     assert result.applied==[7,8] and result.backup_path and result.backup_path.exists()
