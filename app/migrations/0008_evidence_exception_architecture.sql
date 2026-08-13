@@ -9,6 +9,7 @@ CREATE TABLE operational_exceptions (
     import_run_id INTEGER REFERENCES import_runs(id) ON DELETE RESTRICT,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','acknowledged','resolved','waived')),
     occurrence_key TEXT NOT NULL,
+    observation_fingerprint TEXT NOT NULL,
     summary TEXT NOT NULL,
     detail TEXT,
     previous_occurrence_id INTEGER REFERENCES operational_exceptions(id) ON DELETE RESTRICT,

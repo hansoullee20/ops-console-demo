@@ -16,11 +16,14 @@ def operational(migrated_db):
 
 def test_active_only_dedupe_and_append_only_events(operational):
     path,a,_=operational;c=db.connect(path)
-    x=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="검토",evidence=[{"evidence_type":"manual_manager_statement","entity_type":"note","reference_text":"one"}])
-    same=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="검토",evidence=[{"evidence_type":"manual_manager_statement","entity_type":"note","reference_text":"two"}])
-    assert same["id"]==x["id"] and len(same["events"])==2
+    stable_evidence=[{"evidence_type":"manual_manager_statement","entity_type":"note","reference_text":"one"},{"evidence_type":"manual_manager_statement","entity_type":"note","reference_text":"two"}]
+    x=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="검토",evidence=stable_evidence)
+    same=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="검토",evidence=stable_evidence)
+    assert same["id"]==x["id"] and len(same["events"])==1
     safety.transition_exception(c,x["id"],"resolved","확인 완료")
-    again=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="재발")
+    unchanged=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="재확인",evidence=stable_evidence)
+    assert unchanged["id"]==x["id"] and unchanged["status"]=="resolved"
+    again=safety.ensure_exception(c,code="incomplete_day",severity="review",scope="employee",employee_id=a,work_date="2026-08-10",summary="새 증거",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":999}])
     assert again["id"]!=x["id"] and again["previous_occurrence_id"]==x["id"]
     with pytest.raises(sqlite3.IntegrityError):c.execute("DELETE FROM exception_events WHERE exception_id=?",(x["id"],))
     with pytest.raises(sqlite3.IntegrityError):c.execute("UPDATE exception_evidence_links SET reference_text='x' WHERE exception_id=?",(x["id"],))
@@ -68,6 +71,7 @@ def test_source_quality_is_site_scoped_and_sunday_is_quiet(operational):
     c.execute("INSERT INTO import_run_days(import_run_id,work_date,source_date_present,raw_punch_count,coverage_status)VALUES(?, '2026-08-03',1,0,'reported_zero')",(rid,));c.commit()
     safety.reconcile(c,'2026-08-03','2026-08-09')
     source=c.execute("SELECT scope,employee_id,exception_code FROM operational_exceptions WHERE exception_code='covered_but_zero_events'").fetchone();assert tuple(source)==('source',None,'covered_but_zero_events')
+    assert not c.execute("SELECT 1 FROM operational_exceptions WHERE exception_code='scheduled_no_punch' AND work_date='2026-08-03'").fetchone()
     assert not c.execute("SELECT 1 FROM operational_exceptions WHERE work_date='2026-08-09'").fetchone();c.close()
 
 def test_expected_not_covered_is_distinct_and_reconcile_is_quiet(operational):
@@ -76,6 +80,30 @@ def test_expected_not_covered_is_distinct_and_reconcile_is_quiet(operational):
     c.execute("INSERT INTO import_run_days(import_run_id,work_date,source_date_present,raw_punch_count,coverage_status)VALUES(?,'2026-08-03',1,0,'reported_zero')",(rid,));c.commit();safety.reconcile(c,'2026-08-03','2026-08-04');events=c.execute("SELECT COUNT(*) FROM exception_events").fetchone()[0];safety.reconcile(c,'2026-08-03','2026-08-04')
     assert c.execute("SELECT COUNT(*) FROM exception_events").fetchone()[0]==events
     assert {r[0] for r in c.execute("SELECT exception_code FROM operational_exceptions WHERE scope='source'")}=={'covered_but_zero_events','expected_period_not_covered'};c.close()
+
+def test_employment_boundaries_limit_schedule_reconciliation(operational):
+    path,a,b=operational;c=db.connect(path)
+    c.execute("UPDATE employees SET hire_date='2026-08-15' WHERE id=?",(a,));c.execute("UPDATE employees SET end_date='2026-08-10',status='terminated' WHERE id=?",(b,))
+    safety.create_schedule(c,employee_id=a,effective_from='2026-08-15',effective_to='2026-08-31',weekday_mask='0,1,2,3,4,5,6');safety.create_schedule(c,employee_id=b,effective_from='2026-08-01',effective_to='2026-08-10',weekday_mask='0,1,2,3,4,5,6')
+    safety.reconcile(c,'2026-08-01','2026-08-31')
+    dates_a={r[0] for r in c.execute("SELECT work_date FROM operational_exceptions WHERE employee_id=? AND exception_code='scheduled_no_punch'",(a,))};dates_b={r[0] for r in c.execute("SELECT work_date FROM operational_exceptions WHERE employee_id=? AND exception_code='scheduled_no_punch'",(b,))}
+    assert dates_a and min(dates_a)=='2026-08-15';assert dates_b and max(dates_b)=='2026-08-10'
+    assert safety.resolve_schedule(c,a,'2026-08-14')['source']=='employment_period';assert safety.resolve_schedule(c,b,'2026-08-11')['source']=='employment_period';c.close()
+
+def test_expected_not_covered_suppresses_employee_no_punch_fanout(operational):
+    path,a,_=operational;c=db.connect(path);safety.create_schedule(c,employee_id=a,effective_from='2026-08-03',effective_to='2026-08-03',weekday_mask='0')
+    c.execute("INSERT INTO import_runs(source_filename,source_sha256,stored_source_path,status,period_start,period_end)VALUES('fictional.xls','scope-hash','x','applied','2026-08-03','2026-08-03')");c.commit();safety.reconcile(c,'2026-08-03','2026-08-03')
+    assert c.execute("SELECT COUNT(*) FROM operational_exceptions WHERE exception_code='expected_period_not_covered'").fetchone()[0]==1;assert c.execute("SELECT COUNT(*) FROM operational_exceptions WHERE exception_code='scheduled_no_punch'").fetchone()[0]==0;c.close()
+
+def test_reconciliation_reopens_resolved_exception_only_for_new_import_evidence(operational):
+    path,a,_=operational;c=db.connect(path);safety.create_schedule(c,employee_id=a,effective_from='2026-08-03',effective_to='2026-08-03',weekday_mask='0')
+    safety.reconcile(c,'2026-08-03','2026-08-03');first=c.execute("SELECT id FROM operational_exceptions WHERE exception_code='scheduled_no_punch' AND employee_id=?",(a,)).fetchone()[0]
+    safety.transition_exception(c,first,'resolved','관리자 확인 완료');safety.reconcile(c,'2026-08-03','2026-08-03')
+    assert c.execute("SELECT COUNT(*) FROM operational_exceptions WHERE exception_code='scheduled_no_punch' AND employee_id=?",(a,)).fetchone()[0]==1
+    rid=c.execute("INSERT INTO import_runs(source_filename,source_sha256,stored_source_path,status)VALUES('new-fictional.xls','new-evidence-hash','x','applied')").lastrowid
+    c.execute("INSERT INTO import_run_days(import_run_id,work_date,source_date_present,raw_punch_count,coverage_status)VALUES(?,'2026-08-03',1,2,'has_punches')",(rid,));c.commit();safety.reconcile(c,'2026-08-03','2026-08-03')
+    rows=c.execute("SELECT id,status,previous_occurrence_id FROM operational_exceptions WHERE exception_code='scheduled_no_punch' AND employee_id=? ORDER BY id",(a,)).fetchall()
+    assert len(rows)==2 and rows[1]['status']=='open' and rows[1]['previous_occurrence_id']==first;c.close()
 
 def test_source_quality_drop_stays_source_scoped(operational):
     path,a,b=operational;c=db.connect(path);more=[]

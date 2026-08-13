@@ -1,6 +1,6 @@
 """Phase 4.25 deterministic evidence, exception, schedule and correction services."""
 from __future__ import annotations
-import json, sqlite3
+import hashlib, json, sqlite3
 from datetime import date, datetime, timezone
 
 class SafetyError(ValueError): pass
@@ -13,23 +13,35 @@ def audit(conn, action, entity, entity_id, before, after, reason, actor):
 def occurrence_key(code,scope,employee_id=None,work_date=None,source_ref=None):
     return "|".join(map(str,[code,scope,employee_id or "-",work_date or "-",source_ref or "-"]))
 
+def evidence_key(ev):
+    return ev.get("evidence_key") or "|".join(map(str,[ev["evidence_type"],ev["entity_type"],ev.get("entity_id") or "-",ev.get("import_run_id") or "-",ev.get("punch_event_id") or "-",ev.get("reference_text") or "-"]))
+
+def observation_fingerprint(code,scope,employee_id,work_date,source_ref,evidence):
+    material={"code":code,"scope":scope,"employeeId":employee_id,"workDate":work_date,"sourceRef":source_ref,"evidence":sorted(evidence_key(ev) for ev in evidence)}
+    return hashlib.sha256(json.dumps(material,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+
 def ensure_exception(conn,*,code,severity,scope,summary,detail=None,employee_id=None,work_date=None,import_run_id=None,source_ref=None,evidence=(),actor="system"):
+    evidence=tuple(evidence)
     key=occurrence_key(code,scope,employee_id,work_date,source_ref)
+    fingerprint=observation_fingerprint(code,scope,employee_id,work_date,source_ref,evidence)
     current=conn.execute("SELECT * FROM operational_exceptions WHERE occurrence_key=? AND status IN ('open','acknowledged')",(key,)).fetchone()
     created=False
     if current is None:
-        previous=conn.execute("SELECT id FROM operational_exceptions WHERE occurrence_key=? ORDER BY id DESC LIMIT 1",(key,)).fetchone()
-        eid=conn.execute("INSERT INTO operational_exceptions(exception_code,severity,scope,employee_id,work_date,import_run_id,occurrence_key,summary,detail,previous_occurrence_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-          (code,severity,scope,employee_id,work_date,import_run_id,key,summary,detail,previous[0] if previous else None,actor)).lastrowid
+        previous=conn.execute("SELECT id,status,observation_fingerprint FROM operational_exceptions WHERE occurrence_key=? ORDER BY id DESC LIMIT 1",(key,)).fetchone()
+        if previous and previous["status"] in {"resolved","waived"} and previous["observation_fingerprint"]==fingerprint:
+            return exception_detail(conn,previous["id"])
+        eid=conn.execute("INSERT INTO operational_exceptions(exception_code,severity,scope,employee_id,work_date,import_run_id,occurrence_key,observation_fingerprint,summary,detail,previous_occurrence_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+          (code,severity,scope,employee_id,work_date,import_run_id,key,fingerprint,summary,detail,previous["id"] if previous else None,actor)).lastrowid
         conn.execute("INSERT INTO exception_events(exception_id,event_type,to_status,actor) VALUES(?,'created','open',?)",(eid,actor));created=True
     else:eid=current["id"]
     added=0
     for ev in evidence:
-        ekey=ev.get("evidence_key") or "|".join(map(str,[ev["evidence_type"],ev["entity_type"],ev.get("entity_id") or "-",ev.get("import_run_id") or "-",ev.get("punch_event_id") or "-",ev.get("reference_text") or "-"]))
+        ekey=evidence_key(ev)
         cur=conn.execute("INSERT OR IGNORE INTO exception_evidence_links(exception_id,evidence_type,entity_type,entity_id,import_run_id,punch_event_id,reference_text,evidence_key,created_by) VALUES(?,?,?,?,?,?,?,?,?)",
           (eid,ev["evidence_type"],ev["entity_type"],ev.get("entity_id"),ev.get("import_run_id"),ev.get("punch_event_id"),ev.get("reference_text"),ekey,actor))
         added+=cur.rowcount
     if added and not created:
+        conn.execute("UPDATE operational_exceptions SET observation_fingerprint=? WHERE id=?",(fingerprint,eid))
         conn.execute("INSERT INTO exception_events(exception_id,event_type,note,actor) VALUES(?,'evidence_linked',?,?)",(eid,f"{added} new evidence link(s)",actor))
     return exception_detail(conn,eid)
 
@@ -139,6 +151,10 @@ def cancel_schedule_date(conn,override_id,reason,actor="operator"):
     return updated
 
 def resolve_schedule(conn,employee_id,work_date):
+    employee=conn.execute("SELECT hire_date,end_date FROM employees WHERE id=?",(employee_id,)).fetchone()
+    if not employee: raise SafetyError("employee not found")
+    if work_date<employee["hire_date"] or (employee["end_date"] and work_date>employee["end_date"]):
+        return {"isScheduled":False,"source":"employment_period","expectedStart":None,"expectedEnd":None,"evidenceId":None}
     override=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active' ORDER BY id DESC LIMIT 1",(employee_id,work_date)).fetchone()
     if override:return {"isScheduled":bool(override["is_scheduled"]),"source":"employee_date_override","expectedStart":override["expected_start_time"],"expectedEnd":override["expected_end_time"],"evidenceId":override["id"]}
     schedule=conn.execute("SELECT * FROM employee_work_schedules WHERE employee_id=? AND status='active' AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC,id DESC LIMIT 1",(employee_id,work_date,work_date)).fetchone()
@@ -165,10 +181,13 @@ def reconcile(conn,start,end,actor="system"):
         punches=conn.execute("SELECT * FROM punch_events WHERE work_date=? AND rolled_back_at IS NULL ORDER BY id",(iso,)).fetchall()
         coverage=conn.execute("SELECT d.*,r.source_filename FROM import_run_days d JOIN import_runs r ON r.id=d.import_run_id WHERE d.work_date=? AND r.status='applied' ORDER BY d.id DESC LIMIT 1",(iso,)).fetchone()
         expected_run=conn.execute("SELECT * FROM import_runs WHERE status='applied' AND period_start<=? AND period_end>=? ORDER BY id DESC LIMIT 1",(iso,iso)).fetchone()
+        source_wide_problem=False
         if scheduled and coverage and coverage["raw_punch_count"]==0:
+            source_wide_problem=True
             oid=_source_observation(conn,"covered_but_zero_events",iso,coverage["import_run_id"],0,len(scheduled),len(scheduled),{"coverageStatus":coverage["coverage_status"]})
             created.append(ensure_exception(conn,code="covered_but_zero_events",severity="review",scope="source",work_date=iso,import_run_id=coverage["import_run_id"],summary="가져온 자료에 전체 지문 기록이 없습니다",source_ref=f"coverage:{coverage['import_run_id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
         elif scheduled and expected_run and not coverage:
+            source_wide_problem=True
             oid=_source_observation(conn,"expected_period_not_covered",iso,expected_run["id"],None,len(scheduled),len(scheduled),{"periodStart":expected_run["period_start"],"periodEnd":expected_run["period_end"]})
             created.append(ensure_exception(conn,code="expected_period_not_covered",severity="review",scope="source",work_date=iso,import_run_id=expected_run["id"],summary="예상된 근무일이 가져온 자료 범위에 포함되지 않았습니다",source_ref=f"coverage:{expected_run['id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":expected_run["id"],"import_run_id":expected_run["id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
         observed_workers={p["employee_id"] for p in punches if p["employee_id"] is not None}
@@ -177,8 +196,11 @@ def reconcile(conn,start,end,actor="system"):
             created.append(ensure_exception(conn,code="source_quality_drop",severity="review",scope="source",work_date=iso,import_run_id=coverage["import_run_id"],summary="예정 인원에 비해 지문 기록 인원이 크게 적습니다",source_ref=f"coverage:{coverage['import_run_id']}",evidence=[{"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]},{"evidence_type":"source_quality_measurement","entity_type":"source_quality_observations","entity_id":oid}],actor=actor))
         for e in scheduled:
             ep=[p for p in punches if p["employee_id"]==e["id"]]
-            if not ep:
-                created.append(ensure_exception(conn,code="scheduled_no_punch",severity="review",scope="employee",employee_id=e["id"],work_date=iso,summary="예정 근무일에 기록된 지문이 없습니다",detail="결근으로 판정하지 않으며 관리자 확인이 필요합니다.",actor=actor))
+            if not ep and not source_wide_problem:
+                schedule=resolve_schedule(conn,e["id"],iso)
+                evidence=[{"evidence_type":"employee_work_schedule","entity_type":schedule["source"],"entity_id":schedule["evidenceId"],"reference_text":f"{schedule['source']}:{schedule['evidenceId'] or iso}"}]
+                if coverage:evidence.append({"evidence_type":"fingerprint_import","entity_type":"import_runs","entity_id":coverage["import_run_id"],"import_run_id":coverage["import_run_id"]})
+                created.append(ensure_exception(conn,code="scheduled_no_punch",severity="review",scope="employee",employee_id=e["id"],work_date=iso,summary="예정 근무일에 기록된 지문이 없습니다",detail="결근으로 판정하지 않으며 관리자 확인이 필요합니다.",evidence=evidence,actor=actor))
             elif len(ep)==1:
                 created.append(ensure_exception(conn,code="incomplete_day",severity="review",scope="employee",employee_id=e["id"],work_date=iso,import_run_id=ep[0]["active_import_run_id"],summary="지문 기록이 한 건뿐입니다",evidence=[{"evidence_type":"fingerprint_punch","entity_type":"punch_events","entity_id":ep[0]["id"],"punch_event_id":ep[0]["id"]}],actor=actor))
         day=date.fromordinal(day.toordinal()+1)
