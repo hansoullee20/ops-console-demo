@@ -16,10 +16,12 @@
 - Evidence policy: pin package version, model/audio hashes, thresholds, frame size and adapter source; require three identical replays before recording evidence.
 - Closure guard: this can satisfy the alternative-runtime portion only. G2.5 must remain open until a real v4 classifier also replays the identical audio SHA.
 - First real run `31669829292` failed after package installation and input SHA verification because the openWakeWord `0.6.0` wheel did not contain `melspectrogram.onnx` or `embedding_model.onnx`. This is a missing-runtime-resource failure, not a classifier incompatibility result.
-- Fix in progress: fetch those two official openWakeWord `v0.5.1` release assets separately, pin and verify both hashes, and pass their paths explicitly to the runtime. Do not use an untracked mutable download into `site-packages` as benchmark evidence.
+- First recovery: fetch the two official openWakeWord `v0.5.1` release assets separately, pass their paths explicitly and reject missing files. Do not use an untracked mutable download into `site-packages` as benchmark evidence.
 - Recovery adapter commit `0343ef8` requires both feature-model paths explicitly and fails closed if either is absent. Evaluator run `31670415113` passed all 32 tests.
 - Second real run `31670415071` loaded the explicit feature models, then failed the three-repeat determinism guard at threshold `0.50`: attempt 1 emitted one detection and attempt 2 differed. openWakeWord `0.6.0` seeds its feature buffer from four seconds of random PCM on every model construction, so this is an uncontrolled runtime-initialization result, not benchmark evidence.
-- Recovery in progress: pin `embedding_model.onnx` SHA-256 `70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f`, pin `melspectrogram.onnx` SHA-256 `ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f`, and make NumPy initialization seed `0` an explicit adapter/manifest input. Require a fresh 3/3 deterministic run before recording results.
+- Final recovery commit `4c59e9e` pins `embedding_model.onnx` SHA-256 `70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f`, pins `melspectrogram.onnx` SHA-256 `ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f`, and makes NumPy initialization seed `0` an explicit adapter/manifest input.
+- Successful real run `31670716561`: all hashes verified and both thresholds were 3/3 deterministic. Threshold `0.50` detected once at 1280 ms with score `0.5055038929`; threshold `0.06` detected once at 560 ms with score `0.0630315244`. Unit run `31670716607` passed all 32 tests.
+- Gate impact: the G2.5 alternative-runtime portion is complete, but G2.5 stays unchecked until a pinned real v4 classifier replays the exact audio SHA. G2.16 also stays unchecked because one positive compatibility replay is not a full alternative-engine benchmark. Durable details: `aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`.
 
 ---
 

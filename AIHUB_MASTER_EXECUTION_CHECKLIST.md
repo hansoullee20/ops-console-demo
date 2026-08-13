@@ -50,7 +50,7 @@ Acceptable evidence:
 - LiveKit v3 is rejected as deployable wakeword; do not threshold-tune it.
 - MeloTTS Korean is approved for initial v4 data; smoke generation, provenance, WAV QC, split and leakage checks are green. Chatterbox remains a secondary source with quarantined pronunciation failures.
 - G2 evaluator, recording contract, privacy-first candidate ring buffer and deterministic replay harness exist and have green CI evidence.
-- Real LiveKit v3 replay run `31669141305` is deterministic over three repeats at thresholds 0.50 and 0.06. G2.5 remains open until the same audio is replayed through v4 and at least one alternative local/open engine.
+- Real LiveKit v3 replay run `31669141305` and openWakeWord replay run `31670716561` are deterministic over three repeats at thresholds 0.50 and 0.06 on the exact same model/audio SHAs. G2.5 remains open only for the pinned real v4 replay.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -163,7 +163,7 @@ Acceptable evidence:
 
 - [ ] **G2.5 Offline deterministic replay exists** — P0 / AI-ENG  
   DoD: identical recording can be replayed through v3/v4/other engines with pinned model/threshold/version metadata.
-  Partial evidence: commit `0d6f7188fc15d05a31045944b9d4d240877d3148` adds the LiveKit v3 adapter and artifact-pinned replay workflow; unit run `31669141480` passes 25 tests. Real replay run `31669141305` verified pinned model SHA `3cff1a6c...` and audio SHA `a9551898...`, then produced identical results over three repeats at thresholds 0.50 and 0.06. See `aihub/wakeword/V3_REAL_REPLAY_EVIDENCE.md`. Keep unchecked until v4 and another local/open engine replay the same audio SHA.
+  Partial evidence: commit `0d6f7188fc15d05a31045944b9d4d240877d3148` adds the LiveKit v3 adapter and artifact-pinned replay workflow; unit run `31669141480` passes 25 tests. Real replay run `31669141305` verified pinned model SHA `3cff1a6c...` and audio SHA `a9551898...`, then produced identical results over three repeats at thresholds 0.50 and 0.06. Commit `4c59e9ea612190ec9bd80ccc7ac8562450f5577a` adds the openWakeWord `0.6.0` compatibility adapter with pinned official feature-model hashes and initialization seed; unit run `31670716607` passes 32 tests and real replay run `31670716561` is 3/3 deterministic at both thresholds on the same classifier/audio SHAs. See `aihub/wakeword/V3_REAL_REPLAY_EVIDENCE.md` and `aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`. Keep unchecked until a pinned real v4 classifier replays the same audio SHA.
 
 ## G2-B. Metrics and reports
 
@@ -196,6 +196,7 @@ Acceptable evidence:
 - [ ] **G2.15 v4 candidate evaluated on identical benchmark** — P0 / AI-ENG.
 - [ ] **G2.16 At least one alternative fully local/open KWS evaluated** — P0 / AI-ENG.  
   Candidates: openWakeWord, sherpa-onnx, microWakeWord or another legally compatible local engine.
+  Partial evidence: openWakeWord `0.6.0` compatibility replay run `31670716561` passed with pinned feature-model hashes, seed and 3/3 deterministic results on the shared positive WAV. This is not yet a full benchmark evaluation; keep unchecked until the shared positive, hard-negative and long-negative corpus produces recall/FRR, FPPH and latency/resource evidence. See `aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`.
 
 - [ ] **G2.17 Two-stage architecture prototype evaluated** — P1 / AI-ENG  
   DoD: Stage A high-recall KWS → Stage B high-precision phrase verifier; benchmark demonstrates whether cascade improves false-trigger economics.

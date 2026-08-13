@@ -1,6 +1,6 @@
 # Okja v3 real offline replay evidence
 
-**Status:** partial evidence for G2.5; v3 path verified, v4 and an alternative engine still required.
+**Status:** partial evidence for G2.5; v3 path verified and the alternative-engine replay is recorded separately, but v4 is still required.
 
 ## Provenance
 
@@ -26,4 +26,4 @@ The result is consistent with the existing v3 rejection: the normal 0.50 thresho
 
 ## G2.5 closure condition
 
-Do not close G2.5 from this run alone. Replay this exact audio SHA through a pinned v4 model and at least one pinned local/open alternative engine, then retain equivalent manifests and detection JSONL for all three engines.
+Do not close G2.5 from this run alone. The pinned openWakeWord compatibility replay is now recorded in `OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md`; replay this exact audio SHA through a pinned real v4 model, then retain equivalent manifests and detection JSONL for all three paths.
