@@ -240,228 +240,210 @@ def test_requested_correction_and_cancel_never_touch_attendance(operational):
 
 
 def test_approved_employee_date_correction_has_no_cross_employee_phantoms(operational):
-    path,a,b,_=opÛ~­¢G§²ÚîÆ­yßtype,
-         raw_payload,source_filename,source_hash,dedupe_key)
-        VALUES('SC-1','001',?,?,?,'unknown','{}','fictional.xls','fictional-hash',?)""",
-        (employee,date+"T07:00:00",date,key))
-
-
-def test_confirmed_attendance_preserved_but_conflict_is_authoritative(operational):
-    path,a,_,_=operational;conn=db.connect(path)
-    _insert_punch(conn,a,"2026-08-10","confirmed-before")
-    conn.execute("""INSERT INTO attendance_days(employee_id,work_date,status,actual_in_at,
-        source,review_flag,confirmed_at,confirmed_by)
-        VALUES(?,'2026-08-10','late','2026-08-10T07:00:00','fingerprint',
-               'manual_review','2026-08-12T00:00:00.000Z','operator')""",(a,))
-    before=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
-    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    after=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
-    assert after==before
-    assert leave.list_leave(conn,month_start="2026-08-01",month_end="2026-08-31")[0]["finding"]=="leave_attendance_conflict"
-    view=__import__("app.services.ops",fromlist=["week_view"]).week_view(conn,"2026-08-10","2026-08-10")
-    employee=view["employees"][0]
-    assert employee["cells"][0]["issue"] is True
-
-
-def test_import_after_confirmed_leave_surfaces_conflict_without_overwrite(operational,tmp_path):
-    path,a,_,_=operational;conn=db.connect(path)
-    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    conn.execute("UPDATE attendance_days SET status='late',review_flag='manual_review',confirmed_at='2026-08-12T00:00:00.000Z' WHERE employee_id=?",(a,))
-    before=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
-    source=build_export(tmp_path/"confirmed.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
-    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
-    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
-    conn=db.connect(path);after=dict(conn.execute("SELECT * FROM attendance_days").fetchone())
-    assert after==before
-    assert leave.list_leave(conn)[0]["finding"]=="leave_attendance_conflict"
-
-
-def test_rollback_leave_conflict_clears_fingerprint_times_and_owner(operational,tmp_path):
-    path,a,_,_=operational;conn=db.connect(path)
-    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
-    source=build_export(tmp_path/"rollback.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{10:["07:00","16:00"]})])
-    p=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
-    xls_pipeline.apply_import(p.import_run_id,p.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
-    xls_pipeline.rollback_import(p.import_run_id,"mapping correction",db_path=path)
-    conn=db.connect(path);attendance=conn.execute("""SELECT status,actual_in_at,actual_out_at,
-        source,review_flag,last_import_run_id FROM attendance_days""").fetchone()
-    assert tuple(attendance)==("leave",None,None,"manual",None,None)
-    assert conn.execute("SELECT COUNT(*) FROM punch_events WHERE rolled_back_at IS NULL").fetchone()[0]==0
-    leave.cancel_leave(conn,row["id"],"leave cancelled")
-    attendance=conn.execute("SELECT actual_in_at,actual_out_at,status FROM attendance_days").fetchone()
-    assert tuple(attendance)==(None,None,"unknown")
-
-
-def test_replacement_status_lifecycle_patch_and_link_validation(operational):
     path,a,b,_=operational;conn=db.connect(path)
-    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
-        start_date="2026-08-10",end_date="2026-08-10",zone="Site A")
-    repl.set_status(conn,assignment["id"],"confirmed");repl.set_status(conn,assignment["id"],"completed")
-    with pytest.raises(repl.ReplacementError):repl.set_status(conn,assignment["id"],"planned")
-    with pytest.raises(repl.ReplacementError):repl.update_assignment(conn,assignment["id"],{"zone":"Site B"})
-    cancelled=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
-        start_date="2026-08-11",end_date="2026-08-11",zone="Site A")
-    repl.set_status(conn,cancelled["id"],"cancelled")
-    with pytest.raises(repl.ReplacementError):repl.set_status(conn,cancelled["id"],"confirmed")
-    with TestClient(create_app()) as client:
-        assert client.post(f"/api/v1/replacement-operations/{assignment['id']}/status",
-                           json={"status":"planned"}).status_code==409
-        assert client.patch(f"/api/v1/replacement-operations/{assignment['id']}",
-                            json={"status":"planned"}).status_code==409
+    row=create(conn,a,start="2026-08-10",end="2026-08-10");leave.approve_leave(conn,row["id"])
+    leave.correct_leave(conn,row["id"],employee_id=b,leave_type="annual_leave",
+        start_date="2026-08-11",eïËh‘éì¶»§q«^tÏO^ÊKŒŒ‹LLLŠNˆ[šÛ›İÛˆ‹
+‹ŒŒ‹LLLHŠNˆ›X]™HŸB‚‚™YˆÚ[œÙ\Ü[˜Ú
+ÛÛ›‹[\ŞYYK]KÙ^JN‚ˆÛÛ›‹™^Xİ]Jˆˆ’S”ÑT•S•È[˜ÚÙ]™[Âˆ
+\›Z[˜[ÚY\›Z[˜[ÜÛİØÛÙK[\ŞYYWÚY[˜ÚØ]ÛÜš×Ù]K[˜Úİ\Kˆ˜]×Ü^[ØYÛİ\˜ÙWÙš[[˜[YKÛİ\˜ÙWÚ\ÚY\WÚÙ^JBˆSQTÊ	ÔĞËLIË	ÌIËËËË	İ[šÛ›İÛ‰Ë	ŞßIË	ÙšXİ[Û˜[ÉË	ÙšXİ[Û˜[Z\Ú	ËÊHˆˆ‹ˆ
+[\ŞYYK]JÈ•ÎŒŒ‹]KÙ^JJB‚‚™Yˆ\İØÛÛ™š\›YYØ][™[˜ÙWÜ™\Ù\™YØ]ØÛÛ™›XİÚ\×Ø]]Üš]]]™JÜ\˜][Û˜[
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆÚ[œÙ\Ü[˜Ú
+ÛÛ›‹KŒŒ‹LLL‹˜ÛÛ™š\›YYX™Y›Ü™HŠBˆÛÛ›‹™^Xİ]Jˆˆ’S”ÑT•S•È][™[˜ÙWÙ^\Ê[\ŞYYWÚYÛÜš×Ù]Kİ]\ËXİX[Ú[—Ø]ˆÛİ\˜ÙK™]šY]×Ù›YËÛÛ™š\›YYØ]ÛÛ™š\›YYØJBˆSQTÊË	ÌŒ‹LLL	Ë	Û]IË	ÌŒ‹LLLÎŒŒ	Ë	Ùš[™Ù\œš[	Ëˆ	ÛX[X[Ü™]šY]ÉË	ÌŒ‹LLL•ŒŒŒ‰Ë	ÛÜ\˜]Ü‰ÊHˆˆ‹
+K
+JBˆ™Y›Ü™OYXİ
+ÛÛ›‹™^Xİ]J”ÑSPÕ
+ˆ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JBˆ›İÏXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLL‹[™HŒŒ‹LLLŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆY\YXİ
+ÛÛ›‹™^Xİ]J”ÑSPÕ
+ˆ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JBˆ\ÜÙ\Y\OX™Y›Ü™Bˆ\ÜÙ\X]™K›\İÛX]™JÛÛ›‹[ÛÜİ\HŒŒ‹LLH‹[ÛÙ[™HŒŒ‹LLÌHŠVÌVÈ™š[™[™È—OOH›X]™WØ][™[˜ÙWØÛÛ™›Xİ‚ˆšY]ÏW×Ú[\Ü×Ê˜\œÙ\šXÙ\Ë›ÜÈ‹œ›Û[\İVÈÙYZ×İšY]È—JKÙYZ×İšY]ÊÛÛ›‹ŒŒ‹LLL‹ŒŒ‹LLLŠBˆ[\ŞYYO]šY]ÖÈ™[\ŞYY\È—VÌBˆ\ÜÙ\[\ŞYYVÈ˜Ù[È—VÌVÈš\ÜİYH—H\ÈYB‚‚™Yˆ\İÚ[\ÜØY\—ØÛÛ™š\›YYÛX]™WÜİ\™˜XÙ\×ØÛÛ™›XİİÚ]İ]Ûİ™\Üš]JÜ\˜][Û˜[\Ü]
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ›İÏXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLL‹[™HŒŒ‹LLLŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆÛÛ›‹™^Xİ]J•TUH][™[˜ÙWÙ^\ÈÑUİ]\ÏIÛ]IË™]šY]×Ù›YÏIÛX[X[Ü™]šY]ÉËÛÛ™š\›YYØ]IÌŒ‹LLL•ŒŒŒ‰ÈÒT‘H[\ŞYYWÚYOÈ‹
+K
+JBˆ™Y›Ü™OYXİ
+ÛÛ›‹™^Xİ]J”ÑSPÕ
+ˆ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JBˆÛÛ›‹™^Xİ]J’S”ÑT•S•È\›Z[˜[ÜÛİÊÛİØÛÙK[\ŞYYWÚYY™™Xİ]™WÙœ›ÛKİ]\ÊHSQTÊ	ÌIËË	ÌŒ‹LKLIË	ÛX\Y	ÊH‹
+K
+JNØÛÛ›‹˜ÛÛ[Z]
 
+NØÛÛ›‹˜ÛÜÙJ
+BˆÛİ\˜ÙOXZ[Ù^Ü
+\Ü]È˜ÛÛ™š\›YYÈ‹YX\LŒ‹[ÛNÛİÏVÔÛİÜXÊŒH‹‘šXİ[Û˜[‹ÌL–ÈŒÎŒ‹ŒMŒ—_JWJBˆ^×Ü\[[™Kœ™]šY]×Ú[\Ü
+Ûİ\˜ÙK—Ü]\]\ØY×Ù\]\Ü]È\ŠBˆ×Ü\[[™K˜\WÚ[\Ü
+š[\ÜÜ[—ÚY˜ÛÛ™š\›X][Û—İÚÙ[‹—Ü]\]˜XÚİ\×Ù\]\Ü]È˜˜XÚÈŠBˆÛÛ›Y‹˜ÛÛ›™Xİ
+]
+NØY\YXİ
+ÛÛ›‹™^Xİ]J”ÑSPÕ
+ˆ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JBˆ\ÜÙ\Y\OX™Y›Ü™Bˆ\ÜÙ\X]™K›\İÛX]™JÛÛ›ŠVÌVÈ™š[™[™È—OOH›X]™WØ][™[˜ÙWØÛÛ™›Xİ‚‚‚™Yˆ\İÜ›Û˜XÚ×ÛX]™WØÛÛ™›XİØÛX\œ×Ùš[™Ù\œš[İ[Y\×Ø[™ÛİÛ™\ŠÜ\˜][Û˜[\Ü]
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ›İÏXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLL‹[™HŒŒ‹LLLŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆÛÛ›‹™^Xİ]J’S”ÑT•S•È\›Z[˜[ÜÛİÊÛİØÛÙK[\ŞYYWÚYY™™Xİ]™WÙœ›ÛKİ]\ÊHSQTÊ	ÌIËË	ÌŒ‹LKLIË	ÛX\Y	ÊH‹
+K
+JNØÛÛ›‹˜ÛÛ[Z]
 
-def test_month_overlap_filters_and_multiday_replacement_stats(operational):
-    path,a,b,_=operational;conn=db.connect(path)
-    create(conn,a,start="2026-08-31",end="2026-09-02")
-    repl_row=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
-        start_date="2026-08-10",end_date="2026-08-12",zone="Site A")
-    repl.set_status(conn,repl_row["id"],"confirmed")
-    conn.commit()
-    with TestClient(create_app()) as client:
-        assert len(client.get("/api/v1/leave-operations?month=2026-08").json()["leaves"])==1
-        assert len(client.get("/api/v1/leave-operations?month=2026-09").json()["leaves"])==1
-        assert client.get("/api/v1/leave-operations?month=2026-09").json()["balanceYear"]==2026
-    from app.services import ops
-    stats=ops.month_stats(conn,2026,8)
-    assert [stats[str(day)]["replace"] for day in (10,11,12)]==[1,1,1]
-    week=ops.week_view(conn,"2026-08-10","2026-08-10")
-    worker=week["employees"][1]
-    assert [cell["type"] for cell in worker["cells"][:3]]==["replacement"]*3
+NØÛÛ›‹˜ÛÜÙJ
+BˆÛİ\˜ÙOXZ[Ù^Ü
+\Ü]Èœ›Û˜XÚËÈ‹YX\LŒ‹[ÛNÛİÏVÔÛİÜXÊŒH‹‘šXİ[Û˜[‹ÌL–ÈŒÎŒ‹ŒMŒ—_JWJBˆ^×Ü\[[™Kœ™]šY]×Ú[\Ü
+Ûİ\˜ÙK—Ü]\]\ØY×Ù\]\Ü]È\ŠBˆ×Ü\[[™K˜\WÚ[\Ü
+š[\ÜÜ[—ÚY˜ÛÛ™š\›X][Û—İÚÙ[‹—Ü]\]˜XÚİ\×Ù\]\Ü]È˜˜XÚÈŠBˆ×Ü\[[™Kœ›Û˜XÚ×Ú[\Ü
+š[\ÜÜ[—ÚY›X\[™ÈÛÜœ™Xİ[Ûˆ‹—Ü]\]
+BˆÛÛ›Y‹˜ÛÛ›™Xİ
+]
+NØ][™[˜ÙOXÛÛ›‹™^Xİ]Jˆˆ”ÑSPÕİ]\ËXİX[Ú[—Ø]XİX[Ûİ]Ø]ˆÛİ\˜ÙK™]šY]×Ù›YË\İÚ[\ÜÜ[—ÚY”“ÓH][™[˜ÙWÙ^\ÈˆˆŠK™™]ÚÛ™J
+Bˆ\ÜÙ\\J][™[˜ÙJOOJ›X]™H‹›Û™K›Û™K›X[X[‹›Û™K›Û™JBˆ\ÜÙ\ÛÛ›‹™^Xİ]J”ÑSPÕÓÕS•
 
+ŠH”“ÓH[˜ÚÙ]™[ÈÒT‘H›ÛYØ˜XÚ×Ø]TÈ•SŠK™™]ÚÛ™J
+VÌOOLˆX]™K˜Ø[˜Ù[ÛX]™JÛÛ›‹›İÖÈšY—K›X]™HØ[˜Ù[YŠBˆ][™[˜ÙOXÛÛ›‹™^Xİ]J”ÑSPÕXİX[Ú[—Ø]XİX[Ûİ]Ø]İ]\È”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+Bˆ\ÜÙ\\J][™[˜ÙJOOJ›Û™K›Û™K[šÛ›İÛˆŠB‚‚™Yˆ\İÜ™\XÙ[Y[Üİ]\×ÛY™XŞXÛWÜ]ÚØ[™Û[š×İ˜[Y][ÛŠÜ\˜][Û˜[
+N‚ˆ]K‹Ï[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ\ÜÚYÛ›Y[\™\˜Ü™X]WØ\ÜÚYÛ›Y[
+ÛÛ›‹XœÙ[Ù[\ŞYYWÚYXK™\XÙ[Y[Ù[\ŞYYWÚYX‹ˆİ\Ù]OHŒŒ‹LLL‹[™Ù]OHŒŒ‹LLL‹›Û™OH”Ú]HHŠBˆ™\œÙ]Üİ]\ÊÛÛ›‹\ÜÚYÛ›Y[ÈšY—K˜ÛÛ™š\›YYŠNÜ™\œÙ]Üİ]\ÊÛÛ›‹\ÜÚYÛ›Y[ÈšY—K˜ÛÛ\]YŠBˆÚ]]\İœ˜Z\Ù\Ê™\”™\XÙ[Y[\œ›ÜŠNœ™\œÙ]Üİ]\ÊÛÛ›‹\ÜÚYÛ›Y[ÈšY—Kœ[›™YŠBˆÚ]]\İœ˜Z\Ù\Ê™\”™\XÙ[Y[\œ›ÜŠNœ™\\]WØ\ÜÚYÛ›Y[
+ÛÛ›‹\ÜÚYÛ›Y[ÈšY—KÈ›Û™Hˆ”Ú]HˆŸJBˆØ[˜Ù[Y\™\˜Ü™X]WØ\ÜÚYÛ›Y[
+ÛÛ›‹XœÙ[Ù[\ŞYYWÚYXK™\XÙ[Y[Ù[\ŞYYWÚYX‹ˆİ\Ù]OHŒŒ‹LLLH‹[™Ù]OHŒŒ‹LLLH‹›Û™OH”Ú]HHŠBˆ™\œÙ]Üİ]\ÊÛÛ›‹Ø[˜Ù[YÈšY—K˜Ø[˜Ù[YŠBˆÚ]]\İœ˜Z\Ù\Ê™\”™\XÙ[Y[\œ›ÜŠNœ™\œÙ]Üİ]\ÊÛÛ›‹Ø[˜Ù[YÈšY—K˜ÛÛ™š\›YYŠBˆÚ]\İÛY[
+Ü™X]WØ\
 
-@pytest.mark.parametrize("date,is_working,expected",[
-    ("2026-08-08",None,False),
-    ("2026-08-10",False,False),
-    ("2026-08-08",True,True),
-])
-def test_leave_punch_conflict_respects_work_calendar(operational,date,is_working,expected):
-    path,a,_,_=operational;conn=db.connect(path)
-    if is_working is not None:
-        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES(?,?,?)",(date,"special",is_working))
-    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    _insert_punch(conn,a,date,"calendar-"+date)
-    item=leave.list_leave(conn)[0]
-    assert ("leave_attendance_conflict" in item["findings"]) is expected
-    from app.services import ops
-    view=ops.week_view(conn,"2026-08-07","2026-08-07")
-    cell=view["employees"][0]["cells"][(int(date[-2:])-7)]
-    assert (cell.get("issue") is True) is expected
+JH\ÈÛY[‚ˆ\ÜÙ\ÛY[œÜİ
+ˆ‹Ø\KİŒKÜ™\XÙ[Y[[Ü\˜][ÛœËŞØ\ÜÚYÛ›Y[ÉÚY	×_KÜİ]\È‹ˆœÛÛ^Èœİ]\Èˆœ[›™YŸJKœİ]\×ØÛÙOOMBˆ\ÜÙ\ÛY[œ]Ú
+ˆ‹Ø\KİŒKÜ™\XÙ[Y[[Ü\˜][ÛœËŞØ\ÜÚYÛ›Y[ÉÚY	×_H‹ˆœÛÛ^Èœİ]\Èˆœ[›™YŸJKœİ]\×ØÛÙOOMB‚‚™Yˆ\İÛ[ÛÛİ™\›\Ùš[\œ×Ø[™Û][Y^WÜ™\XÙ[Y[Üİ]ÊÜ\˜][Û˜[
+N‚ˆ]K‹Ï[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLÌH‹[™HŒŒ‹LKLˆŠBˆ™\Ü›İÏ\™\˜Ü™X]WØ\ÜÚYÛ›Y[
+ÛÛ›‹XœÙ[Ù[\ŞYYWÚYXK™\XÙ[Y[Ù[\ŞYYWÚYX‹ˆİ\Ù]OHŒŒ‹LLL‹[™Ù]OHŒŒ‹LLLˆ‹›Û™OH”Ú]HHŠBˆ™\œÙ]Üİ]\ÊÛÛ›‹™\Ü›İÖÈšY—K˜ÛÛ™š\›YYŠBˆÛÛ›‹˜ÛÛ[Z]
 
+BˆÚ]\İÛY[
+Ü™X]WØ\
 
-def test_approved_am_pm_aggregate_to_full_day(operational):
-    path,a,_,_=operational;conn=db.connect(path)
-    am=create(conn,a,"half_day","2026-08-10","2026-08-10","am")
-    pm=create(conn,a,"half_day","2026-08-10","2026-08-10","pm")
-    leave.approve_leave(conn,am["id"]);leave.approve_leave(conn,pm["id"])
-    assert leave.balance(conn,a,2026)["used"]==1.0
-    assert leave.approved_leave_coverage(conn,a,"2026-08-10")["coverage"]=="full"
-    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave",None)
-    _insert_punch(conn,a,"2026-08-10","both-halves")
-    leave._sync_attendance(conn,a,{"2026-08-10"})
-    assert tuple(conn.execute("SELECT status,review_flag FROM attendance_days").fetchone())==("leave","leave_attendance_conflict")
+JH\ÈÛY[‚ˆ\ÜÙ\[ŠÛY[™Ù]
+‹Ø\KİŒKÛX]™K[Ü\˜][ÛœÏÛ[ÛLŒ‹LŠKšœÛÛŠ
+VÈ›X]™\È—JOOLBˆ\ÜÙ\[ŠÛY[™Ù]
+‹Ø\KİŒKÛX]™K[Ü\˜][ÛœÏÛ[ÛLŒ‹LHŠKšœÛÛŠ
+VÈ›X]™\È—JOOLBˆ\ÜÙ\ÛY[™Ù]
+‹Ø\KİŒKÛX]™K[Ü\˜][ÛœÏÛ[ÛLŒ‹LHŠKšœÛÛŠ
+VÈ˜˜[[˜ÙVYX\ˆ—OOLŒ‚ˆœ›ÛH\œÙ\šXÙ\È[\ÜÜÂˆİ]Ï[ÜË›[ÛÜİ]ÊÛÛ›‹Œ‹
+Bˆ\ÜÙ\Üİ]ÖÜİŠ^JWVÈœ™\XÙH—H›Üˆ^H[ˆ
+LLKLŠWOOVÌKKWBˆÙYZÏ[ÜËÙYZ×İšY]ÊÛÛ›‹ŒŒ‹LLL‹ŒŒ‹LLLŠBˆÛÜšÙ\]ÙYZÖÈ™[\ŞYY\È—VÌWBˆ\ÜÙ\ØÙ[È\H—H›ÜˆÙ[[ˆÛÜšÙ\–È˜Ù[È—VÎŒ×WOOVÈœ™\XÙ[Y[—JŒÂ‚‚]\İ›X\šËœ\˜[Y]š^™J™]K\×İÛÜšÚ[™Ë^XİY‹Âˆ
+ŒŒ‹LL‹›Û™K˜[ÙJKˆ
+ŒŒ‹LLL‹˜[ÙK˜[ÙJKˆ
+ŒŒ‹LL‹YKYJK—JB™Yˆ\İÛX]™WÜ[˜ÚØÛÛ™›XİÜ™\ÜXİ×İÛÜš×ØØ[[™\ŠÜ\˜][Û˜[]K\×İÛÜšÚ[™Ë^XİY
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆYˆ\×İÛÜšÚ[™È\È›İ›Û™N‚ˆÛÛ›‹™^Xİ]J’S”ÑT•S•ÈÚ]WØØ[[™\ŠØ[[™\—Ù]K^Wİ\K\×İÛÜšÚ[™ÊHSQTÊËËÊH‹
+]KœÜXÚX[‹\×İÛÜšÚ[™ÊJBˆ›İÏXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLÈ‹[™HŒŒ‹LLLŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆÚ[œÙ\Ü[˜Ú
+ÛÛ›‹K]K˜Ø[[™\‹HŠÙ]JBˆ][O[X]™K›\İÛX]™JÛÛ›ŠVÌBˆ\ÜÙ\
+›X]™WØ][™[˜ÙWØÛÛ™›Xİˆ[ˆ][VÈ™š[™[™ÜÈ—JH\È^XİYˆœ›ÛH\œÙ\šXÙ\È[\ÜÜÂˆšY]Ï[ÜËÙYZ×İšY]ÊÛÛ›‹ŒŒ‹LLÈ‹ŒŒ‹LLÈŠBˆÙ[]šY]ÖÈ™[\ŞYY\È—VÌVÈ˜Ù[È—VÊ[
+]VËL—JKMÊWBˆ\ÜÙ\
+Ù[™Ù]
+š\ÜİYHŠH\ÈYJH\È^XİY‚‚™Yˆ\İØ\›İ™YØ[WÜWØYÙÜ™YØ]Wİ×Ù[Ù^JÜ\˜][Û˜[
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ[OXÜ™X]JÛÛ›‹Kš[—Ù^H‹ŒŒ‹LLL‹ŒŒ‹LLL‹˜[HŠBˆOXÜ™X]JÛÛ›‹Kš[—Ù^H‹ŒŒ‹LLL‹ŒŒ‹LLL‹œHŠBˆX]™K˜\›İ™WÛX]™JÛÛ›‹[VÈšY—JNÛX]™K˜\›İ™WÛX]™JÛÛ›‹VÈšY—JBˆ\ÜÙ\X]™K˜˜[[˜ÙJÛÛ›‹KŒŠVÈ\ÙY—OOLKŒˆ\ÜÙ\X]™K˜\›İ™YÛX]™WØÛİ™\˜YÙJÛÛ›‹KŒŒ‹LLLŠVÈ˜Ûİ™\˜YÙH—OOH™[‚ˆ\ÜÙ\\JÛÛ›‹™^Xİ]J”ÑSPÕİ]\Ë™]šY]×Ù›YÈ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JOOJ›X]™H‹›Û™JBˆÚ[œÙ\Ü[˜Ú
+ÛÛ›‹KŒŒ‹LLL‹˜›İZ[™\ÈŠBˆX]™K—ÜŞ[˜×Ø][™[˜ÙJÛÛ›‹KÈŒŒ‹LLLŸJBˆ\ÜÙ\\JÛÛ›‹™^Xİ]J”ÑSPÕİ]\Ë™]šY]×Ù›YÈ”“ÓH][™[˜ÙWÙ^\ÈŠK™™]ÚÛ™J
+JOOJ›X]™H‹›X]™WØ][™[˜ÙWØÛÛ™›XİŠB‚‚™Yˆ\İÜÚXÚ×ÛZ\ÛX]ÚØ[™Ü[˜ÚÜ™\Ù\™WØ›İÙš[™[™ÜÊÜ\˜][Û˜[
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ›İÏXÜ™X]JÛÛ›‹KœÚXÚ×ÛX]™H‹ŒŒ‹LL‹ŒŒ‹LKLLH‹]šY[˜ÙWÜ™XÙZ]™YUYKˆ]šY[˜ÙWÜİ\Ù]OHŒŒ‹LL‹]šY[˜ÙWÙ[™Ù]OHŒŒ‹LLÌHŠBˆX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆ\ÜÙ\X]™K›\İÛX]™JÛÛ›ŠVÌVÈ™š[™[™ÜÈ—OOVÈœÚXÚ×ÛX]™WÙ]šY[˜ÙWÛZ\ÛX]Ú—BˆÚ[œÙ\Ü[˜Ú
+ÛÛ›‹KŒŒ‹LL‹œÚXÚËX›İŠBˆš[™[™ÜÏ[X]™K›\İÛX]™JÛÛ›ŠVÌVÈ™š[™[™ÜÈ—Bˆ\ÜÙ\š[™[™ÜÏOVÈœÚXÚ×ÛX]™WÙ]šY[˜ÙWÛZ\ÛX]Ú‹›X]™WØ][™[˜ÙWØÛÛ™›Xİ—B‚‚™Yˆ\İÜ™\XÙ[Y[ÙY]Ü™]˜[Y]\×Û[š×Ø[™Ø[İÜ×Û[ØXœÙ[
+Ü\˜][Û˜[
+N‚ˆ]K‹Ï[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆİ\XÛÛ›‹™^Xİ]J’S”ÑT•S•È[\ŞYY\Ê[\ŞYYWØÛÙK˜[YK\™WÙ]Kİ]\ÊHSQTÊ	ÔQ	Ë	ÑšXİ[Û˜[	Ë	ÌŒŒLKLIË	ØXİ]™IÊHŠK›\İ›İÚYˆ[šÙYXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLL‹[™HŒŒ‹LLLˆŠBˆ\ÜÚYÛ›Y[\™\˜Ü™X]WØ\ÜÚYÛ›Y[
+ÛÛ›‹XœÙ[Ù[\ŞYYWÚYXK™\XÙ[Y[Ù[\ŞYYWÚYX‹ˆİ\Ù]OHŒŒ‹LLL‹[™Ù]OHŒŒ‹LLLˆ‹›Û™OHH‹X]™WÜ™\]Y\İÚY[[šÙYÈšY—JBˆÚ]]\İœ˜Z\Ù\Ê™\”™\XÙ[Y[\œ›Ü‹X]ÚH˜™[Û™ÈŠN‚ˆ™\\]WØ\ÜÚYÛ›Y[
+ÛÛ›‹\ÜÚYÛ›Y[ÈšY—KÈ˜XœÙ[[\ŞYYRY›İ\ŸJBˆÚ]]\İœ˜Z\Ù\Ê™\”™\XÙ[Y[\œ›Ü‹X]ÚH˜Ûİ™\™YŠN‚ˆ™\\]WØ\ÜÚYÛ›Y[
+ÛÛ›‹\ÜÚYÛ›Y[ÈšY—KÈœİ\]HˆŒŒ‹LLMH‹™[™]HˆŒŒ‹LLMHŸJBˆÛÜÙO\™\˜Ü™X]WØ\ÜÚYÛ›Y[
+ÛÛ›‹XœÙ[Ù[\ŞYYWÚYS›Û™K™\XÙ[Y[Ù[\ŞYYWÚYX‹ˆİ\Ù]OHŒŒ‹LLLÈ‹[™Ù]OHŒŒ‹LLLÈ‹›Û™OHHŠBˆÚ[™ÙY\™\\]WØ\ÜÚYÛ›Y[
+ÛÛ›‹ÛÜÙVÈšY—KÈ›Û™Hˆˆ‹››İHˆ™šXİ[Û˜[ŸJBˆ\ÜÙ\Ú[™ÙYÈ˜XœÙ[[\ŞYYRY—H\È›Û™H[™Ú[™ÙYÈ›Û™H—OOHˆ‚ˆ\ÜÙ\ÛÛ›‹™^Xİ]J”ÑSPÕÓÕS•
 
+ŠH”“ÓH]Y]ÛÙÈÒT‘HXİ[ÛIÜ™\XÙ[Y[\]IÈŠK™™]ÚÛ™J
+VÌOOLB‚‚]\İ›X\šËœ\˜[Y]š^™Jœ^[ØY‹ÂˆÈ›X]™U\Hˆ˜[›X[ÛX]™H‹œİ\]HˆŒŒ‹LLLH‹™[™]HˆŒŒ‹LLL‹œÜ[Ûˆˆ™[ŸKˆÈ›X]™U\Hˆš[—Ù^H‹œİ\]HˆŒŒ‹LLL‹™[™]HˆŒŒ‹LLLH‹œÜ[Ûˆˆ˜[HŸK—JB™Yˆ\İØ˜YÛX]™WØØ[[™\—Ú[œ]×Ø\™WØÛÛ›ÛYÚÙ\œ›ÜœÊÜ\˜][Û˜[^[ØY
+N‚ˆ]KËÏ[Ü\˜][Û˜[ˆ^[ØY^È™[\ŞYYRY˜K
+Šœ^[ØYBˆÚ]\İÛY[
+Ü™X]WØ\
 
-def test_sick_mismatch_and_punch_preserve_both_findings(operational):
-    path,a,_,_=operational;conn=db.connect(path)
-    row=create(conn,a,"sick_leave","2026-08-04","2026-09-11",evidence_received=True,
-        evidence_start_date="2026-08-04",evidence_end_date="2026-08-31")
-    leave.approve_leave(conn,row["id"])
-    assert leave.list_leave(conn)[0]["findings"]==["sick_leave_evidence_mismatch"]
-    _insert_punch(conn,a,"2026-08-04","sick-both")
-    findings=leave.list_leave(conn)[0]["findings"]
-    assert findings==["sick_leave_evidence_mismatch","leave_attendance_conflict"]
+JH\ÈÛY[‚ˆ™\ÜÛœÙOXÛY[œÜİ
+‹Ø\KİŒKÛX]™K[Ü\˜][ÛœÈ‹œÛÛ\^[ØY
+Bˆ\ÜÙ\™\ÜÛœÙKœİ]\×ØÛÙH[ˆÍKŒŸBˆ\ÜÙ\‹˜ÛÛ›™Xİ
+]
+K™^Xİ]J”ÑSPÕÓÕS•
 
+ŠH”“ÓHX]™WÜ™\]Y\İÈŠK™™]ÚÛ™J
+VÌOOL‚‚™Yˆ\İÛÜ\˜][Û˜[İZWÚ[š]X[Û[ÛÚ\×Ù[˜[ZXÊ
+N‚ˆØÜš\T]
+œ\ÙM]ZKšœÈŠKœ™XYİ^
+[˜ÛÙ[™ÏH]‹NŠBˆ\ÜÙ\œÙ[XİY[ÛIÌŒ‹L	Èˆ›İ[ˆØÜš\ˆ\ÜÙ\››İË™Ù][YX\Š
+Hˆ[ˆØÜš\[™››İË™Ù][Û
 
-def test_replacement_edit_revalidates_link_and_allows_null_absent(operational):
-    path,a,b,_=operational;conn=db.connect(path)
-    other=conn.execute("INSERT INTO employees(employee_code,name,hire_date,status) VALUES('P4-D','Fictional D','2020-01-01','active')").lastrowid
-    linked=create(conn,a,start="2026-08-10",end="2026-08-12")
-    assignment=repl.create_assignment(conn,absent_employee_id=a,replacement_employee_id=b,
-        start_date="2026-08-10",end_date="2026-08-12",zone="A",leave_request_id=linked["id"])
-    with pytest.raises(repl.ReplacementError,match="belong"):
-        repl.update_assignment(conn,assignment["id"],{"absentEmployeeId":other})
-    with pytest.raises(repl.ReplacementError,match="covered"):
-        repl.update_assignment(conn,assignment["id"],{"startDate":"2026-08-15","endDate":"2026-08-15"})
-    loose=repl.create_assignment(conn,absent_employee_id=None,replacement_employee_id=b,
-        start_date="2026-08-13",end_date="2026-08-13",zone="A")
-    changed=repl.update_assignment(conn,loose["id"],{"zone":"B","note":"fictional"})
-    assert changed["absentEmployeeId"] is None and changed["zone"]=="B"
-    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='replacement.update'").fetchone()[0]==1
+JÌHˆ[ˆØÜš\‚‚™Yˆ\İŞ×Ù\š]˜][Û—İ\Ù\×Ø]]Üš]]]™WİÛÜš×ØØ[[™\ŠÜ\˜][Û˜[\Ü]
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆÛÛ›‹™^Xİ]J’S”ÑT•S•ÈÚ]WØØ[[™\ŠØ[[™\—Ù]K^Wİ\K\×İÛÜšÚ[™ÊHSQTÊ	ÌŒ‹LL	Ë	ÜÜXÚX[	ËJHŠBˆÛÛ›‹™^Xİ]J’S”ÑT•S•ÈÚ]WØØ[[™\ŠØ[[™\—Ù]K^Wİ\K\×İÛÜšÚ[™ÊHSQTÊ	ÌŒ‹LLL	Ë	ÚÛY^IË
+HŠBˆ›İÏXÜ™X]JÛÛ›‹Kİ\HŒŒ‹LLÈ‹[™HŒŒ‹LLLŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆÛÛ›‹™^Xİ]J’S”ÑT•S•È\›Z[˜[ÜÛİÊÛİØÛÙK[\ŞYYWÚYY™™Xİ]™WÙœ›ÛKİ]\ÊHSQTÊ	ÌIËË	ÌŒ‹LKLIË	ÛX\Y	ÊH‹
+K
+JNØÛÛ›‹˜ÛÛ[Z]
 
+NØÛÛ›‹˜ÛÜÙJ
+BˆÛİ\˜ÙOXZ[Ù^Ü
+\Ü]È˜Ø[[™\‹È‹YX\LŒ‹[ÛNÛİÏVÔÛİÜXÊŒH‹‘šXİ[Û˜[‹Âˆ–ÈŒÎŒ‹ŒMŒ—KL–ÈŒÎŒ‹ŒMŒ—_JWJBˆ™]šY]Ï^×Ü\[[™Kœ™]šY]×Ú[\Ü
+Ûİ\˜ÙK—Ü]\]\ØY×Ù\]\Ü]È\ŠBˆ×Ü\[[™K˜\WÚ[\Ü
+™]šY]Ëš[\ÜÜ[—ÚY™]šY]Ë˜ÛÛ™š\›X][Û—İÚÙ[‹—Ü]\]˜XÚİ\×Ù\]\Ü]È˜˜XÚÈŠBˆÛÛ›Y‹˜ÛÛ›™Xİ
+]
+Bˆ›İÜÏ^Ü–ÈÛÜš×Ù]H—N™Xİ
+ŠH›Üˆˆ[ˆÛÛ›‹™^Xİ]J”ÑSPÕÛÜš×Ù]Kİ]\Ë™]šY]×Ù›YÈ”“ÓH][™[˜ÙWÙ^\ÈÒT‘HÛÜš×Ù]HSˆ
+	ÌŒ‹LL	Ë	ÌŒ‹LLL	ÊHŠ_Bˆ\ÜÙ\›İÜÖÈŒŒ‹LL—VÈœ™]šY]×Ù›YÈ—OOH›X]™WØ][™[˜ÙWØÛÛ™›Xİ‚ˆ\ÜÙ\›İÜÖÈŒŒ‹LLL—VÈœİ]\È—OOH››Ü›X[ˆ[™›İÜÖÈŒŒ‹LLL—VÈœ™]šY]×Ù›YÈ—H\È›Û™B‚‚]\İ›X\šËœ\˜[Y]š^™J™]KØ[[™\—Ù[K^XİØÛÛ™›Xİ‹Âˆ
+ŒŒ‹LL‹›Û™K˜[ÙJKˆ
+ŒŒ‹LLNH‹
+šÛY^H‹º¬ ; àH;g-;'oŠK˜[ÙJKˆ
+ŒŒ‹LLŒˆ‹
+œÜXÚX[‹Kº¬ ; àH;a¨;&¥:­ï:ë-ŠKYJK—JB™Yˆ\İŞ×Ü™]šY]×ÛX]™WØÛÛ™›Xİİ\Ù\×İÛÜš×ØØ[[™\ŠˆÜ\˜][Û˜[\Ü]]KØ[[™\—Ù[K^XİØÛÛ™›XİŠN‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆX\[™×Ù]OHŒŒ‹LKLH‚ˆÛÛ›‹™^Xİ]J’S”ÑT•S•È\›Z[˜[ÜÛİÊÛİØÛÙK[\ŞYYWÚYY™™Xİ]™WÙœ›ÛKİ]\ÊHSQTÊ	ÌIËËË	ÛX\Y	ÊH‹
+KX\[™×Ù]JJBˆYˆØ[[™\—Ù[N‚ˆÛÛ›‹™^Xİ]J’S”ÑT•S•ÈÚ]WØØ[[™\ŠØ[[™\—Ù]K^Wİ\K\×İÛÜšÚ[™ËX™[
+HSQTÊËËËÊH‹
+]K
+˜Ø[[™\—Ù[JJBˆX]™WÜİ\X]™WÙ[™JŒŒ‹LLÈ‹ŒŒ‹LLLŠHYˆ]OOHŒŒ‹LLˆ[ÙH
 
-@pytest.mark.parametrize("payload",[
-    {"leaveType":"annual_leave","startDate":"2026-08-11","endDate":"2026-08-10","portion":"full"},
-    {"leaveType":"half_day","startDate":"2026-08-10","endDate":"2026-08-11","portion":"am"},
-])
-def test_bad_leave_calendar_inputs_are_controlled_http_errors(operational,payload):
-    path,a,_,_=operational
-    payload={"employeeId":a,**payload}
-    with TestClient(create_app()) as client:
-        response=client.post("/api/v1/leave-operations",json=payload)
-    assert response.status_code in {409,422}
-    assert db.connect(path).execute("SELECT COUNT(*) FROM leave_requests").fetchone()[0]==0
+ŒŒ‹LLN‹ŒŒ‹LLŒŠHYˆ]OOHŒŒ‹LLNHˆ[ÙH
+]K]JJBˆ›İÏXÜ™X]JÛÛ›‹Kİ\[X]™WÜİ\[™[X]™WÙ[™
+NÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JNØÛÛ›‹˜ÛÛ[Z]
 
+NØÛÛ›‹˜ÛÜÙJ
+Bˆ^OZ[
+]VËL—JNÜÛİ\˜ÙOXZ[Ù^Ü
+\Ü]Èœ™]šY]ËXØ[[™\‹È‹YX\LŒ‹[ÛNˆÛİÏVÔÛİÜXÊŒH‹‘šXİ[Û˜[‹Ù^N–ÈŒÎMH‹ŒMŒH—_JWJBˆ™]šY]Ï^×Ü\[[™Kœ™]šY]×Ú[\Ü
+Ûİ\˜ÙK—Ü]\]\ØY×Ù\]\Ü]È\ŠBˆÛÙ\ÏVÙš[™[™ÖÈ˜ÛÙH—H›Üˆš[™[™È[ˆ™]šY]Ë™š[™[™Ü×Bˆ\ÜÙ\
+›X]™WØÛÛ™›Xİˆ[ˆÛÙ\ÊH\È^XİØÛÛ™›Xİˆ×Ü\[[™K˜\WÚ[\Ü
+™]šY]Ëš[\ÜÜ[—ÚY™]šY]Ë˜ÛÛ™š\›X][Û—İÚÙ[‹—Ü]\]˜XÚİ\×Ù\]\Ü]È˜˜XÚÈŠBˆÛÛ›Y‹˜ÛÛ›™Xİ
+]
+NØ][™[˜ÙOXÛÛ›‹™^Xİ]J”ÑSPÕİ]\Ë™]šY]×Ù›YÈ”“ÓH][™[˜ÙWÙ^\ÈÒT‘H[\ŞYYWÚYOÈS‘ÛÜš×Ù]OOÈ‹
+K]JJK™™]ÚÛ™J
+Bˆ\ÜÙ\
+][™[˜ÙVÈœ™]šY]×Ù›YÈ—OOH›X]™WØ][™[˜ÙWØÛÛ™›XİŠH\È^XİØÛÛ™›Xİ‚‚]\İ›X\šËœ\˜[Y]š^™JœÜ[ÛœË^XİØÛÛ™›Xİ‹Ê
+	Ø[IË
+K˜[ÙJK
 
-def test_operational_ui_initial_month_is_dynamic():
-    script=Path("phase4-ui.js").read_text(encoding="utf-8")
-    assert "selectedMonth='2026-08'" not in script
-    assert "now.getFullYear()" in script and "now.getMonth()+1" in script
+	Ø[IË	ÜIÊKYJWJB™Yˆ\İŞ×Ü™]šY]×ØYÙÜ™YØ]\×Ú[—Ù^WØÛİ™\˜YÙJÜ\˜][Û˜[\Ü]Ü[ÛœË^XİØÛÛ™›Xİ
+N‚ˆ]KËÏ[Ü\˜][Û˜[ØÛÛ›Y‹˜ÛÛ›™Xİ
+]
+BˆÛÛ›‹™^Xİ]J’S”ÑT•S•È\›Z[˜[ÜÛİÊÛİØÛÙK[\ŞYYWÚYY™™Xİ]™WÙœ›ÛKİ]\ÊHSQTÊ	ÌIËË	ÌŒ‹LKLIË	ÛX\Y	ÊH‹
+K
+JBˆ›ÜˆÜ[Ûˆ[ˆÜ[ÛœÎ‚ˆ›İÏXÜ™X]JÛÛ›‹Kš[—Ù^H‹ŒŒ‹LLM‹ŒŒ‹LLM‹Ü[ÛŠNÛX]™K˜\›İ™WÛX]™JÛÛ›‹›İÖÈšY—JBˆÛÛ›‹˜ÛÛ[Z]
 
-
-def test_xls_derivation_uses_authoritative_work_calendar(operational,tmp_path):
-    path,a,_,_=operational;conn=db.connect(path)
-    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-08','special',1)")
-    conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working) VALUES('2026-08-10','holiday',0)")
-    row=create(conn,a,start="2026-08-07",end="2026-08-10");leave.approve_leave(conn,row["id"])
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,));conn.commit();conn.close()
-    source=build_export(tmp_path/"calendar.xls",year=2026,month=8,slots=[SlotSpec("001","Fictional",{
-        8:["07:00","16:00"],10:["07:00","16:00"]})])
-    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
-    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
-    conn=db.connect(path)
-    rows={r["work_date"]:dict(r) for r in conn.execute("SELECT work_date,status,review_flag FROM attendance_days WHERE work_date IN ('2026-08-08','2026-08-10')")}
-    assert rows["2026-08-08"]["review_flag"]=="leave_attendance_conflict"
-    assert rows["2026-08-10"]["status"]=="normal" and rows["2026-08-10"]["review_flag"] is None
-
-
-@pytest.mark.parametrize("date,calendar_entry,expect_conflict",[
-    ("2026-08-08",None,False),
-    ("2026-08-19",("holiday",0,"ê°€ìƒ íœ´ì¼"),False),
-    ("2026-08-22",("special",1,"ê°€ìƒ í† ìš”ê·¼ë¬´"),True),
-])
-def test_xls_preview_leave_conflict_uses_work_calendar(
-    operational,tmp_path,date,calendar_entry,expect_conflict
-):
-    path,a,_,_=operational;conn=db.connect(path)
-    mapping_date="2026-01-01"
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,?,'mapped')",(a,mapping_date))
-    if calendar_entry:
-        conn.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working,label) VALUES(?,?,?,?)",(date,*calendar_entry))
-    leave_start,leave_end=("2026-08-07","2026-08-10") if date=="2026-08-08" else (("2026-08-18","2026-08-20") if date=="2026-08-19" else (date,date))
-    row=create(conn,a,start=leave_start,end=leave_end);leave.approve_leave(conn,row["id"]);conn.commit();conn.close()
-    day=int(date[-2:]);source=build_export(tmp_path/"preview-calendar.xls",year=2026,month=8,
-        slots=[SlotSpec("001","Fictional",{day:["07:55","16:01"]})])
-    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
-    codes=[finding["code"] for finding in preview.findings]
-    assert ("leave_conflict" in codes) is expect_conflict
-    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
-    conn=db.connect(path);attendance=conn.execute("SELECT status,review_flag FROM attendance_days WHERE employee_id=? AND work_date=?",(a,date)).fetchone()
-    assert (attendance["review_flag"]=="leave_attendance_conflict") is expect_conflict
-
-
-@pytest.mark.parametrize("portions,expect_conflict",[(('am',),False),(('am','pm'),True)])
-def test_xls_preview_aggregates_half_day_coverage(operational,tmp_path,portions,expect_conflict):
-    path,a,_,_=operational;conn=db.connect(path)
-    conn.execute("INSERT INTO terminal_slots(slot_code,employee_id,effective_from,status) VALUES('001',?,'2026-01-01','mapped')",(a,))
-    for portion in portions:
-        row=create(conn,a,"half_day","2026-08-14","2026-08-14",portion);leave.approve_leave(conn,row["id"])
-    conn.commit();conn.close()
-    source=build_export(tmp_path/"preview-halves.xls",year=2026,month=8,
-        slots=[SlotSpec("001","Fictional",{14:["07:52","16:04"]})])
-    preview=xls_pipeline.preview_import(source,db_path=path,uploads_dir=tmp_path/"up")
-    assert ("leave_conflict" in [f["code"] for f in preview.findings]) is expect_conflict
-    xls_pipeline.apply_import(preview.import_run_id,preview.confirmation_token,db_path=path,backups_dir=tmp_path/"back")
-    conn=db.connect(path);flag=conn.execute("SELECT review_flag FROM attendance_days WHERE employee_id=? AND work_date='2026-08-14'",(a,)).fetchone()[0]
-    assert flag == ("leave_attendance_conflict" if expect_conflict else "partial_leave_review")
+NØÛÛ›‹˜ÛÜÙJ
+BˆÛİ\˜ÙOXZ[Ù^Ü
+\Ü]Èœ™]šY]ËZ[™\ËÈ‹YX\LŒ‹[ÛNˆÛİÏVÔÛİÜXÊŒH‹‘šXİ[Û˜[‹ÌM–ÈŒÎLˆ‹ŒMŒ—_JWJBˆ™]šY]Ï^×Ü\[[™Kœ™]šY]×Ú[\Ü
+Ûİ\˜ÙK—Ü]\]\ØY×Ù\]\Ü]È\ŠBˆ\ÜÙ\
+›X]™WØÛÛ™›Xİˆ[ˆÙ–È˜ÛÙH—H›Üˆˆ[ˆ™]šY]Ë™š[™[™Ü×JH\È^XİØÛÛ™›Xİˆ×Ü\[[™K˜\WÚ[\Ü
+™]šY]Ëš[\ÜÜ[—ÚY™]šY]Ë˜ÛÛ™š\›X][Û—İÚÙ[‹—Ü]\]˜XÚİ\×Ù\]\Ü]È˜˜XÚÈŠBˆÛÛ›Y‹˜ÛÛ›™Xİ
+]
+NÙ›YÏXÛÛ›‹™^Xİ]J”ÑSPÕ™]šY]×Ù›YÈ”“ÓH][™[˜ÙWÙ^\ÈÒT‘H[\ŞYYWÚYOÈS‘ÛÜš×Ù]OIÌŒ‹LLM	È‹
+K
+JK™™]ÚÛ™J
+VÌBˆ\ÜÙ\›YÈOH
+›X]™WØ][™[˜ÙWØÛÛ™›XİˆYˆ^XİØÛÛ™›Xİ[ÙHœ\X[ÛX]™WÜ™]šY]ÈŠB
