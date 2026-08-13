@@ -213,3 +213,50 @@ def test_0008_to_0009_to_0010_upgrade_backfills_lineage_and_is_idempotent(tmp_pa
     assert month_close.snapshot(conn, "2026-08", close_id=second)["close"]["revision"] == 2
     conn.close()
     assert migrate.run_migrations(database, backups_dir=backups).applied == []
+
+
+def test_closed_reconciliation_get_is_read_only_and_reopen_allows_reconciliation(migrated_db, monkeypatch):
+    conn = _operational(migrated_db)
+    employee_id = _employee(conn, "READONLY1")
+    stable = _exception(conn, code="informational_history", work_date="2026-08-10",
+                        scope="employee", employee_id=employee_id)
+    conn.execute("UPDATE operational_exceptions SET severity='info' WHERE id=?", (stable["id"],))
+    closed = month_close.close_month(conn, "2026-08", "operator", "Read-only close")
+    # Simulate newly visible live facts without using a guarded production mutation.
+    conn.execute(
+        "INSERT INTO employee_work_schedules(employee_id,effective_from,effective_to,weekday_mask,created_by) "
+        "VALUES(?,'2026-08-11','2026-08-11','1','test-fixture')", (employee_id,)
+    )
+    conn.commit()
+    before = {
+        "exceptions": conn.execute("SELECT COUNT(*) FROM operational_exceptions").fetchone()[0],
+        "events": conn.execute("SELECT COUNT(*) FROM exception_events").fetchone()[0],
+        "evidence": conn.execute("SELECT COUNT(*) FROM exception_evidence_links").fetchone()[0],
+        "fingerprints": [tuple(row) for row in conn.execute(
+            "SELECT id,observation_fingerprint FROM operational_exceptions ORDER BY id")],
+    }
+    conn.close()
+    monkeypatch.setattr(config, "DB_PATH", migrated_db)
+    client = TestClient(create_app())
+    for _ in range(3):
+        response = client.get("/api/v1/month-close/2026-08/reconciliation")
+        assert response.status_code == 200 and response.json()["reconciliationStatus"] == "closed"
+    conn = db.connect(migrated_db)
+    after = {
+        "exceptions": conn.execute("SELECT COUNT(*) FROM operational_exceptions").fetchone()[0],
+        "events": conn.execute("SELECT COUNT(*) FROM exception_events").fetchone()[0],
+        "evidence": conn.execute("SELECT COUNT(*) FROM exception_evidence_links").fetchone()[0],
+        "fingerprints": [tuple(row) for row in conn.execute(
+            "SELECT id,observation_fingerprint FROM operational_exceptions ORDER BY id")],
+    }
+    assert after == before
+    month_close.reopen(conn, "2026-08", "operator", "Explicit re-evaluation")
+    conn.commit(); conn.close()
+    response = client.get("/api/v1/month-close/2026-08/reconciliation")
+    assert response.status_code == 200
+    conn = db.connect(migrated_db)
+    assert conn.execute(
+        "SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-11' "
+        "AND exception_code='scheduled_no_punch'", (employee_id,)
+    ).fetchone()
+    conn.close()

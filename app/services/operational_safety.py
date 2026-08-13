@@ -175,16 +175,16 @@ def resolve_schedule(conn,employee_id,work_date):
     employee=conn.execute("SELECT hire_date,end_date FROM employees WHERE id=?",(employee_id,)).fetchone()
     if not employee: raise SafetyError("employee not found")
     if work_date<employee["hire_date"] or (employee["end_date"] and work_date>employee["end_date"]):
-        return {"isScheduled":False,"source":"employment_period","expectedStart":None,"expectedEnd":None,"evidenceId":None}
+        return {"isScheduled":False,"isAuthoritative":False,"source":"employment_period","expectedStart":None,"expectedEnd":None,"evidenceId":None}
     override=conn.execute("SELECT * FROM employee_schedule_dates WHERE employee_id=? AND work_date=? AND status='active' ORDER BY id DESC LIMIT 1",(employee_id,work_date)).fetchone()
-    if override:return {"isScheduled":bool(override["is_scheduled"]),"source":"employee_date_override","expectedStart":override["expected_start_time"],"expectedEnd":override["expected_end_time"],"evidenceId":override["id"]}
+    if override:return {"isScheduled":bool(override["is_scheduled"]),"isAuthoritative":True,"source":"employee_date_override","expectedStart":override["expected_start_time"],"expectedEnd":override["expected_end_time"],"evidenceId":override["id"]}
     schedule=conn.execute("SELECT * FROM employee_work_schedules WHERE employee_id=? AND status='active' AND effective_from<=? AND (effective_to IS NULL OR effective_to>=?) ORDER BY effective_from DESC,id DESC LIMIT 1",(employee_id,work_date,work_date)).fetchone()
     if schedule:
         scheduled=str(date.fromisoformat(work_date).weekday()) in set(schedule["weekday_mask"].split(","))
-        return {"isScheduled":scheduled,"source":"employee_schedule","expectedStart":schedule["expected_start_time"],"expectedEnd":schedule["expected_end_time"],"evidenceId":schedule["id"]}
+        return {"isScheduled":scheduled,"isAuthoritative":True,"source":"employee_schedule","expectedStart":schedule["expected_start_time"],"expectedEnd":schedule["expected_end_time"],"evidenceId":schedule["id"]}
     calendar=conn.execute("SELECT * FROM site_calendar WHERE calendar_date=?",(work_date,)).fetchone()
     is_working=bool(calendar["is_working"]) if calendar else date.fromisoformat(work_date).weekday()<5
-    return {"isScheduled":is_working,"source":"site_calendar","expectedStart":None,"expectedEnd":None,"evidenceId":calendar["id"] if calendar else None}
+    return {"isScheduled":is_working,"isAuthoritative":False,"source":"site_calendar","expectedStart":None,"expectedEnd":None,"evidenceId":None}
 
 def _source_observation(conn,code,work_date,import_run_id,observed,expected,scheduled,measurement):
     conn.execute("INSERT OR IGNORE INTO source_quality_observations(observation_code,work_date,import_run_id,observed_value,expected_value,scheduled_worker_count,rule_version,measurement_json) VALUES(?,?,?,?,?,?,'1',?)",
@@ -198,7 +198,8 @@ def reconcile(conn,start,end,actor="system"):
     while day<=last:
         iso=day.isoformat(); scheduled=[]
         for e in employees:
-            if resolve_schedule(conn,e["id"],iso)["isScheduled"]:scheduled.append(e)
+            schedule=resolve_schedule(conn,e["id"],iso)
+            if schedule["isAuthoritative"] and schedule["isScheduled"]:scheduled.append(e)
         punches=conn.execute("SELECT * FROM punch_events WHERE work_date=? AND rolled_back_at IS NULL ORDER BY id",(iso,)).fetchall()
         coverage=conn.execute("SELECT d.*,r.source_filename FROM import_run_days d JOIN import_runs r ON r.id=d.import_run_id WHERE d.work_date=? AND r.status='applied' ORDER BY d.id DESC LIMIT 1",(iso,)).fetchone()
         expected_run=conn.execute("SELECT * FROM import_runs WHERE status='applied' AND period_start<=? AND period_end>=? ORDER BY id DESC LIMIT 1",(iso,iso)).fetchone()

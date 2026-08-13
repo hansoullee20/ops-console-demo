@@ -75,6 +75,25 @@ def test_schedule_precedence_boundaries_and_overlap(operational):
     assert safety.resolve_schedule(c,a,'2026-08-01')['source']=='employee_schedule'
     assert safety.resolve_schedule(c,a,'2026-08-31')['source']=='employee_schedule';c.close()
 
+def test_scheduled_no_punch_requires_authoritative_employee_schedule(operational):
+    path,a,b=operational;c=db.connect(path)
+    # Weekday fallback and an explicit working site calendar are context only.
+    c.execute("INSERT INTO site_calendar(calendar_date,day_type,is_working,label)VALUES('2026-08-04','working',1,'Fictional site day')")
+    safety.reconcile(c,'2026-08-03','2026-08-04')
+    assert not c.execute("SELECT 1 FROM operational_exceptions WHERE exception_code='scheduled_no_punch'").fetchone()
+    # A date-scoped employee schedule is authoritative.
+    safety.create_schedule(c,employee_id=a,effective_from='2026-08-05',effective_to='2026-08-05',weekday_mask='2')
+    safety.reconcile(c,'2026-08-05','2026-08-05')
+    assert c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-05' AND exception_code='scheduled_no_punch'",(a,)).fetchone()
+    # Explicit positive/negative employee date overrides are authoritative.
+    safety.set_schedule_date(c,employee_id=b,work_date='2026-08-06',is_scheduled=True)
+    safety.set_schedule_date(c,employee_id=b,work_date='2026-08-07',is_scheduled=False)
+    safety.reconcile(c,'2026-08-06','2026-08-07')
+    assert c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-06' AND exception_code='scheduled_no_punch'",(b,)).fetchone()
+    assert not c.execute("SELECT 1 FROM operational_exceptions WHERE employee_id=? AND work_date='2026-08-07' AND exception_code='scheduled_no_punch'",(b,)).fetchone()
+    assert not c.execute("SELECT 1 FROM attendance_days WHERE status IN ('absent','unauthorized_absence','misconduct')").fetchone()
+    c.close()
+
 def test_source_quality_is_site_scoped_and_sunday_is_quiet(operational):
     path,a,_=operational;c=db.connect(path)
     safety.create_schedule(c,employee_id=a,effective_from='2026-08-03',effective_to='2026-08-09',weekday_mask='0,1,2,3,4')

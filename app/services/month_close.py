@@ -139,14 +139,21 @@ def _scheduled_employee_days(conn: sqlite3.Connection, start: str, end: str) -> 
         iso = cursor.isoformat()
         for employee in employees:
             if employee["hire_date"] <= iso and (not employee["end_date"] or iso <= employee["end_date"]):
-                count += int(operational_safety.resolve_schedule(conn, employee["id"], iso)["isScheduled"])
+                schedule = operational_safety.resolve_schedule(conn, employee["id"], iso)
+                count += int(schedule["isAuthoritative"] and schedule["isScheduled"])
         cursor += timedelta(days=1)
     return count
 
 
 def reconcile(conn: sqlite3.Connection, month: str) -> dict:
     start, end = bounds(month)
-    operational_safety.reconcile(conn, start, end)
+    current = conn.execute(
+        "SELECT * FROM month_closes WHERE month_key=? ORDER BY revision DESC LIMIT 1", (month,)
+    ).fetchone()
+    # A closed month is an immutable historical result. GET reconciliation is
+    # read-only until an explicit reopen makes live re-evaluation permissible.
+    if not current or current["status"] != "closed":
+        operational_safety.reconcile(conn, start, end)
     active = [row for row in _month_exception_rows(conn, start, end)
               if row["status"] in {"open", "acknowledged"}]
     blockers, warnings = [], []
@@ -188,9 +195,6 @@ def reconcile(conn: sqlite3.Connection, month: str) -> dict:
         "reviewNeeded": len(blockers),
         "sourceQualityWarnings": sum(x["scope"] in {"source", "site"} for x in blockers + warnings),
     }
-    current = conn.execute(
-        "SELECT * FROM month_closes WHERE month_key=? ORDER BY revision DESC LIMIT 1", (month,)
-    ).fetchone()
     return {"month": month,
             "reconciliationStatus": "closed" if current and current["status"] == "closed" else ("blocked" if blockers else "ready"),
             "summary": summary, "blockingItems": blockers, "warningItems": warnings,
