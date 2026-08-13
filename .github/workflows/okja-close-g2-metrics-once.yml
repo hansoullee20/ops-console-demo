@@ -23,105 +23,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Extend evaluator condition coverage and marker metadata
-        shell: bash
+      - name: Apply G2 metric implementation patch
+        env:
+          PATCH_MODE: code
+        run: python aihub/wakeword/_patch_g2_metrics_once.py
+
+      - name: Verify patch shape
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          eval_path = Path('aihub/wakeword/v4_eval.py')
-          s = eval_path.read_text(encoding='utf-8')
-
-          def repl(old, new, label):
-              global s
-              n = s.count(old)
-              if n != 1:
-                  raise SystemExit(f'{label}: expected 1 anchor, got {n}')
-              s = s.replace(old, new, 1)
-
-          repl(
-              '''    background: str = ""\n\n\n@dataclass(frozen=True)\nclass Detection:\n''',
-              '''    background: str = ""\n    distance_m: float | None = None\n    direction: str = ""\n    voice_level: str = ""\n    self_tts: bool | None = None\n    time_bucket: str = ""\n\n\n@dataclass(frozen=True)\nclass Detection:\n''',
-              'truth fields',
-          )
-
-          repl(
-              '''                phrase=str(row.get("phrase", "")),\n                speaker=str(row.get("speaker", "")),\n                condition=str(row.get("condition", "")),\n                room=str(row.get("room", "")),\n                background=str(row.get("background", "")),\n''',
-              '''                phrase=str(row.get("phrase", "")),\n                speaker=str(row.get("speaker", row.get("speaker_id", ""))),\n                condition=str(row.get("condition", "")),\n                room=str(row.get("room", row.get("room_id", ""))),\n                background=str(row.get("background", "")),\n                distance_m=(float(row["distance_m"]) if row.get("distance_m") is not None else None),\n                direction=str(row.get("direction", "")),\n                voice_level=str(row.get("voice_level", "")),\n                self_tts=(row.get("self_tts") if isinstance(row.get("self_tts"), bool) else None),\n                time_bucket=str(row.get("time_bucket", "")),\n''',
-              'truth loader',
-          )
-
-          repl(
-              '''def _group_metrics(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], field: str) -> dict[str, Any]:\n    groups: dict[str, dict[str, int]] = {}\n    for t, _, _ in matches:\n        key = getattr(t, field) or "unspecified"\n        groups.setdefault(key, {"tp": 0, "fn": 0})\n        groups[key]["tp"] += 1\n    for t in misses:\n        key = getattr(t, field) or "unspecified"\n        groups.setdefault(key, {"tp": 0, "fn": 0})\n        groups[key]["fn"] += 1\n    out: dict[str, Any] = {}\n    for key, counts in sorted(groups.items()):\n        n = counts["tp"] + counts["fn"]\n        out[key] = {\n            **counts,\n            "recall": counts["tp"] / n if n else None,\n            "miss_rate": counts["fn"] / n if n else None,\n        }\n    return out\n\n\n''',
-              '''def _group_metrics_key(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], key_fn) -> dict[str, Any]:\n    groups: dict[str, dict[str, int]] = {}\n    for t, _, _ in matches:\n        key = key_fn(t) or "unspecified"\n        groups.setdefault(key, {"tp": 0, "fn": 0})\n        groups[key]["tp"] += 1\n    for t in misses:\n        key = key_fn(t) or "unspecified"\n        groups.setdefault(key, {"tp": 0, "fn": 0})\n        groups[key]["fn"] += 1\n    out: dict[str, Any] = {}\n    for key, counts in sorted(groups.items()):\n        n = counts["tp"] + counts["fn"]\n        out[key] = {\n            **counts,\n            "recall": counts["tp"] / n if n else None,\n            "miss_rate": counts["fn"] / n if n else None,\n        }\n    return out\n\n\ndef _group_metrics(matches: list[tuple[Truth, Detection, float]], misses: list[Truth], field: str) -> dict[str, Any]:\n    return _group_metrics_key(matches, misses, lambda t: str(getattr(t, field) or "unspecified"))\n\n\ndef _distance_bucket(distance_m: float | None) -> str:\n    if distance_m is None:\n        return "unspecified"\n    if distance_m <= 1.0:\n        return "near_0_1m"\n    if distance_m <= 3.0:\n        return "mid_1_3m"\n    return "far_3m_plus"\n\n\ndef _self_tts_bucket(value: bool | None) -> str:\n    if value is True:\n        return "self_tts"\n    if value is False:\n        return "not_self_tts"\n    return "unspecified"\n\n\n''',
-              'group helpers',
-          )
-
-          repl(
-              '''        "by_background": _group_metrics(matches, misses, "background"),\n        "false_positive_timestamps_ms": [d.timestamp_ms for d in fps],\n''',
-              '''        "by_background": _group_metrics(matches, misses, "background"),\n        "by_distance": _group_metrics_key(matches, misses, lambda t: _distance_bucket(t.distance_m)),\n        "by_direction": _group_metrics(matches, misses, "direction"),\n        "by_voice_level": _group_metrics(matches, misses, "voice_level"),\n        "by_self_tts": _group_metrics_key(matches, misses, lambda t: _self_tts_bucket(t.self_tts)),\n        "by_time_bucket": _group_metrics(matches, misses, "time_bucket"),\n        "false_positive_timestamps_ms": [d.timestamp_ms for d in fps],\n''',
-              'report groups',
-          )
-          eval_path.write_text(s, encoding='utf-8')
-
-          schema_path = Path('aihub/wakeword/v4_benchmark_schema.json')
-          schema = json.loads(schema_path.read_text(encoding='utf-8'))
-          props = schema['definitions']['truth_event']['properties']
-          props['self_tts'] = {'type': 'boolean'}
-          props['time_bucket'] = {'type': 'string', 'enum': ['day', 'night']}
-          schema_path.write_text(json.dumps(schema, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-
-          contract_path = Path('aihub/wakeword/v4_benchmark_contract.py')
-          c = contract_path.read_text(encoding='utf-8')
-          old = '''    if row.get("distance_m") is not None:\n        if not isinstance(row["distance_m"], (int, float)) or row["distance_m"] < 0:\n            raise ValueError(f"{kind}: distance_m must be null or >= 0")\n\n\n'''
-          new = '''    if row.get("distance_m") is not None:\n        if not isinstance(row["distance_m"], (int, float)) or row["distance_m"] < 0:\n            raise ValueError(f"{kind}: distance_m must be null or >= 0")\n    if "self_tts" in row and not isinstance(row["self_tts"], bool):\n        raise ValueError(f"{kind}: self_tts must be boolean")\n    if row.get("time_bucket") not in (None, "day", "night"):\n        raise ValueError(f"{kind}: time_bucket must be day or night")\n\n\n'''
-          if c.count(old) != 1:
-              raise SystemExit(f'contract validation anchor count={c.count(old)}')
-          c = c.replace(old, new, 1)
-          old = '''        "voice_level": args.voice_level,\n        "mention_context": args.mention_context,\n'''
-          new = '''        "voice_level": args.voice_level,\n        "self_tts": bool(getattr(args, "self_tts", False)),\n        "mention_context": args.mention_context,\n'''
-          if c.count(old) != 1:
-              raise SystemExit(f'marker metadata anchor count={c.count(old)}')
-          c = c.replace(old, new, 1)
-          old = '''    validate_truth_event(row)\n    return row\n'''
-          new = '''    time_bucket = getattr(args, "time_bucket", None)\n    if time_bucket is not None:\n        row["time_bucket"] = time_bucket\n    validate_truth_event(row)\n    return row\n'''
-          if c.count(old) != 1:
-              raise SystemExit(f'marker final anchor count={c.count(old)}')
-          c = c.replace(old, new, 1)
-          old = '''    mark.add_argument("--voice-level")\n    mark.add_argument("--mention-context", action="store_true")\n'''
-          new = '''    mark.add_argument("--voice-level")\n    mark.add_argument("--self-tts", action="store_true")\n    mark.add_argument("--time-bucket", choices=["day", "night"])\n    mark.add_argument("--mention-context", action="store_true")\n'''
-          if c.count(old) != 1:
-              raise SystemExit(f'parser anchor count={c.count(old)}')
-          c = c.replace(old, new, 1)
-          contract_path.write_text(c, encoding='utf-8')
-
-          test_eval = Path('aihub/wakeword/test_v4_eval.py')
-          t = test_eval.read_text(encoding='utf-8')
-          t = t.replace('import unittest\n\nfrom v4_eval import Detection, Truth, evaluate, parse_thresholds\n',
-                        'import json\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom v4_eval import Detection, Truth, evaluate, load_truth, parse_thresholds, threshold_sweep\n', 1)
-          anchor = '''    def test_threshold_parse_is_sorted_unique(self):\n        self.assertEqual(parse_thresholds("0.5,0.1,0.5"), [0.1, 0.5])\n'''
-          insert = '''    def test_benchmark_metadata_fallbacks_and_extended_breakdowns(self):\n        row = {\n            "event_id": "meta",\n            "timestamp_ms": 1000,\n            "intentional_invocation": True,\n            "phrase": "옥자",\n            "speaker_id": "grandma",\n            "condition": "far_field",\n            "room_id": "livingroom",\n            "background": "tv_noise",\n            "distance_m": 4.2,\n            "direction": "back",\n            "voice_level": "soft",\n            "self_tts": True,\n            "time_bucket": "night",\n        }\n        with tempfile.TemporaryDirectory() as td:\n            p = Path(td) / "truth.jsonl"\n            p.write_text(json.dumps(row, ensure_ascii=False) + "\\n", encoding="utf-8")\n            truth = load_truth(p)\n        r = evaluate(truth, [Detection(1100, 0.9)], 0.5, negative_exposure_hours=1.0)\n        self.assertIn("grandma", r["by_speaker"])\n        self.assertIn("livingroom", r["by_room"])\n        self.assertIn("tv_noise", r["by_background"])\n        self.assertIn("far_3m_plus", r["by_distance"])\n        self.assertIn("back", r["by_direction"])\n        self.assertIn("soft", r["by_voice_level"])\n        self.assertIn("self_tts", r["by_self_tts"])\n        self.assertIn("night", r["by_time_bucket"])\n\n    def test_threshold_sweep_is_automatic_and_ordered(self):\n        rows = threshold_sweep(self.truth, self.dets, [0.5, 0.85], 2.0, 500, 1500)\n        self.assertEqual([r["threshold"] for r in rows], [0.5, 0.85])\n        self.assertGreater(rows[0]["recall"], rows[1]["recall"])\n\n    def test_threshold_parse_is_sorted_unique(self):\n        self.assertEqual(parse_thresholds("0.5,0.1,0.5"), [0.1, 0.5])\n'''
-          if t.count(anchor) != 1:
-              raise SystemExit(f'eval test anchor count={t.count(anchor)}')
-          t = t.replace(anchor, insert, 1)
-          test_eval.write_text(t, encoding='utf-8')
-
-          test_contract = Path('aihub/wakeword/test_v4_benchmark_contract.py')
-          q = test_contract.read_text(encoding='utf-8')
-          old = '''            voice_level="normal",\n            mention_context=False,\n            notes=None,\n'''
-          new = '''            voice_level="normal",\n            self_tts=True,\n            time_bucket="night",\n            mention_context=False,\n            notes=None,\n'''
-          if q.count(old) != 1:
-              raise SystemExit(f'contract test args anchor count={q.count(old)}')
-          q = q.replace(old, new, 1)
-          old = '''        self.assertTrue(row["intentional_invocation"])\n        validate_truth_event(row)\n'''
-          new = '''        self.assertTrue(row["intentional_invocation"])\n        self.assertTrue(row["self_tts"])\n        self.assertEqual(row["time_bucket"], "night")\n        validate_truth_event(row)\n        with self.assertRaisesRegex(ValueError, "self_tts must be boolean"):\n            validate_truth_event(dict(row, self_tts="yes"))\n        with self.assertRaisesRegex(ValueError, "time_bucket must be day or night"):\n            validate_truth_event(dict(row, time_bucket="dusk"))\n'''
-          if q.count(old) != 1:
-              raise SystemExit(f'contract test assert anchor count={q.count(old)}')
-          q = q.replace(old, new, 1)
-          test_contract.write_text(q, encoding='utf-8')
-          PY
           git diff --check
+          grep -q 'by_distance' aihub/wakeword/v4_eval.py
+          grep -q 'by_self_tts' aihub/wakeword/v4_eval.py
+          grep -q 'by_time_bucket' aihub/wakeword/v4_eval.py
+          grep -q -- '--self-tts' aihub/wakeword/v4_benchmark_contract.py
+          grep -q -- '--time-bucket' aihub/wakeword/v4_benchmark_contract.py
 
       - name: Run evaluator, contract, and ring-buffer tests
         working-directory: aihub/wakeword
@@ -132,7 +46,7 @@ jobs:
         shell: bash
         run: |
           cat > /tmp/truth.jsonl <<'EOF'
-          {"event_id":"a","timestamp_ms":1000,"phrase":"옥자","speaker_id":"grandma","condition":"quiet","room_id":"living","background":"none","distance_m":1.0,"direction":"front","voice_level":"normal","self_tts":false,"time_bucket":"day"}
+          {"event_id":"a","timestamp_ms":1000,"phrase":"옥자","speaker_id":"grandma","condition":"quiet","room_id":"living","background":"tv_noise","distance_m":1.0,"direction":"front","voice_level":"normal","self_tts":false,"time_bucket":"day"}
           EOF
           cat > /tmp/detections.jsonl <<'EOF'
           {"timestamp_ms":1100,"score":0.9,"model":"fixture","version":"1"}
@@ -141,7 +55,8 @@ jobs:
           python v4_eval.py --truth /tmp/truth.jsonl --detections /tmp/detections.jsonl --negative-exposure-hours 24 --thresholds 0.5,0.8 --output /tmp/report.json > /tmp/report.stdout.json
           python - <<'PY'
           import json
-          r=json.load(open('/tmp/report.json'))
+          with open('/tmp/report.json', encoding='utf-8') as f:
+              r=json.load(f)
           assert len(r['threshold_sweep']) == 2
           row=r['threshold_sweep'][0]
           assert 'fpph' in row and 'recall' in row and 'miss_rate' in row
@@ -162,42 +77,14 @@ jobs:
 
       - name: Close satisfied G2 metric checklist items
         env:
+          PATCH_MODE: checklist
           CODE_SHA: ${{ steps.code_commit.outputs.sha }}
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          sha=os.environ['CODE_SHA']
-          run=os.environ['GITHUB_RUN_ID']
-          p=Path('AIHUB_MASTER_EXECUTION_CHECKLIST.md')
-          s=p.read_text(encoding='utf-8')
-          pairs=[
-            (
-              '- [ ] **G2.6 Threshold sweep report exists** — P0 / AI-ENG  \n  DoD: threshold vs recall/FRR/FPR-hour is automatically generated.\n',
-              f'- [x] **G2.6 Threshold sweep report exists** — P0 / AI-ENG\n  DoD: threshold vs recall/FRR/FPR-hour is automatically generated.\n  Evidence: `v4_eval.py` emits deterministic threshold sweeps with recall, miss/FRR, FPPH and false-alarms/day; CLI report smoke and unit tests passed in run `{run}` after commit `{sha}`.\n'
-            ),
-            (
-              '- [ ] **G2.7 Condition breakdown exists** — P1 / AI-ENG  \n  DoD: metrics by phrase, speaker, distance, direction, TV/noise, self-TTS, day/night are reported.\n',
-              f'- [x] **G2.7 Condition breakdown exists** — P1 / AI-ENG\n  DoD: metrics by phrase, speaker, distance, direction, TV/noise, self-TTS, day/night are reported.\n  Evidence: commit `{sha}` adds benchmark-contract metadata and evaluator groups for phrase, speaker, distance bucket, direction, background/TV-noise, voice level, self-TTS and day/night, including `speaker_id`/`room_id` compatibility; tests passed in run `{run}`.\n'
-            ),
-            (
-              '- [ ] **G2.9 Statistical confidence is reported** — P1 / AI-ENG  \n  DoD: negative listening hours and confidence bounds accompany false-trigger rates; zero observed events is never presented as zero true rate.\n',
-              f'- [x] **G2.9 Statistical confidence is reported** — P1 / AI-ENG\n  DoD: negative listening hours and confidence bounds accompany false-trigger rates; zero observed events is never presented as zero true rate.\n  Evidence: `v4_eval.py` reports negative exposure hours, Wilson recall CI and Poisson false-positive rate CI; the zero-FP unit test verifies a non-zero 95% upper rate bound, and all evaluator tests passed in run `{run}`.\n'
-            ),
-          ]
-          for old,new in pairs:
-            n=s.count(old)
-            if n != 1:
-              raise SystemExit(f'checklist anchor count={n}: {old.splitlines()[0]}')
-            s=s.replace(old,new,1)
-          p.write_text(s,encoding='utf-8')
-          PY
-          git diff --check
+        run: python aihub/wakeword/_patch_g2_metrics_once.py
 
       - name: Commit checklist evidence and push
         shell: bash
         run: |
+          git diff --check
           git add AIHUB_MASTER_EXECUTION_CHECKLIST.md
           git commit -m 'Record G2 wake metric evidence'
           git pull --rebase origin aihub-voice-test
