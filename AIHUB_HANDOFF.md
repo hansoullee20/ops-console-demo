@@ -9,6 +9,13 @@
 
 > **CURRENT CHECKPOINT:** Okja v3 remains rejected as a deployable model. Reusable evaluator, benchmark contract, diagnostic ring buffer and deterministic replay harness now exist. Real replay run `31669141305` executed the pinned v3 ONNX against a fixed, human-approved MeloTTS `옥자` WAV three times per threshold and produced identical outputs. At threshold 0.50 it missed; at 0.06 it detected once with score 0.16584, consistent with the existing v3 failure verdict. G2.5 stays open until the identical audio SHA is replayed through v4 and another local/open engine. Existing Android SpeechRecognizer remains the working control/fallback.
 
+## Active continuation log — 2026-08-13
+
+- Current subtask: replay the exact pinned v3 ONNX and WAV through a second fully local/open runtime, openWakeWord `0.6.0`.
+- Compatibility basis: openWakeWord accepts custom ONNX classifiers, derives the temporal embedding length from the model input shape, and processes 16 kHz PCM in 1280-sample (80 ms) streaming frames. The LiveKit v3 classifier uses a 16-frame × 96-feature input.
+- Evidence policy: pin package version, model/audio hashes, thresholds, frame size and adapter source; require three identical replays before recording evidence.
+- Closure guard: this can satisfy the alternative-runtime portion only. G2.5 must remain open until a real v4 classifier also replays the identical audio SHA.
+
 ---
 
 ## 0. Fast restart
