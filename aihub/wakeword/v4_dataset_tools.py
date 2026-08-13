@@ -30,14 +30,26 @@ def assign_split(row: dict) -> str:
     # never be created implicitly, because that can put the same voice/engine in
     # train and a named holdout split and falsely look like valid generalization.
     role = row.get("holdout_role", "").strip()
-    if role == "engine":
-        return "test_engine"
-    if role == "speaker":
-        return "test_speaker"
-    if role == "real":
-        return "test_real"
-    if role == "household":
-        return "test_household"
+    role_splits = {
+        "engine": "test_engine",
+        "speaker": "test_speaker",
+        "real": "test_real",
+        "household": "test_household",
+    }
+    planned = row.get("split", "").strip()
+    if role:
+        if role not in role_splits:
+            raise ValueError(f"unknown holdout_role: {role}")
+        role_split = role_splits[role]
+        if planned and planned != role_split:
+            raise ValueError(
+                f"planned split {planned!r} conflicts with holdout role {role!r}"
+            )
+        return role_split
+    if planned:
+        if planned not in {"train", "validation", "quarantine"}:
+            raise ValueError(f"invalid preassigned split without holdout role: {planned}")
+        return planned
     # Group by base audio or script so derivatives never cross ordinary splits.
     # Non-holdout synthetic data is only train/validation. Speaker/engine tests
     # are assigned explicitly at corpus-planning time.
@@ -188,6 +200,7 @@ def leakage_errors(rows: list[dict]) -> list[str]:
     errors: list[str] = []
     by_base: dict[str, set[str]] = defaultdict(set)
     by_template: dict[str, set[str]] = defaultdict(set)
+    by_normalized_text: dict[tuple[str, str], set[str]] = defaultdict(set)
     by_audio_hash: dict[str, set[str]] = defaultdict(set)
     ids: set[str] = set()
     for r in rows:
@@ -202,6 +215,9 @@ def leakage_errors(rows: list[dict]) -> list[str]:
         template = r.get("template_id") or r.get("script_id") or ""
         if template:
             by_template[template].add(split)
+        normalized = r.get("normalized_text") or normalize_text(r.get("text", ""))
+        if normalized:
+            by_normalized_text[(r.get("language", ""), normalized)].add(split)
         audio_hash = r.get("audio_sha256", "").strip()
         if audio_hash:
             by_audio_hash[audio_hash].add(cid)
@@ -214,6 +230,12 @@ def leakage_errors(rows: list[dict]) -> list[str]:
         ordinary = splits & {"train", "validation", "test_speaker", "test_engine"}
         if len(ordinary) > 1:
             errors.append(f"template leakage {template}: {sorted(ordinary)}")
+    for (language, normalized), splits in by_normalized_text.items():
+        ordinary = splits & {"train", "validation", "test_speaker", "test_engine"}
+        if len(ordinary) > 1:
+            errors.append(
+                f"normalized text leakage {language}/{normalized}: {sorted(ordinary)}"
+            )
     for audio_hash, clip_ids in by_audio_hash.items():
         if len(clip_ids) > 1:
             errors.append(f"duplicate audio sha256 {audio_hash}: {sorted(clip_ids)}")

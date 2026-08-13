@@ -21,6 +21,9 @@ on:
       - 'aihub/wakeword/v4_dataset_tools.py'
       - 'aihub/wakeword/v4_dataset_schema.json'
       - 'aihub/wakeword/test_v4_dataset_tools.py'
+      - 'aihub/wakeword/build_v4_scripts.py'
+      - 'aihub/wakeword/test_build_v4_scripts.py'
+      - 'aihub/wakeword/v4_scripts.csv'
       - '.github/workflows/okja-v4-eval-tests.yml'
 
 permissions:
@@ -35,6 +38,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run evaluator, dataset, benchmark-contract, ring-buffer, and replay unit tests
+      - name: Run evaluator, scripts, dataset, benchmark-contract, ring-buffer, and replay unit tests
         working-directory: aihub/wakeword
-        run: python -m unittest -v test_v4_eval.py test_v4_dataset_tools.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py test_v4_replay.py test_livekit_v3_replay_adapter.py test_openwakeword_replay_adapter.py
+        run: python -m unittest -v test_v4_eval.py test_build_v4_scripts.py test_v4_dataset_tools.py test_v4_benchmark_contract.py test_v4_ring_buffer_logger.py test_v4_replay.py test_livekit_v3_replay_adapter.py test_openwakeword_replay_adapter.py
