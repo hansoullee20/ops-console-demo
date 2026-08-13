@@ -89,9 +89,9 @@ Acceptable evidence:
   DoD: tested package version or Git commit is pinned; API used by generator matches installed implementation; environment is reproducible from clean CI.  
   Evidence: `v4_sources_manifest.yaml` and `okja-v4-data-smoke.yml` pin `chatterbox-tts==0.1.7` and document the tested `from_pretrained(device=device)` API. Clean run `31612771436` installed that package and generated/uploaded six real Chatterbox WAVs.
 
-- [ ] **G1.2 Pin all v4 TTS/runtime dependencies** — P0 / AI-ENG  
+- [x] **G1.2 Pin all v4 TTS/runtime dependencies** — P0 / AI-ENG
   DoD: Kokoro, Chatterbox, audio libs and critical transitive versions are bounded or locked.  
-  Partial evidence: smoke workflows pin their requested top-level packages, and MeloTTS run `31615755020` captured a full resolved environment. Keep unchecked until complete Kokoro/Chatterbox/MeloTTS transitive lock files are committed and consumed by clean CI.
+  Evidence: commit `ab96ecce5380b77f27654ff487df0c30f2e643cd` adds platform/Python-specific locks containing 110 Kokoro, 122 Chatterbox and 170 MeloTTS exact pins, pins Python `3.11.15`/`3.9.25` and pip `26.2.1`/`26.0.1`, runs `pip check`, and requires sorted `pip freeze` equality before synthesis. Clean locked runs `31676094058` and `31676094114` passed dependency verification, generation, manifest validation, WAV QC, leakage and artifact upload for all three engines.
 
 - [x] **G1.3 Record generator provenance per clip** — P0 / AI-ENG
   DoD: manifest includes engine, engine version/commit, voice, language, script/text ID, seed, source/license, base/parent ID, file SHA-256.
