@@ -54,6 +54,7 @@ Acceptable evidence:
 - G1.12/G1.13 are closed: commit `7b37c8b` freezes 425 unique bilingual scripts with pre-generation train/validation assignments; evaluator run `31677969571`, data-smoke run `31677969581` and MeloTTS run `31677969589` are green.
 - G2.8 instrumentation is ready but the gate remains open: commits `fc87823`/`a506e61`, evaluator run `31679294780` and APK run `31679460462` provide the strict report path; the target Fold4 still needs one >=20-accepted-attempt session.
 - G3.1 is closed: commit `a1aa9c3` migrates the Android/bridge transcript round trip to the strict `okja.event.v1` envelope; contract run `31680385188` and APK run `31680385242` are green.
+- G3.3/G3.8 are closed: commit `f2a41f6` adds a durable at-most-once device-command boundary and capability manifest for TV/AC/phone finder with washer disabled; run `31681395404` and APK run `31681395431` are green. Physical integrations remain open.
 - Product direction is one Okja app/firmware with senior/personal profiles.
 
 ---
@@ -240,9 +241,11 @@ Acceptable evidence:
 
 - [ ] **G3.2 Core voice events implemented** — P0  
   `wake.candidate/detected/rejected`, listening, transcript, intent, confirmation, command accepted/failed.
+  Partial evidence: commit `a1aa9c3` emits/validates wake detected, listening started, transcript final and assistant result events on the Android/bridge path; commit `f2a41f6` emits replay-safe command accepted/completed/failed events from the guarded boundary. Keep unchecked until remaining wake candidate/rejection, transcript/listening failure, intent and confirmation producers exist.
 
-- [ ] **G3.3 Device command contract implemented and idempotent** — P0  
+- [x] **G3.3 Device command contract implemented and idempotent** — P0
   TV, AC, phone finder now; washer capability reserved/disabled until integration exists.
+  Evidence: commit `f2a41f6` adds strict target/action/parameter and time validation, durable SQLite idempotency reservation/result caching, concurrent duplicate suppression, content-conflict rejection and `okja.event.v1` command accepted/completed/failed output. Washer is mechanically disabled. Run `31681395404` and APK run `31681395431` are green; physical device flows remain separate gates.
 
 - [ ] **G3.4 Care/family event contract implemented** — P1  
   Wellness, symptom record, arrival/departure, ETA, notification, emergency escalation events.
@@ -254,8 +257,9 @@ Acceptable evidence:
 - [ ] **G3.6 One shared profile schema supports senior + personal modes** — P0.
 - [ ] **G3.7 Senior accessibility settings implemented** — P1  
   Large type, solar+lunar date, quiet hours/night mode, simple quick actions.
-- [ ] **G3.8 Device capability flags implemented** — P1  
+- [x] **G3.8 Device capability flags implemented** — P1
   TV=true, AC=true, washer future/hidden until connected.
+  Evidence: `capability_manifest()` in commit `f2a41f6` reports TV/AC/phone finder enabled with adapter-required runtime and washer `enabled=false`/`runtime=disabled` with a reserved-until-integration reason; contract tests enforce the manifest.
 - [ ] **G3.9 Family/caregiver notification preferences implemented** — P1.
 - [ ] **G3.10 Privacy/health/camera/benchmark consents are separate fields** — P0.
 

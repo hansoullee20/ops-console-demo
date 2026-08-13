@@ -65,10 +65,11 @@
 - Clean evidence: run `31680385188` passes the 48 existing tests plus 8 envelope/transport contract tests; APK run `31680385242` compiles the Android producer/consumer and uploads the artifact. G3.1 is closed.
 - Scope guard: keep G3.2 open until wake rejection/candidate, structured intent, confirmation and device-command accepted/failed paths are genuinely emitted by their real implementations.
 
-### G3.3 idempotent device-command boundary — active
+### G3.3/G3.8 device-command boundary and capability flags — completed
 
-- Current task: define a fail-closed `okja.device-command.v1` request contract for TV, AC and phone finder, with washer present only as an explicitly disabled future capability.
-- Implementation in progress: validate exact target/action/parameter combinations and a <=5-minute validity window; reserve idempotency keys durably in SQLite before adapter invocation; cache success/failure events; reject key reuse with different content; and leave interrupted actions `in_progress` rather than risk automatic duplicate execution.
+- Commit `f2a41f6` defines the fail-closed `okja.device-command.v1` request contract for TV, AC and phone finder, with washer present only as an explicitly disabled future capability. The older UI/care event sketch is now labeled legacy/non-normative.
+- The service validates exact target/action/parameter combinations, expiry and future-clock bounds; reserves idempotency keys durably in SQLite before adapter invocation; caches success/failure events; rejects key reuse with different content; prevents concurrent duplicates; and leaves interrupted actions `in_progress` rather than risk automatic re-execution.
+- Clean evidence: contract run `31681395404` passes 16 phone-contract tests plus the 48-test wake/evaluator suite; APK run `31681395431` is green. G3.3 and the exact capability-flag DoD in G3.8 are closed.
 - Scope guard: passing contract tests closes the G3.3 command boundary, not physical integrations. G3.15/G3.16/G4.3/G4.4 remain open until real TV, AC and phone-finder adapters and devices are tested.
 
 ---
@@ -397,7 +398,7 @@ The test UI and final product UI are different artifacts. Test tooling may expos
 4. G1.12/G1.13 script and split preparation is complete. While the human reviews are pending, keep G1.14 and large generation locked; do not reinterpret the completed preparation as corpus approval.
 5. Install the debug APK from run `31679460462` on the Fold4 and follow `V4_ANDROID_LATENCY_MEASUREMENT.md` for one >=20-accepted-attempt session; keep G2.8 unchecked until its strict report is preserved.
 6. Train only a small v4 sanity classifier after G1.1–G1.10 genuinely pass. Replay audio SHA `a9551898...` through that pinned model with `v4_replay.py` to close G2.5; do not launch large v4 generation before G1 passes.
-7. G3.1 is complete. Extend the v1 registry only from real producers: implement the idempotent device-command boundary (G3.3) before claiming the remaining command events in G3.2.
+7. G3.1/G3.3/G3.8 are complete. Next, add guarded emergency-state behavior before any care or emergency producer is connected; do not let agent text become a privileged command/event source.
 
 ## 16. Do not repeat
 
