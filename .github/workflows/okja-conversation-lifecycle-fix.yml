@@ -1,0 +1,65 @@
+name: Apply Okja conversation lifecycle fix
+
+on:
+  push:
+    branches: [ aihub-voice-test ]
+    paths:
+      - '.github/workflows/okja-conversation-lifecycle-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aihub-voice-test
+      - name: Patch conversation lifecycle
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aihub/app/src/main/java/com/soul/aihub/MainActivity.java')
+          s = p.read_text()
+
+          s = s.replace(
+              '    private boolean conversationActive = false;\n',
+              '    private boolean conversationActive = false;\n    private int followUpNoMatchRetries = 0;\n'
+          )
+
+          old = '''                if(failed==ListenMode.FOLLOW_UP&&(error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)){\n                    endConversation(true);return;\n                }\n                uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);'''
+          new = '''                if((error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)&&failed==ListenMode.WAKE){\n                    uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;\n                    stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());\n                    if(handsFree)scheduleWakeListening(500);\n                    return;\n                }\n                if((error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)&&failed==ListenMode.FOLLOW_UP){\n                    if(followUpNoMatchRetries<1){\n                        followUpNoMatchRetries++;\n                        uiState=VoiceUiState.State.READY;\n                        stateText.setText(followUpPrompt());\n                        main.postDelayed(()->startFollowUpListening(),450);\n                    }else{\n                        endConversation(true);\n                    }\n                    return;\n                }\n                uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);'''
+          if old not in s:
+              raise SystemExit('onError target not found')
+          s = s.replace(old, new)
+
+          s = s.replace(
+              '                        if(containsWakePhrase(matches)){conversationActive=true;',
+              '                        if(containsWakePhrase(matches)){conversationActive=true;followUpNoMatchRetries=0;'
+          )
+          s = s.replace(
+              '                if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;',
+              '                if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;followUpNoMatchRetries=0;'
+          )
+
+          old_exit = '    private boolean isConversationExit(String spoken){String n=spoken.toLowerCase(Locale.ROOT).replace(" ","");return n.equals("됐어")||n.equals("됐어고마워")||n.equals("그만")||n.equals("고마워")||n.equals("괜찮아")||n.equals("끝")||n.equals("stop")||n.equals("thanks")||n.equals("thankyou")||n.equals("that\'sall")||n.equals("thatsall");}'
+          new_exit = '''    private boolean isConversationExit(String spoken){\n        String n=spoken.toLowerCase(Locale.ROOT).replace(" ","").replace(".","").replace("!","").replace("?","");\n        return n.contains("고마워")||n.contains("감사해")||n.contains("됐어")||n.contains("그만")||n.equals("끝")||n.endsWith("끝내")||n.equals("stop")||n.contains("thanks")||n.contains("thankyou")||n.contains("that'sall")||n.contains("thatsall");\n    }'''
+          if old_exit not in s:
+              raise SystemExit('exit matcher target not found')
+          s = s.replace(old_exit, new_exit)
+
+          s = s.replace(
+              '    private void endConversation(boolean resumeWake){conversationActive=false;resetListening();clearInteractionChain();',
+              '    private void endConversation(boolean resumeWake){conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();'
+          )
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "Okja CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add aihub/app/src/main/java/com/soul/aihub/MainActivity.java
+          git commit -m "Fix Okja conversation exit and no-match lifecycle"
+          git push origin HEAD:aihub-voice-test
