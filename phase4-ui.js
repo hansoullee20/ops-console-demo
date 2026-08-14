@@ -1,7 +1,10 @@
 /* Phase 4 deterministic operational leave/replacement UI. Demo exits before fetch. */
 (function(){'use strict';
 var LEAVE='/api/v1/leave-operations',REPL='/api/v1/replacement-operations',leaveData=null,replData=null,now=new Date(),selectedMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-function demo(){return window.OPS_MODE_ACTIVE==='demo'}
+// Demo mode is decided once, in data-source.js. The fallback reads the raw
+  // marker the Pages build injects, so a demo artifact is still recognised even
+  // if this file somehow loads first: unknown must never mean "call the API".
+  function demo(){return window.OPS_IS_DEMO?window.OPS_IS_DEMO():window.OPS_MODE==='demo'}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
 function send(url,opt){if(demo())return Promise.reject(Error('공개 데모에서는 운영 기능을 사용하지 않습니다.'));return fetch(url,opt).then(function(r){return r.json().catch(function(){return null}).then(function(x){if(!r.ok)throw Error(x&&x.detail||'요청 실패 ('+r.status+')');return x})})}
 function drawer(title,sub,body,foot){dtitle.textContent=title;dsub.textContent=sub||'';dbody.innerHTML=body;dfoot.innerHTML=foot||'<button class="btn" onclick="closeDrawer()">닫기</button>';drawerWrap.classList.add('open')}
