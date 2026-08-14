@@ -154,6 +154,7 @@ async def main() -> None:
         "personal": deque(maxlen=HISTORY_TURNS * 2),
     }
     last_model_turn = {"grandma": 0.0, "personal": 0.0}
+    last_correlation = {"grandma": None, "personal": None}
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         req = None
@@ -192,9 +193,10 @@ async def main() -> None:
 
             now = time.monotonic()
             history = histories[profile]
-            if now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:
+            correlation = envelope["correlation_id"]
+            if last_correlation[profile] != correlation or now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:
                 history.clear()
-            prompt = make_prompt(profile, language, text, list(history))
+            last_correlation[profile] = correlation
             started = time.perf_counter()
             print(
                 f"[Okja/Codex] event={envelope['event_id']} "
@@ -204,6 +206,7 @@ async def main() -> None:
             # Serialize model calls on the phone to avoid stacking multiple Codex CLI
             # processes if repeated wake/STT events arrive while a response is pending.
             async with model_lock:
+                prompt = make_prompt(profile, language, text, list(history))
                 reply = await codex_reply(prompt)
 
             history.append(("user", text))

@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private boolean bridgeDegraded = false;
     private boolean conversationActive = false;
     private int followUpNoMatchRetries = 0;
+    private int interactionEpoch = 0;
     private VoiceUiState.State uiState = VoiceUiState.State.READY;
     private String deviceId;
     private String sessionId;
@@ -175,9 +176,14 @@ public class MainActivity extends Activity {
                     return;
                 }
                 uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);
-                if(failed==ListenMode.COMMAND||failed==ListenMode.FOLLOW_UP){try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("error_code",error);JSONObject f=voiceEvent("listening.failed",listeningEventId,"warning","household",p);JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",error);voiceEvent("transcript.failed",f.getString("event_id"),"warning","household",t);}catch(Exception ignored){}if(failed==ListenMode.COMMAND)clearInteractionChain();}
+                if(failed==ListenMode.COMMAND||failed==ListenMode.FOLLOW_UP){
+                    try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("error_code",error);JSONObject f=voiceEvent("listening.failed",listeningEventId,"warning","household",p);JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",error);voiceEvent("transcript.failed",f.getString("event_id"),"warning","household",t);}catch(Exception ignored){}
+                    transcriptText.setText("음성인식 오류 ("+error+")");
+                    endConversation(true);
+                    return;
+                }
                 stateText.setText("음성인식 오류 · 다시 시도합니다 ("+error+")");
-                if(handsFree&&VoiceUiState.automaticWakeAllowed(uiState))scheduleWakeListening(failed==ListenMode.WAKE?350:650);
+                if(handsFree&&VoiceUiState.automaticWakeAllowed(uiState))scheduleWakeListening(350);
             }
             @Override public void onResults(Bundle results){
                 ArrayList<String> matches=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);ListenMode completed=listenMode;listenMode=ListenMode.IDLE;if(uiState!=VoiceUiState.State.MIC_OFF)uiState=VoiceUiState.State.READY;
@@ -190,7 +196,21 @@ public class MainActivity extends Activity {
                         else{JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",count);r.put("reason","phrase_mismatch");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);clearInteractionChain();if(handsFree)scheduleWakeListening(250);}
                     }catch(Exception ignored){clearInteractionChain();if(handsFree)scheduleWakeListening(350);}return;
                 }
-                if(count==0){talkButton.setEnabled(true);if(completed==ListenMode.FOLLOW_UP){endConversation(true);return;}if(completed==ListenMode.COMMAND){try{JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",SpeechRecognizer.ERROR_NO_MATCH);voiceEvent("transcript.failed",lifecycleEventId,"warning","household",t);}catch(Exception ignored){}clearInteractionChain();}if(handsFree)scheduleWakeListening(350);return;}
+                if(count==0){
+                    talkButton.setEnabled(true);
+                    if(completed==ListenMode.FOLLOW_UP){
+                        if(followUpNoMatchRetries<1){followUpNoMatchRetries++;uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());main.postDelayed(()->startFollowUpListening(),450);}
+                        else endConversation(true);
+                        return;
+                    }
+                    if(completed==ListenMode.COMMAND){
+                        try{JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",SpeechRecognizer.ERROR_NO_MATCH);voiceEvent("transcript.failed",lifecycleEventId,"warning","household",t);}catch(Exception ignored){}
+                        endConversation(true);
+                        return;
+                    }
+                    if(handsFree)scheduleWakeListening(350);
+                    return;
+                }
                 String spoken=matches.get(0).trim();
                 if(completed==ListenMode.FOLLOW_UP&&isConversationExit(spoken)){answerText.setText(recognitionLanguage().equals("en-US")?"Okay.":"네, 알겠습니다.");endConversation(true);return;}
                 if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;followUpNoMatchRetries=0;uiState=VoiceUiState.State.THINKING;transcriptText.setText((profile==Profile.GRANDMA?"할머니: ":"You: ")+spoken);stateText.setText("AI 처리 중…");sendToBridge(spoken,lifecycleEventId);}
@@ -223,10 +243,10 @@ public class MainActivity extends Activity {
         catch(Exception e){endConversation(true);}
     }
     private void resetListening(){listenMode=ListenMode.IDLE;if(recognizer!=null)try{recognizer.cancel();}catch(Exception ignored){}}
-    private void endConversation(boolean resumeWake){conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());talkButton.setEnabled(true);if(resumeWake&&handsFree) scheduleWakeListening(650);}}
+    private void endConversation(boolean resumeWake){interactionEpoch++;conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());talkButton.setEnabled(true);if(resumeWake&&handsFree) scheduleWakeListening(650);}}
 
     private void sendToBridge(String prompt,String causationId){
-        final String lang=recognitionLanguage();final String profileName=profile==Profile.GRANDMA?"grandma":"personal";final JSONObject request;
+        final String lang=recognitionLanguage();final String profileName=profile==Profile.GRANDMA?"grandma":"personal";final int requestEpoch=interactionEpoch;final JSONObject request;
         try{JSONObject p=new JSONObject();p.put("profile",profileName);p.put("language",lang);p.put("text",prompt);request=voiceEvent("transcript.final",causationId,"info","sensitive",p);}
         catch(Exception error){uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("이벤트 생성 실패 · 다시 시도해주세요");talkButton.setEnabled(true);return;}
         ioPool.execute(()->{
@@ -236,6 +256,7 @@ public class MainActivity extends Activity {
             }catch(Exception e){degraded=true;String detail=e.getClass().getSimpleName();String message=e.getMessage();if(message!=null&&!message.trim().isEmpty()){message=message.replace('\n',' ').replace('\r',' ').trim();if(message.length()>120)message=message.substring(0,120);detail += ": "+message;}result=lang.equals("en-US")?"Bridge diagnostic · "+detail:"브리지 진단 · "+detail;}
             final String reply=result;final boolean degradedResult=degraded;
             main.post(()->{
+                if(destroyed||requestEpoch!=interactionEpoch||uiState==VoiceUiState.State.MIC_OFF)return;
                 bridgeDegraded=degradedResult;
                 uiState=degradedResult?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;
                 answerText.setText(reply);stateText.setText(degradedResult?offlinePrompt():"답변 중…");talkButton.setEnabled(VoiceUiState.manualTalkEnabled(uiState));speak(reply,lang);
