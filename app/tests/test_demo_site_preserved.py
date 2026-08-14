@@ -14,9 +14,12 @@ from app.config import REPO_ROOT
 
 # Committed files the public build serves. `demo-data.js` is generated at
 # deploy time and is deliberately not here.
-PUBLIC_FILES = ("index.html", "profile.css", "profile.js", "data-source.js",
-                "import-ui.js", "phase4-ui.js", "month-close-ui.js", "mobile.html", "mobile.css", "mobile-period.css", "mobile-full.css",
-                "mobile.js", ".nojekyll")
+PUBLIC_FILES = (
+    "index.html", "profile.css", "profile.js", "data-source.js",
+    "import-ui.js", "phase4-ui.js", "safety-ui.js", "month-close-ui.js",
+    "mobile.html", "mobile.css", "mobile-period.css", "mobile-full.css",
+    "mobile.js", ".nojekyll",
+)
 STAGED_FILES = PUBLIC_FILES + ("demo-data.js",)
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pages.yml"
 NEVER_PUBLISHED = ("app", "data", "uploads", "backups", "requirements.txt")
@@ -44,9 +47,21 @@ def test_index_references_its_assets_statically():
     """The local app and the deployed demo must be the same page: the workflow
     adds cache-busting to these references, it does not create them."""
     html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
-    for asset in ("profile.css", "profile.js", "data-source.js", "import-ui.js"):
+    for asset in (
+        "profile.css", "profile.js", "data-source.js", "import-ui.js",
+        "phase4-ui.js", "safety-ui.js", "month-close-ui.js",
+    ):
         assert f'"./{asset}"' in html, f"{asset} is not referenced statically"
     assert "<!--OPS_DEMO_INJECT-->" in html
+
+
+def test_every_local_index_asset_is_staged_for_pages():
+    """Catch the reverse failure: index.html may reference a local asset that
+    the explicit Pages allowlist forgot to copy."""
+    html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    referenced = set(re.findall(r'(?:src|href)=["\']\./([^?"\']+)', html))
+    missing = sorted(referenced - set(STAGED_FILES))
+    assert missing == [], f"index.html references unstaged Pages assets: {missing}"
 
 
 def test_operational_build_carries_no_demo_marker():
@@ -74,6 +89,14 @@ def test_pages_workflow_never_stages_backend_or_data():
     assert set(staged) == set(STAGED_FILES)
     for forbidden in NEVER_PUBLISHED:
         assert forbidden not in staged
+
+
+def test_pages_workflow_file_count_matches_allowlist():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    expected = len(STAGED_FILES)
+    assert f'wc -l)" -eq {expected}' in workflow, (
+        f"Pages artifact file-count assertion must match {expected} staged files"
+    )
 
 
 def test_gitignore_keeps_operational_data_out_of_git():
@@ -200,4 +223,3 @@ def test_no_template_placeholder_survives_in_a_quoted_string():
     html = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     for hook in ("dailyAside", "renderAttendanceGrid"):
         assert "${" + hook not in html, f"${{{hook}()}} is not interpolated in a quoted string"
-
