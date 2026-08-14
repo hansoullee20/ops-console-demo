@@ -12,6 +12,7 @@ import json
 import os
 import struct
 import time
+from collections import deque
 
 from okja_event_contract import assistant_failure, assistant_response, parse_transcript_request
 from okja_intent_confirmation import VoiceIntentSession
@@ -20,6 +21,8 @@ HOST = "127.0.0.1"
 PORT = 8765
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_TIMEOUT_SECONDS = float(os.environ.get("OKJA_CODEX_TIMEOUT_SECONDS", "90"))
+HISTORY_IDLE_RESET_SECONDS = float(os.environ.get("OKJA_HISTORY_IDLE_RESET_SECONDS", "45"))
+HISTORY_TURNS = 6
 
 
 async def read_packet(reader: asyncio.StreamReader) -> str:
@@ -42,29 +45,40 @@ def parse_request(raw: str):
     return parse_transcript_request(json.loads(raw))
 
 
-def make_prompt(profile: str, language: str, text: str) -> str:
+def make_prompt(profile: str, language: str, text: str, history: list[tuple[str, str]]) -> str:
     if profile == "grandma":
-        return (
+        instructions = (
             "너의 이름은 옥자다. 한국의 고령 사용자를 위한 친근하고 실용적인 음성 비서다. "
             "항상 자연스러운 한국어 존댓말로 답하고 한 번에 이해하기 쉽게 짧은 문장을 쓴다. "
             "화면을 보지 않아도 이해되는 답을 우선한다. 위험하거나 중요한 건강·금융·법률 문제는 "
             "단정하지 말고 필요한 확인을 권한다. 불필요한 영어, 마크다운, 긴 목록은 피한다. "
-            "음성으로 읽기 좋은 짧은 답만 출력한다.\n\n"
-            f"사용자: {text}"
+            "음성으로 읽기 좋은 짧은 답만 출력한다."
         )
-    if language == "en-US":
-        return (
+    elif language == "en-US":
+        instructions = (
             "You are Okja, a capable room voice assistant. Reply in natural spoken English. "
             "Handle ordinary requests quickly and keep spoken answers concise unless detail is needed. "
-            "Avoid markdown tables, headings, and long lists. Output only the answer to speak.\n\n"
-            f"User: {text}"
+            "Use the recent conversation only when it helps resolve follow-up references. "
+            "Avoid markdown tables, headings, and long lists. Output only the answer to speak."
         )
-    return (
-        "너는 옥자라는 개인용 음성 비서다. 자연스러운 한국어로 답한다. "
-        "간단한 질문은 빠르고 짧게 답하고 복잡한 질문은 필요한 만큼 정확하게 답한다. "
-        "마크다운 표, 제목, 긴 목록은 피하고 음성으로 읽기 좋은 답만 출력한다.\n\n"
-        f"사용자: {text}"
-    )
+    else:
+        instructions = (
+            "너는 옥자라는 개인용 음성 비서다. 자연스러운 한국어로 답한다. "
+            "간단한 질문은 빠르고 짧게 답하고 복잡한 질문은 필요한 만큼 정확하게 답한다. "
+            "최근 대화는 후속 질문의 생략된 맥락을 이해하는 데 필요한 경우에만 사용한다. "
+            "마크다운 표, 제목, 긴 목록은 피하고 음성으로 읽기 좋은 답만 출력한다."
+        )
+
+    if history:
+        label_user = "User" if language == "en-US" else "사용자"
+        label_assistant = "Okja" if language == "en-US" else "옥자"
+        lines = []
+        for role, content in history:
+            lines.append(f"{label_user if role == 'user' else label_assistant}: {content}")
+        context = "\n".join(lines)
+        return f"{instructions}\n\nRecent conversation:\n{context}\n\n{label_user}: {text}"
+
+    return f"{instructions}\n\n{'User' if language == 'en-US' else '사용자'}: {text}"
 
 
 def _action_label(target: str, action: str, language: str) -> str:
@@ -135,6 +149,11 @@ async def codex_reply(prompt: str) -> str:
 async def main() -> None:
     intent_session = VoiceIntentSession()
     model_lock = asyncio.Lock()
+    histories = {
+        "grandma": deque(maxlen=HISTORY_TURNS * 2),
+        "personal": deque(maxlen=HISTORY_TURNS * 2),
+    }
+    last_model_turn = {"grandma": 0.0, "personal": 0.0}
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         req = None
@@ -171,7 +190,11 @@ async def main() -> None:
                 await write_packet(writer, json.dumps(response, ensure_ascii=False))
                 return
 
-            prompt = make_prompt(profile, language, text)
+            now = time.monotonic()
+            history = histories[profile]
+            if now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:
+                history.clear()
+            prompt = make_prompt(profile, language, text, list(history))
             started = time.perf_counter()
             print(
                 f"[Okja/Codex] event={envelope['event_id']} "
@@ -182,6 +205,10 @@ async def main() -> None:
             # processes if repeated wake/STT events arrive while a response is pending.
             async with model_lock:
                 reply = await codex_reply(prompt)
+
+            history.append(("user", text))
+            history.append(("assistant", reply))
+            last_model_turn[profile] = time.monotonic()
 
             elapsed = time.perf_counter() - started
             print(
