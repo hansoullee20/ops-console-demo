@@ -4,7 +4,10 @@
   var API='/api/v1/imports', SLOTS='/api/v1/terminal-slots', current=null, pending=[], mappingData=null;
   function el(id){return document.getElementById(id)}
   function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
-  function demo(){return window.OPS_MODE_ACTIVE==='demo'}
+  // Demo mode is decided once, in data-source.js. The fallback reads the raw
+  // marker the Pages build injects, so a demo artifact is still recognised even
+  // if this file somehow loads first: unknown must never mean "call the API".
+  function demo(){return window.OPS_IS_DEMO?window.OPS_IS_DEMO():window.OPS_MODE==='demo'}
   function drawer(title,sub,body,foot){el('dtitle').textContent=title;el('dsub').textContent=sub||'';el('dbody').innerHTML=body;el('dfoot').innerHTML=foot||'<button class="btn" onclick="closeDrawer()">닫기</button>';el('drawerWrap').classList.add('open')}
   function fail(message,detail){drawer('처리하지 못했습니다','근태 데이터는 변경되지 않았습니다.','<div class="alert"><b>'+esc(message)+'</b><br>'+esc(detail||'')+'</div>')}
   function send(url,opt){

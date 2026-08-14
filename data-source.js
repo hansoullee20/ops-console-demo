@@ -367,6 +367,15 @@
 
   window.OPS_MODE_ACTIVE = MODE;
 
+  // The single demo-mode decision. Every UI file asks this instead of reading a
+  // global of its own choosing: safety-ui.js and month-close-ui.js each guarded
+  // on `window.OPS_DATA_MODE`, which nothing has ever set, so their guards were
+  // dead and the public demo called the operational API for months. A guard
+  // that reads the wrong name looks correct in review and fails silently.
+  window.OPS_IS_DEMO = function () {
+    return MODE === 'demo';
+  };
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', window.OPS_RELOAD);
   } else {

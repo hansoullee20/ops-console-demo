@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "app/**"
+      - "*.js"
+      - "index.html"
       - "requirements.txt"
       - "pytest.ini"
       - ".github/workflows/backend-tests.yml"
@@ -32,3 +34,31 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+  # The public demo must never reach the operational API. Only a browser can
+  # prove that: the failure this catches was a guard reading a global nobody
+  # set, plus an export button that navigated to /api/... instead of fetching
+  # it. Both looked fine in review and in the unit tests.
+  demo-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Drive the built demo in a browser
+        # OPS_REQUIRE_BROWSER makes a missing browser a failure rather than a
+        # skip: a check that silently does not run is worse than no check.
+        env:
+          OPS_REQUIRE_BROWSER: "1"
+        run: python -m pytest -m browser -rs
