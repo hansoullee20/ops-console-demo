@@ -1,0 +1,54 @@
+name: Build Okja bridge diagnostic APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ aihub-voice-test ]
+    paths:
+      - '.github/workflows/okja-bridge-diagnostic-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject temporary bridge exception diagnostics
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('aihub/app/src/main/java/com/soul/aihub/MainActivity.java')
+          text = path.read_text(encoding='utf-8')
+          old = '''            }catch(Exception e){degraded=true;result=lang.equals("en-US")?"The AI bridge is unavailable. Voice input can retry.":"AI 브리지에 연결할 수 없습니다. 음성 입력은 다시 시도할 수 있습니다.";}'''
+          new = '''            }catch(Exception e){
+                degraded=true;
+                String detail=e.getMessage();
+                if(detail==null)detail="";
+                detail=detail.replaceAll("[\\r\\n]+"," ");
+                if(detail.length()>160)detail=detail.substring(0,160);
+                String diagnostic=e.getClass().getSimpleName()+(detail.isEmpty()?"":": "+detail);
+                result=lang.equals("en-US")?"BRIDGE DIAG · "+diagnostic:"브리지 진단 · "+diagnostic;
+            }'''
+          if text.count(old) != 1:
+              raise SystemExit('expected bridge catch block not found exactly once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build diagnostic debug APK
+        run: gradle -p aihub assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: okja-bridge-diagnostic-apk
+          path: aihub/app/build/outputs/apk/debug/app-debug.apk
