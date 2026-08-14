@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private boolean destroyed = false;
     private boolean bridgeDegraded = false;
     private boolean conversationActive = false;
+    private int followUpNoMatchRetries = 0;
     private VoiceUiState.State uiState = VoiceUiState.State.READY;
     private String deviceId;
     private String sessionId;
@@ -156,8 +157,22 @@ public class MainActivity extends Activity {
             @Override public void onError(int error){
                 ListenMode failed=listenMode;listenMode=ListenMode.IDLE;
                 if(uiState==VoiceUiState.State.MIC_OFF)return;
-                if(failed==ListenMode.FOLLOW_UP&&(error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)){
-                    endConversation(true);return;
+                if((error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)&&failed==ListenMode.WAKE){
+                    uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;
+                    stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());
+                    if(handsFree)scheduleWakeListening(500);
+                    return;
+                }
+                if((error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)&&failed==ListenMode.FOLLOW_UP){
+                    if(followUpNoMatchRetries<1){
+                        followUpNoMatchRetries++;
+                        uiState=VoiceUiState.State.READY;
+                        stateText.setText(followUpPrompt());
+                        main.postDelayed(()->startFollowUpListening(),450);
+                    }else{
+                        endConversation(true);
+                    }
+                    return;
                 }
                 uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);
                 if(failed==ListenMode.COMMAND||failed==ListenMode.FOLLOW_UP){try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("error_code",error);JSONObject f=voiceEvent("listening.failed",listeningEventId,"warning","household",p);JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",error);voiceEvent("transcript.failed",f.getString("event_id"),"warning","household",t);}catch(Exception ignored){}if(failed==ListenMode.COMMAND)clearInteractionChain();}
@@ -171,14 +186,14 @@ public class MainActivity extends Activity {
                     correlationId="corr-"+UUID.randomUUID();
                     try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("candidate_count",count);JSONObject candidate=voiceEvent("wake.candidate",null,"debug","household",p);lifecycleEventId=candidate.getString("event_id");
                         if(count==0){JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",0);r.put("reason","empty_result");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);clearInteractionChain();if(handsFree)scheduleWakeListening(350);return;}
-                        if(containsWakePhrase(matches)){conversationActive=true;JSONObject d=new JSONObject();d.put("language",recognitionLanguage());d.put("candidate_count",count);JSONObject detected=voiceEvent("wake.detected",lifecycleEventId,"info","household",d);listeningEventId=detected.getString("event_id");transcriptText.setText(profile==Profile.GRANDMA?"네, 말씀하세요.":"Listening…");stateText.setText("깨움 감지");main.postDelayed(()->startCommandListening(true),250);}
+                        if(containsWakePhrase(matches)){conversationActive=true;followUpNoMatchRetries=0;JSONObject d=new JSONObject();d.put("language",recognitionLanguage());d.put("candidate_count",count);JSONObject detected=voiceEvent("wake.detected",lifecycleEventId,"info","household",d);listeningEventId=detected.getString("event_id");transcriptText.setText(profile==Profile.GRANDMA?"네, 말씀하세요.":"Listening…");stateText.setText("깨움 감지");main.postDelayed(()->startCommandListening(true),250);}
                         else{JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",count);r.put("reason","phrase_mismatch");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);clearInteractionChain();if(handsFree)scheduleWakeListening(250);}
                     }catch(Exception ignored){clearInteractionChain();if(handsFree)scheduleWakeListening(350);}return;
                 }
                 if(count==0){talkButton.setEnabled(true);if(completed==ListenMode.FOLLOW_UP){endConversation(true);return;}if(completed==ListenMode.COMMAND){try{JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",SpeechRecognizer.ERROR_NO_MATCH);voiceEvent("transcript.failed",lifecycleEventId,"warning","household",t);}catch(Exception ignored){}clearInteractionChain();}if(handsFree)scheduleWakeListening(350);return;}
                 String spoken=matches.get(0).trim();
                 if(completed==ListenMode.FOLLOW_UP&&isConversationExit(spoken)){answerText.setText(recognitionLanguage().equals("en-US")?"Okay.":"네, 알겠습니다.");endConversation(true);return;}
-                if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;uiState=VoiceUiState.State.THINKING;transcriptText.setText((profile==Profile.GRANDMA?"할머니: ":"You: ")+spoken);stateText.setText("AI 처리 중…");sendToBridge(spoken,lifecycleEventId);}
+                if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;followUpNoMatchRetries=0;uiState=VoiceUiState.State.THINKING;transcriptText.setText((profile==Profile.GRANDMA?"할머니: ":"You: ")+spoken);stateText.setText("AI 처리 중…");sendToBridge(spoken,lifecycleEventId);}
             }
             @Override public void onPartialResults(Bundle partialResults){if(listenMode!=ListenMode.COMMAND&&listenMode!=ListenMode.FOLLOW_UP)return;ArrayList<String> m=partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(m!=null&&!m.isEmpty()&&!m.get(0).trim().isEmpty()){String text=m.get(0).trim();transcriptText.setText(text);try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("text",text);voiceEvent("transcript.partial",listeningEventId,"debug","sensitive",p);}catch(Exception ignored){}}}
             @Override public void onEvent(int eventType,Bundle params){}
@@ -188,7 +203,10 @@ public class MainActivity extends Activity {
     }
 
     private boolean containsWakePhrase(ArrayList<String> matches){for(String candidate:matches){String n=candidate.toLowerCase(Locale.ROOT).replace(" ","").replace("-","");if(n.contains("옥자")||n.contains("옥짜")||n.contains("okja")||n.contains("heyokja")||n.contains("okayokja"))return true;}return false;}
-    private boolean isConversationExit(String spoken){String n=spoken.toLowerCase(Locale.ROOT).replace(" ","");return n.equals("됐어")||n.equals("됐어고마워")||n.equals("그만")||n.equals("고마워")||n.equals("괜찮아")||n.equals("끝")||n.equals("stop")||n.equals("thanks")||n.equals("thankyou")||n.equals("that'sall")||n.equals("thatsall");}
+    private boolean isConversationExit(String spoken){
+        String n=spoken.toLowerCase(Locale.ROOT).replace(" ","").replace(".","").replace("!","").replace("?","");
+        return n.contains("고마워")||n.contains("감사해")||n.contains("됐어")||n.contains("그만")||n.equals("끝")||n.endsWith("끝내")||n.equals("stop")||n.contains("thanks")||n.contains("thankyou")||n.contains("that'sall")||n.contains("thatsall");
+    }
     private Intent recognizerIntent(String lang,boolean partial){Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,lang);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,lang);i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,partial);i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,5);return i;}
     private void scheduleWakeListening(long delayMs){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;main.postDelayed(()->{if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startWakeListening();},delayMs);}
     private void startWakeListening(){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;try{recognizer.cancel();listenMode=ListenMode.WAKE;uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());recognizer.startListening(recognizerIntent(recognitionLanguage(),false));}catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성인식 시작 실패 · 다시 시도합니다");scheduleWakeListening(750);}}
@@ -205,7 +223,7 @@ public class MainActivity extends Activity {
         catch(Exception e){endConversation(true);}
     }
     private void resetListening(){listenMode=ListenMode.IDLE;if(recognizer!=null)try{recognizer.cancel();}catch(Exception ignored){}}
-    private void endConversation(boolean resumeWake){conversationActive=false;resetListening();clearInteractionChain();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());talkButton.setEnabled(true);if(resumeWake&&handsFree) scheduleWakeListening(650);}}
+    private void endConversation(boolean resumeWake){conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());talkButton.setEnabled(true);if(resumeWake&&handsFree) scheduleWakeListening(650);}}
 
     private void sendToBridge(String prompt,String causationId){
         final String lang=recognitionLanguage();final String profileName=profile==Profile.GRANDMA?"grandma":"personal";final JSONObject request;
