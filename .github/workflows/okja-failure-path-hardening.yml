@@ -1,0 +1,85 @@
+name: Harden Okja failure paths
+on: push
+permissions:
+  contents: write
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aihub-voice-test
+      - name: Patch Android and Codex bridge
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('aihub/app/src/main/java/com/soul/aihub/MainActivity.java')
+          s = p.read_text()
+
+          s = s.replace(
+              '    private int followUpNoMatchRetries = 0;\n    private VoiceUiState.State uiState',
+              '    private int followUpNoMatchRetries = 0;\n    private int interactionEpoch = 0;\n    private VoiceUiState.State uiState'
+          )
+
+          old = '''                uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);\n                if(failed==ListenMode.COMMAND||failed==ListenMode.FOLLOW_UP){try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("error_code",error);JSONObject f=voiceEvent("listening.failed",listeningEventId,"warning","household",p);JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",error);voiceEvent("transcript.failed",f.getString("event_id"),"warning","household",t);}catch(Exception ignored){}if(failed==ListenMode.COMMAND)clearInteractionChain();}\n                stateText.setText("음성인식 오류 · 다시 시도합니다 ("+error+")");\n                if(handsFree&&VoiceUiState.automaticWakeAllowed(uiState))scheduleWakeListening(failed==ListenMode.WAKE?350:650);'''
+          new = '''                uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);\n                if(failed==ListenMode.COMMAND||failed==ListenMode.FOLLOW_UP){\n                    try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("error_code",error);JSONObject f=voiceEvent("listening.failed",listeningEventId,"warning","household",p);JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",error);voiceEvent("transcript.failed",f.getString("event_id"),"warning","household",t);}catch(Exception ignored){}\n                    transcriptText.setText("음성인식 오류 ("+error+")");\n                    endConversation(true);\n                    return;\n                }\n                stateText.setText("음성인식 오류 · 다시 시도합니다 ("+error+")");\n                if(handsFree&&VoiceUiState.automaticWakeAllowed(uiState))scheduleWakeListening(350);'''
+          if old not in s:
+              raise SystemExit('generic recognizer error block not found')
+          s = s.replace(old, new)
+
+          old = 'if(count==0){talkButton.setEnabled(true);if(completed==ListenMode.FOLLOW_UP){endConversation(true);return;}if(completed==ListenMode.COMMAND){try{JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",SpeechRecognizer.ERROR_NO_MATCH);voiceEvent("transcript.failed",lifecycleEventId,"warning","household",t);}catch(Exception ignored){}clearInteractionChain();}if(handsFree)scheduleWakeListening(350);return;}'
+          new = '''if(count==0){\n                    talkButton.setEnabled(true);\n                    if(completed==ListenMode.FOLLOW_UP){\n                        if(followUpNoMatchRetries<1){followUpNoMatchRetries++;uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());main.postDelayed(()->startFollowUpListening(),450);}\n                        else endConversation(true);\n                        return;\n                    }\n                    if(completed==ListenMode.COMMAND){\n                        try{JSONObject t=new JSONObject();t.put("language",recognitionLanguage());t.put("error_code",SpeechRecognizer.ERROR_NO_MATCH);voiceEvent("transcript.failed",lifecycleEventId,"warning","household",t);}catch(Exception ignored){}\n                        endConversation(true);\n                        return;\n                    }\n                    if(handsFree)scheduleWakeListening(350);\n                    return;\n                }'''
+          if old not in s:
+              raise SystemExit('empty results block not found')
+          s = s.replace(old, new)
+
+          old = 'private void endConversation(boolean resumeWake){conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();'
+          new = 'private void endConversation(boolean resumeWake){interactionEpoch++;conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();'
+          if old not in s:
+              raise SystemExit('endConversation block not found')
+          s = s.replace(old, new)
+
+          old = 'final String lang=recognitionLanguage();final String profileName=profile==Profile.GRANDMA?"grandma":"personal";final JSONObject request;'
+          new = 'final String lang=recognitionLanguage();final String profileName=profile==Profile.GRANDMA?"grandma":"personal";final int requestEpoch=interactionEpoch;final JSONObject request;'
+          if old not in s:
+              raise SystemExit('sendToBridge declaration not found')
+          s = s.replace(old, new)
+
+          old = '''            main.post(()->{\n                bridgeDegraded=degradedResult;'''
+          new = '''            main.post(()->{\n                if(destroyed||requestEpoch!=interactionEpoch||uiState==VoiceUiState.State.MIC_OFF)return;\n                bridgeDegraded=degradedResult;'''
+          if old not in s:
+              raise SystemExit('bridge main.post block not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          p = Path('aihub/phone/aihub_bridge_codex.py')
+          s = p.read_text()
+          s = s.replace(
+              '    last_model_turn = {"grandma": 0.0, "personal": 0.0}\n',
+              '    last_model_turn = {"grandma": 0.0, "personal": 0.0}\n    last_correlation = {"grandma": None, "personal": None}\n'
+          )
+          old = '''            now = time.monotonic()\n            history = histories[profile]\n            if now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:\n                history.clear()\n            prompt = make_prompt(profile, language, text, list(history))\n            started = time.perf_counter()'''
+          new = '''            now = time.monotonic()\n            history = histories[profile]\n            correlation = envelope["correlation_id"]\n            if last_correlation[profile] != correlation or now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:\n                history.clear()\n            last_correlation[profile] = correlation\n            started = time.perf_counter()'''
+          if old not in s:
+              raise SystemExit('bridge history preamble not found')
+          s = s.replace(old, new)
+          old = '''            async with model_lock:\n                reply = await codex_reply(prompt)\n\n            history.append(("user", text))'''
+          new = '''            async with model_lock:\n                prompt = make_prompt(profile, language, text, list(history))\n                reply = await codex_reply(prompt)\n\n            history.append(("user", text))'''
+          if old not in s:
+              raise SystemExit('bridge model lock block not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+      - name: Sanity checks
+        run: |
+          grep -q 'interactionEpoch' aihub/app/src/main/java/com/soul/aihub/MainActivity.java
+          grep -q 'last_correlation' aihub/phone/aihub_bridge_codex.py
+          python -m py_compile aihub/phone/aihub_bridge_codex.py aihub/phone/okja_event_contract.py aihub/phone/okja_intent_confirmation.py
+      - name: Commit hardening
+        run: |
+          git config user.name 'Okja CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add aihub/app/src/main/java/com/soul/aihub/MainActivity.java aihub/phone/aihub_bridge_codex.py
+          git commit -m 'Harden Okja voice failure paths'
+          git push origin HEAD:aihub-voice-test
