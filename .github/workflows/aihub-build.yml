@@ -1,4 +1,4 @@
-name: Build AI Hub test APK
+name: Verify and build AI Hub test APK
 
 on:
   workflow_dispatch:
@@ -9,10 +9,25 @@ on:
       - '.github/workflows/aihub-build.yml'
 
 jobs:
-  build:
+  verify-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile bridge modules
+        run: |
+          python -m py_compile \
+            aihub/phone/aihub_bridge_codex.py \
+            aihub/phone/okja_event_contract.py \
+            aihub/phone/okja_intent_confirmation.py
+
+      - name: Run deterministic pre-build failure matrix
+        working-directory: aihub/phone
+        run: python -m unittest -v test_prebuild_failure_matrix.py
 
       - uses: actions/setup-java@v4
         with:
@@ -23,7 +38,7 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Build debug APK
+      - name: Build debug APK after verification
         run: gradle -p aihub assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4
