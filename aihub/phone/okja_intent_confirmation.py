@@ -34,6 +34,15 @@ _DEVICE_PATTERNS = (
     (re.compile(r"(?:휴대폰|핸드폰|내 폰|my phone|phone).*(?:찾아|찾아줘|찾아 줘|find|ring)", re.I), "phone_finder.ring"),
 )
 
+# A phrase that explicitly negates the requested action must never be promoted to a
+# device command. These patterns intentionally stay narrow: ambiguous language falls
+# through to the assistant instead of creating a confirmation for a possibly unsafe act.
+_DEVICE_NEGATION_PATTERNS = (
+    re.compile(r"(?:켜|켜줘|켜 줘|꺼|꺼줘|꺼 줘|찾아|찾아줘|찾아 줘)\s*(?:지\s*)?마(?:라|세요|줘)?", re.I),
+    re.compile(r"(?:하지|하지는)\s*마(?:라|세요|줘)?", re.I),
+    re.compile(r"\b(?:do not|don't|dont|never)\b.*\b(?:turn|power|ring|find)\b", re.I),
+)
+
 _PAYLOAD_FIELDS = {
     "intent.requested": frozenset({"language"}),
     "intent.resolved": frozenset({"intent_kind", "requires_confirmation", "target", "action"}),
@@ -125,15 +134,34 @@ class VoiceIntentSession:
             raise ValueError("confirmation_ttl_seconds must be 5..300")
         self.confirmation_ttl_seconds = confirmation_ttl_seconds
         self.ledger = VolatileEventLedger(ledger_capacity)
-        self._pending: dict[tuple[str, str, str], _PendingConfirmation] = {}
+        self._pending: dict[tuple[str, str, str, str], _PendingConfirmation] = {}
 
     @staticmethod
-    def _key(request: Mapping[str, Any]) -> tuple[str, str, str]:
-        return (request["device_id"], request["profile_id"], request["session_id"])
+    def _key(request: Mapping[str, Any]) -> tuple[str, str, str, str]:
+        # Confirmation is a conversation-local capability. A confirmation from an old
+        # correlation must not be accepted by a newly started interaction in the same
+        # device/profile/session.
+        return (
+            request["device_id"],
+            request["profile_id"],
+            request["session_id"],
+            request["correlation_id"],
+        )
 
     @staticmethod
     def _normalized(text: str) -> str:
         return " ".join(text.strip().lower().split())
+
+    def _prune_expired(self, current_ms: float, *, keep_key: tuple[str, str, str, str] | None = None) -> None:
+        # Expired confirmations from abandoned correlations have no valid current
+        # envelope to which a rejection event could be causally attached. Remove them
+        # silently; the current correlation still receives an explicit expired event.
+        stale = [
+            key for key, pending in self._pending.items()
+            if key != keep_key and current_ms > pending.expires_at_ms
+        ]
+        for key in stale:
+            del self._pending[key]
 
     def _event(
         self,
@@ -160,6 +188,8 @@ class VoiceIntentSession:
         return self.ledger.record(event)
 
     def _classify_device(self, text: str) -> tuple[str, str] | None:
+        if any(pattern.search(text) for pattern in _DEVICE_NEGATION_PATTERNS):
+            return None
         for pattern, intent_name in _DEVICE_PATTERNS:
             if pattern.search(text):
                 return DEVICE_INTENTS[intent_name]
@@ -172,6 +202,7 @@ class VoiceIntentSession:
         current_ms = time.monotonic() * 1000.0 if now_ms is None else float(now_ms)
         events: list[dict[str, Any]] = []
         key = self._key(request)
+        self._prune_expired(current_ms, keep_key=key)
 
         pending = self._pending.get(key)
         if pending is not None and current_ms > pending.expires_at_ms:
