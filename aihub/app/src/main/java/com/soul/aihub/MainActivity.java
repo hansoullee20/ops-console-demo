@@ -47,6 +47,9 @@ public class MainActivity extends Activity {
     private boolean conversationActive = false;
     private int followUpNoMatchRetries = 0;
     private int interactionEpoch = 0;
+    private boolean foreground = true;
+    private boolean ttsReady = false;
+    private static final int MAX_BRIDGE_PACKET_BYTES = 262144;
     private VoiceUiState.State uiState = VoiceUiState.State.READY;
     private String deviceId;
     private String sessionId;
@@ -231,17 +234,17 @@ public class MainActivity extends Activity {
     }
     private Intent recognizerIntent(String lang,boolean partial){Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,lang);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,lang);i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,partial);i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,5);return i;}
     private void scheduleWakeListening(long delayMs){
-        if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;
+        if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;
         main.postDelayed(()->{
-            if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();
+            if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();
         },delayMs);
     }
     private void startQuietWakeGate(){
-        if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;
+        if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;
         if(quietWakeGate==null){
             quietWakeGate=new QuietWakeGate(new QuietWakeGate.Callback(){
                 @Override public void onSpeechActivity(){
-                    if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();
+                    if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();
                 }
                 @Override public void onFailure(String reason){
                     if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;
@@ -258,15 +261,16 @@ public class MainActivity extends Activity {
         }
     }
     private void stopQuietWakeGate(){if(quietWakeGate!=null)quietWakeGate.stop();}
-    private void startWakeListening(){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;stopQuietWakeGate();try{recognizer.cancel();listenMode=ListenMode.WAKE;uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());recognizer.startListening(recognizerIntent(recognitionLanguage(),false));}catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성인식 시작 실패 · 다시 시도합니다");scheduleWakeListening(750);}}
+    private void startWakeListening(){if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;stopQuietWakeGate();try{recognizer.cancel();listenMode=ListenMode.WAKE;uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());recognizer.startListening(recognizerIntent(recognitionLanguage(),false));}catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성인식 시작 실패 · 다시 시도합니다");scheduleWakeListening(750);}}
     private void startCommandListening(boolean fromWake){
+        if(!foreground)return;
         if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}
         if(recognizer==null||destroyed){initSpeech();if(recognizer==null)return;}
         try{stopQuietWakeGate();if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();recognizer.cancel();listenMode=ListenMode.COMMAND;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);answerText.setText("");stateText.setText("듣고 있습니다…");JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint",fromWake?"wake":"button");JSONObject listening=voiceEvent("listening.started",listeningEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;recognizer.startListening(recognizerIntent(recognitionLanguage(),true));}
         catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);stateText.setText("음성인식 시작 실패 · 다시 시도해주세요");if(handsFree)scheduleWakeListening(700);}
     }
     private void startFollowUpListening(){
-        if(!conversationActive||!handsFree||uiState==VoiceUiState.State.MIC_OFF||bridgeDegraded||destroyed)return;
+        if(!foreground||!conversationActive||!handsFree||uiState==VoiceUiState.State.MIC_OFF||bridgeDegraded||destroyed)return;
         if(recognizer==null){initSpeech();if(recognizer==null)return;}
         try{stopQuietWakeGate();recognizer.cancel();listenMode=ListenMode.FOLLOW_UP;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);stateText.setText(followUpPrompt());JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint","follow_up");JSONObject listening=voiceEvent("listening.started",lifecycleEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;recognizer.startListening(recognizerIntent(recognitionLanguage(),true));}
         catch(Exception e){endConversation(true);}
@@ -281,21 +285,47 @@ public class MainActivity extends Activity {
         ioPool.execute(()->{
             String result;boolean degraded=false;
             try(Socket socket=new Socket()){
-                socket.connect(new InetSocketAddress("127.0.0.1",PORT),3000);socket.setSoTimeout(90000);byte[] out=request.toString().getBytes(StandardCharsets.UTF_8);DataOutputStream dos=new DataOutputStream(socket.getOutputStream());DataInputStream dis=new DataInputStream(socket.getInputStream());dos.writeInt(out.length);dos.write(out);dos.flush();int len=dis.readInt();if(len<0||len>2_000_000)throw new IllegalStateException("Bad reply length");byte[] in=new byte[len];dis.readFully(in);JSONObject response=new JSONObject(new String(in,StandardCharsets.UTF_8));OkjaEventEnvelope.requireResponseFor(response,request);JSONObject rp=response.getJSONObject("payload");result=response.getString("event_type").equals("assistant.response")?rp.getString("text"):rp.optString("message","Assistant request failed");
+                socket.connect(new InetSocketAddress("127.0.0.1",PORT),3000);socket.setSoTimeout(90000);byte[] out=request.toString().getBytes(StandardCharsets.UTF_8);if(out.length<1||out.length>MAX_BRIDGE_PACKET_BYTES)throw new IllegalStateException("Bad request length");DataOutputStream dos=new DataOutputStream(socket.getOutputStream());DataInputStream dis=new DataInputStream(socket.getInputStream());dos.writeInt(out.length);dos.write(out);dos.flush();int len=dis.readInt();if(len<1||len>MAX_BRIDGE_PACKET_BYTES)throw new IllegalStateException("Bad reply length");byte[] in=new byte[len];dis.readFully(in);JSONObject response=new JSONObject(new String(in,StandardCharsets.UTF_8));OkjaEventEnvelope.requireResponseFor(response,request);JSONObject rp=response.getJSONObject("payload");if(response.getString("event_type").equals("assistant.failed")){degraded=true;result=lang.equals("en-US")?"AI bridge unavailable. Please try again.":"AI 브리지 응답 실패 · 다시 시도해주세요";}else{result=rp.getString("text");}
             }catch(Exception e){degraded=true;String detail=e.getClass().getSimpleName();String message=e.getMessage();if(message!=null&&!message.trim().isEmpty()){message=message.replace('\n',' ').replace('\r',' ').trim();if(message.length()>120)message=message.substring(0,120);detail += ": "+message;}result=lang.equals("en-US")?"Bridge diagnostic · "+detail:"브리지 진단 · "+detail;}
             final String reply=result;final boolean degradedResult=degraded;
             main.post(()->{
                 if(destroyed||requestEpoch!=interactionEpoch||uiState==VoiceUiState.State.MIC_OFF)return;
                 bridgeDegraded=degradedResult;
-                uiState=degradedResult?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;
-                answerText.setText(reply);stateText.setText(degradedResult?offlinePrompt():"답변 중…");talkButton.setEnabled(VoiceUiState.manualTalkEnabled(uiState));speak(reply,lang);
+                if(degradedResult){answerText.setText(reply);endConversation(true);return;}
+                uiState=VoiceUiState.State.THINKING;
+                answerText.setText(reply);stateText.setText("답변 중…");talkButton.setEnabled(VoiceUiState.manualTalkEnabled(uiState));speak(reply,lang);
             });
         });
     }
-    private void initTts(){tts=new TextToSpeech(this,status->{if(status==TextToSpeech.SUCCESS){tts.setSpeechRate(1.02f);tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){@Override public void onStart(String id){main.post(()->{resetListening();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;stateText.setText(bridgeDegraded?offlinePrompt():"답변 중…");}});}@Override public void onDone(String id){main.post(()->{listenMode=ListenMode.IDLE;if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}if(!bridgeDegraded&&handsFree&&conversationActive){uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());talkButton.setEnabled(true);main.postDelayed(()->startFollowUpListening(),350);}else{endConversation(true);}});}@Override public void onError(String id){main.post(()->{endConversation(true);if(uiState!=VoiceUiState.State.MIC_OFF){uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성 출력 오류 · 화면에서 답변을 확인해주세요");talkButton.setEnabled(true);}});}});}});}
-    private void speak(String text,String lang){if(tts==null){endConversation(true);return;}resetListening();tts.setLanguage(lang.equals("en-US")?Locale.US:Locale.KOREA);tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"aihub-reply");}
+    private void initTts(){
+        ttsReady=false;
+        tts=new TextToSpeech(this,status->{
+            if(status!=TextToSpeech.SUCCESS){main.post(()->{ttsReady=false;if(!destroyed){stateText.setText("음성 출력 초기화 실패 · 화면 답변만 사용합니다");}});return;}
+            ttsReady=true;
+            tts.setSpeechRate(1.02f);
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
+                @Override public void onStart(String id){main.post(()->{resetListening();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;stateText.setText(bridgeDegraded?offlinePrompt():"답변 중…");}});}
+                @Override public void onDone(String id){main.post(()->{listenMode=ListenMode.IDLE;if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}if(foreground&&!bridgeDegraded&&handsFree&&conversationActive){uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());talkButton.setEnabled(true);main.postDelayed(()->startFollowUpListening(),350);}else{endConversation(true);}});}
+                @Override public void onError(String id){main.post(()->{endConversation(true);if(uiState!=VoiceUiState.State.MIC_OFF){uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성 출력 오류 · 화면에서 답변을 확인해주세요");talkButton.setEnabled(true);}});}
+            });
+        });
+    }
+    private void speak(String text,String lang){
+        if(tts==null||!ttsReady){answerText.setText(text);endConversation(true);stateText.setText("음성 출력 준비 안 됨 · 화면에서 답변을 확인해주세요");return;}
+        resetListening();
+        int available=tts.setLanguage(lang.equals("en-US")?Locale.US:Locale.KOREA);
+        if(available==TextToSpeech.LANG_MISSING_DATA||available==TextToSpeech.LANG_NOT_SUPPORTED){endConversation(true);stateText.setText("선택 언어 음성 출력 불가 · 화면에서 답변을 확인해주세요");return;}
+        int status=tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"aihub-reply");
+        if(status==TextToSpeech.ERROR){endConversation(true);stateText.setText("음성 출력 시작 실패 · 화면에서 답변을 확인해주세요");}
+    }
     private JSONObject voiceEvent(String eventType,String causationId,String severity,String privacyClass,JSONObject payload)throws Exception{if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();JSONObject event=OkjaEventEnvelope.create(eventType,deviceId,profile==Profile.GRANDMA?"profile-grandma":"profile-personal",sessionId,correlationId,causationId,"android.voice",severity,privacyClass,"volatile",payload);return eventLedger.record(event);}
     private void clearInteractionChain(){correlationId="";lifecycleEventId=null;listeningEventId=null;}
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==REQ_AUDIO&&grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED){handsFree=true;uiState=VoiceUiState.State.READY;initSpeech();}else{handsFree=false;uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(false);handsFreeButton.setText("마이크: 권한 필요");stateText.setText("마이크 권한이 필요합니다 · 설정에서 허용해주세요");}}
-    @Override protected void onDestroy(){destroyed=true;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}
+    @Override protected void onPause(){
+        foreground=false;interactionEpoch++;conversationActive=false;followUpNoMatchRetries=0;main.removeCallbacksAndMessages(null);stopQuietWakeGate();resetListening();clearInteractionChain();if(tts!=null)try{tts.stop();}catch(Exception ignored){}super.onPause();
+    }
+    @Override protected void onResume(){
+        super.onResume();foreground=true;if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;talkButton.setEnabled(recognizer!=null);scheduleWakeListening(350);}
+    }
+    @Override protected void onDestroy(){destroyed=true;foreground=false;ttsReady=false;interactionEpoch++;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}
 }
