@@ -6,9 +6,10 @@ import asyncio
 import json
 import struct
 import unittest
+from pathlib import Path
 
 import aihub_bridge_codex as bridge
-from okja_event_contract import new_event
+from okja_event_contract import assistant_failure, new_event, parse_assistant_result
 from okja_intent_confirmation import VoiceIntentSession
 
 
@@ -97,6 +98,56 @@ class BridgeProtocolTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid packet size"):
                 await bridge.read_packet(reader)
         asyncio.run(scenario())
+
+    def test_assistant_failure_is_distinct_from_success(self):
+        request = transcript("테스트")
+        failure = assistant_failure(request, "TimeoutError", "Assistant request failed")
+        parsed = parse_assistant_result(failure, request)
+        self.assertEqual("assistant.failed", parsed["event_type"])
+        self.assertEqual("TimeoutError", parsed["payload"]["error_code"])
+
+    def test_supersession_generation_guards_exist(self):
+        source = Path("aihub_bridge_codex.py").read_text(encoding="utf-8")
+        for marker in (
+            "class RequestSuperseded",
+            "latest_request_serial += 1",
+            "prior.cancel()",
+            "if request_serial != latest_request_serial",
+        ):
+            self.assertIn(marker, source)
+
+
+class AndroidSafetyInvariantTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.main = Path("../app/src/main/java/com/soul/aihub/MainActivity.java").read_text(encoding="utf-8")
+        cls.wake = Path("../app/src/main/java/com/soul/aihub/QuietWakeGate.java").read_text(encoding="utf-8")
+
+    def test_assistant_failed_enters_degraded_path(self):
+        self.assertIn('response.getString("event_type").equals("assistant.failed")', self.main)
+        self.assertIn("if(degradedResult){answerText.setText(reply);endConversation(true);return;}", self.main)
+
+    def test_background_lifecycle_invalidates_voice_work(self):
+        self.assertIn("@Override protected void onPause()", self.main)
+        self.assertIn("foreground=false;interactionEpoch++", self.main)
+        self.assertIn("if(!foreground||conversationActive", self.main)
+
+    def test_tts_readiness_and_language_are_checked(self):
+        self.assertIn("private boolean ttsReady = false;", self.main)
+        self.assertIn("LANG_MISSING_DATA", self.main)
+        self.assertIn("LANG_NOT_SUPPORTED", self.main)
+        self.assertIn("if(tts==null||!ttsReady)", self.main)
+
+    def test_android_bridge_packet_limit_matches_python(self):
+        self.assertIn(f"MAX_BRIDGE_PACKET_BYTES = {bridge.MAX_PACKET_BYTES};", self.main)
+        self.assertIn("out.length>MAX_BRIDGE_PACKET_BYTES", self.main)
+        self.assertIn("len>MAX_BRIDGE_PACKET_BYTES", self.main)
+
+    def test_wake_gate_is_adaptive_not_fixed_threshold(self):
+        self.assertNotIn("RMS_THRESHOLD", self.wake)
+        self.assertIn("NOISE_MULTIPLIER", self.wake)
+        self.assertIn("FRAME_SAMPLES = 320", self.wake)
+        self.assertIn("noiseFloor", self.wake)
 
 
 if __name__ == "__main__":
