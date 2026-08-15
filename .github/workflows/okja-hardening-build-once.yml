@@ -1,22 +1,33 @@
-name: Build hardened Okja APK once
-on: push
+name: Build hardened Okja APK
+
+on:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
-  build:
+  verify-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: aihub-voice-test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run deterministic pre-build failure matrix
+        working-directory: aihub/phone
+        run: python -m unittest -v test_prebuild_failure_matrix.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK
-        working-directory: aihub
-        run: gradle --no-daemon :app:assembleDebug
+        with:
+          gradle-version: '8.11.1'
+      - name: Build debug APK only after verification
+        run: gradle -p aihub assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: okja-hardened-apk
