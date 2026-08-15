@@ -29,6 +29,10 @@ MAX_RESPONSE_CHARS = int(os.environ.get("OKJA_MAX_RESPONSE_CHARS", "16000"))
 HISTORY_TURNS = 6
 
 
+class RequestSuperseded(Exception):
+    """Raised internally when a newer transcript makes this request obsolete."""
+
+
 async def _read_exactly(reader: asyncio.StreamReader, size: int) -> bytes:
     return await asyncio.wait_for(reader.readexactly(size), timeout=PACKET_READ_TIMEOUT_SECONDS)
 
@@ -149,8 +153,6 @@ async def codex_reply(prompt: str) -> str:
         await proc.wait()
         raise TimeoutError(f"Codex request exceeded {CODEX_TIMEOUT_SECONDS:.0f}s")
     except asyncio.CancelledError:
-        # A newer voice turn superseded this one. Do not leave an orphan Codex CLI
-        # process consuming the single phone-side model slot.
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
@@ -172,6 +174,7 @@ async def main() -> None:
     intent_session = VoiceIntentSession()
     model_lock = asyncio.Lock()
     active_model_task: asyncio.Task[str] | None = None
+    latest_request_serial = 0
     histories = {
         "grandma": deque(maxlen=HISTORY_TURNS * 2),
         "personal": deque(maxlen=HISTORY_TURNS * 2),
@@ -180,8 +183,9 @@ async def main() -> None:
     last_correlation = {"grandma": None, "personal": None}
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        nonlocal active_model_task
+        nonlocal active_model_task, latest_request_serial
         req = None
+        request_serial = 0
         try:
             raw = await read_packet(reader)
             req = parse_request(raw)
@@ -189,6 +193,22 @@ async def main() -> None:
             language = req["language"]
             text = req["text"]
             envelope = req["envelope"]
+
+            # Every newly accepted transcript supersedes any older in-flight model
+            # response, including when the new transcript resolves locally as a device
+            # command or confirmation. Increment before classification to close the
+            # race where two requests arrive while both are waiting for model_lock.
+            latest_request_serial += 1
+            request_serial = latest_request_serial
+            prior = active_model_task
+            if prior is not None and not prior.done():
+                prior.cancel()
+                try:
+                    await prior
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
             if not text:
                 response = assistant_response(
@@ -215,16 +235,6 @@ async def main() -> None:
                 await write_packet(writer, json.dumps(response, ensure_ascii=False))
                 return
 
-            # New voice turns are more valuable than an obsolete answer. Cancel any
-            # currently running Codex call before waiting for the serialized model slot.
-            prior = active_model_task
-            if prior is not None and not prior.done():
-                prior.cancel()
-                try:
-                    await prior
-                except (asyncio.CancelledError, Exception):
-                    pass
-
             started = time.perf_counter()
             print(
                 f"[Okja/Codex] event={envelope['event_id']} "
@@ -232,6 +242,8 @@ async def main() -> None:
             )
 
             async with model_lock:
+                if request_serial != latest_request_serial:
+                    raise RequestSuperseded()
                 now = time.monotonic()
                 history = histories[profile]
                 correlation = envelope["correlation_id"]
@@ -246,6 +258,8 @@ async def main() -> None:
                 finally:
                     if active_model_task is task:
                         active_model_task = None
+                if request_serial != latest_request_serial:
+                    raise RequestSuperseded()
                 history.append(("user", text))
                 history.append(("assistant", reply))
                 last_model_turn[profile] = time.monotonic()
@@ -257,9 +271,7 @@ async def main() -> None:
             response = assistant_response(envelope, reply)
             await write_packet(writer, json.dumps(response, ensure_ascii=False))
 
-        except asyncio.CancelledError:
-            # Superseded request: close quietly. The Android interaction epoch will also
-            # discard any stale response if transport cancellation races with the UI.
+        except (asyncio.CancelledError, RequestSuperseded):
             print("[Okja/Codex] request superseded by newer voice turn")
         except Exception as exc:
             error_code = type(exc).__name__
