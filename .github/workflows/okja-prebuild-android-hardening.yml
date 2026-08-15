@@ -1,0 +1,110 @@
+name: Apply verified Okja Android pre-build hardening
+
+on:
+  push:
+    branches: [ aihub-voice-test ]
+    paths:
+      - '.github/workflows/okja-prebuild-android-hardening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aihub-voice-test
+
+      - name: Patch Android failure and lifecycle semantics
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('aihub/app/src/main/java/com/soul/aihub/MainActivity.java')
+          s = p.read_text()
+
+          def replace(old, new, label):
+              global s
+              if old not in s:
+                  raise SystemExit(f'{label} target not found')
+              s = s.replace(old, new, 1)
+
+          replace(
+              '    private int interactionEpoch = 0;\n    private VoiceUiState.State uiState',
+              '    private int interactionEpoch = 0;\n    private boolean foreground = true;\n    private boolean ttsReady = false;\n    private static final int MAX_BRIDGE_PACKET_BYTES = 262144;\n    private VoiceUiState.State uiState',
+              'state fields')
+
+          replace(
+              'if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;',
+              'if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;',
+              'schedule wake guard')
+          replace(
+              'if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();',
+              'if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();',
+              'delayed wake guard')
+          replace(
+              'if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;',
+              'if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;',
+              'quiet gate foreground guard')
+          replace(
+              'if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();',
+              'if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();',
+              'quiet callback foreground guard')
+          replace(
+              'private void startWakeListening(){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;',
+              'private void startWakeListening(){if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;',
+              'wake foreground guard')
+          replace(
+              'if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}\n        if(recognizer==null||destroyed)',
+              'if(!foreground)return;\n        if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}\n        if(recognizer==null||destroyed)',
+              'command foreground guard')
+          replace(
+              'if(!conversationActive||!handsFree||uiState==VoiceUiState.State.MIC_OFF||bridgeDegraded||destroyed)return;',
+              'if(!foreground||!conversationActive||!handsFree||uiState==VoiceUiState.State.MIC_OFF||bridgeDegraded||destroyed)return;',
+              'follow-up foreground guard')
+
+          old_io = 'socket.connect(new InetSocketAddress("127.0.0.1",PORT),3000);socket.setSoTimeout(90000);byte[] out=request.toString().getBytes(StandardCharsets.UTF_8);DataOutputStream dos=new DataOutputStream(socket.getOutputStream());DataInputStream dis=new DataInputStream(socket.getInputStream());dos.writeInt(out.length);dos.write(out);dos.flush();int len=dis.readInt();if(len<0||len>2_000_000)throw new IllegalStateException("Bad reply length");byte[] in=new byte[len];dis.readFully(in);JSONObject response=new JSONObject(new String(in,StandardCharsets.UTF_8));OkjaEventEnvelope.requireResponseFor(response,request);JSONObject rp=response.getJSONObject("payload");result=response.getString("event_type").equals("assistant.response")?rp.getString("text"):rp.optString("message","Assistant request failed");'
+          new_io = 'socket.connect(new InetSocketAddress("127.0.0.1",PORT),3000);socket.setSoTimeout(90000);byte[] out=request.toString().getBytes(StandardCharsets.UTF_8);if(out.length<1||out.length>MAX_BRIDGE_PACKET_BYTES)throw new IllegalStateException("Bad request length");DataOutputStream dos=new DataOutputStream(socket.getOutputStream());DataInputStream dis=new DataInputStream(socket.getInputStream());dos.writeInt(out.length);dos.write(out);dos.flush();int len=dis.readInt();if(len<1||len>MAX_BRIDGE_PACKET_BYTES)throw new IllegalStateException("Bad reply length");byte[] in=new byte[len];dis.readFully(in);JSONObject response=new JSONObject(new String(in,StandardCharsets.UTF_8));OkjaEventEnvelope.requireResponseFor(response,request);JSONObject rp=response.getJSONObject("payload");if(response.getString("event_type").equals("assistant.failed")){degraded=true;result=lang.equals("en-US")?"AI bridge unavailable. Please try again.":"AI 브리지 응답 실패 · 다시 시도해주세요";}else{result=rp.getString("text");}'
+          replace(old_io, new_io, 'bridge packet/failure semantics')
+
+          old_post = 'bridgeDegraded=degradedResult;\n                uiState=degradedResult?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;\n                answerText.setText(reply);stateText.setText(degradedResult?offlinePrompt():"답변 중…");talkButton.setEnabled(VoiceUiState.manualTalkEnabled(uiState));speak(reply,lang);'
+          new_post = 'bridgeDegraded=degradedResult;\n                if(degradedResult){answerText.setText(reply);endConversation(true);return;}\n                uiState=VoiceUiState.State.THINKING;\n                answerText.setText(reply);stateText.setText("답변 중…");talkButton.setEnabled(VoiceUiState.manualTalkEnabled(uiState));speak(reply,lang);'
+          replace(old_post, new_post, 'assistant failure UI semantics')
+
+          old_tts = '    private void initTts(){tts=new TextToSpeech(this,status->{if(status==TextToSpeech.SUCCESS){tts.setSpeechRate(1.02f);tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){@Override public void onStart(String id){main.post(()->{resetListening();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;stateText.setText(bridgeDegraded?offlinePrompt():"답변 중…");}});}@Override public void onDone(String id){main.post(()->{listenMode=ListenMode.IDLE;if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}if(!bridgeDegraded&&handsFree&&conversationActive){uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());talkButton.setEnabled(true);main.postDelayed(()->startFollowUpListening(),350);}else{endConversation(true);}});}@Override public void onError(String id){main.post(()->{endConversation(true);if(uiState!=VoiceUiState.State.MIC_OFF){uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성 출력 오류 · 화면에서 답변을 확인해주세요");talkButton.setEnabled(true);}});}});}});}\n    private void speak(String text,String lang){if(tts==null){endConversation(true);return;}resetListening();tts.setLanguage(lang.equals("en-US")?Locale.US:Locale.KOREA);tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"aihub-reply");}'
+          new_tts = '''    private void initTts(){\n        ttsReady=false;\n        tts=new TextToSpeech(this,status->{\n            if(status!=TextToSpeech.SUCCESS){main.post(()->{ttsReady=false;if(!destroyed){stateText.setText("음성 출력 초기화 실패 · 화면 답변만 사용합니다");}});return;}\n            ttsReady=true;\n            tts.setSpeechRate(1.02f);\n            tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){\n                @Override public void onStart(String id){main.post(()->{resetListening();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.THINKING;stateText.setText(bridgeDegraded?offlinePrompt():"답변 중…");}});}\n                @Override public void onDone(String id){main.post(()->{listenMode=ListenMode.IDLE;if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}if(foreground&&!bridgeDegraded&&handsFree&&conversationActive){uiState=VoiceUiState.State.READY;stateText.setText(followUpPrompt());talkButton.setEnabled(true);main.postDelayed(()->startFollowUpListening(),350);}else{endConversation(true);}});}\n                @Override public void onError(String id){main.post(()->{endConversation(true);if(uiState!=VoiceUiState.State.MIC_OFF){uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성 출력 오류 · 화면에서 답변을 확인해주세요");talkButton.setEnabled(true);}});}\n            });\n        });\n    }\n    private void speak(String text,String lang){\n        if(tts==null||!ttsReady){answerText.setText(text);endConversation(true);stateText.setText("음성 출력 준비 안 됨 · 화면에서 답변을 확인해주세요");return;}\n        resetListening();\n        int available=tts.setLanguage(lang.equals("en-US")?Locale.US:Locale.KOREA);\n        if(available==TextToSpeech.LANG_MISSING_DATA||available==TextToSpeech.LANG_NOT_SUPPORTED){endConversation(true);stateText.setText("선택 언어 음성 출력 불가 · 화면에서 답변을 확인해주세요");return;}\n        int status=tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"aihub-reply");\n        if(status==TextToSpeech.ERROR){endConversation(true);stateText.setText("음성 출력 시작 실패 · 화면에서 답변을 확인해주세요");}\n    }'''
+          replace(old_tts, new_tts, 'TTS lifecycle')
+
+          old_destroy = '    @Override protected void onDestroy(){destroyed=true;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}'
+          new_destroy = '''    @Override protected void onPause(){\n        foreground=false;interactionEpoch++;conversationActive=false;followUpNoMatchRetries=0;main.removeCallbacksAndMessages(null);stopQuietWakeGate();resetListening();clearInteractionChain();if(tts!=null)try{tts.stop();}catch(Exception ignored){}super.onPause();\n    }\n    @Override protected void onResume(){\n        super.onResume();foreground=true;if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;talkButton.setEnabled(recognizer!=null);scheduleWakeListening(350);}\n    }\n    @Override protected void onDestroy(){destroyed=true;foreground=false;ttsReady=false;interactionEpoch++;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}'''
+          replace(old_destroy, new_destroy, 'activity lifecycle')
+
+          p.write_text(s)
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run deterministic bridge failure matrix
+        working-directory: aihub/phone
+        run: |
+          python -m py_compile aihub_bridge_codex.py okja_event_contract.py okja_intent_confirmation.py
+          python -m unittest -v test_prebuild_failure_matrix.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Compile Android app without publishing artifact
+        run: gradle -p aihub assembleDebug --stacktrace
+
+      - name: Commit verified Android hardening
+        run: |
+          git config user.name 'Okja CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add aihub/app/src/main/java/com/soul/aihub/MainActivity.java
+          git commit -m 'Harden Okja Android lifecycle and failure semantics'
+          git push origin HEAD:aihub-voice-test
