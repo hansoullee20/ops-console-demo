@@ -21,28 +21,41 @@ HOST = "127.0.0.1"
 PORT = 8765
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_TIMEOUT_SECONDS = float(os.environ.get("OKJA_CODEX_TIMEOUT_SECONDS", "90"))
+PACKET_READ_TIMEOUT_SECONDS = float(os.environ.get("OKJA_PACKET_READ_TIMEOUT_SECONDS", "10"))
 HISTORY_IDLE_RESET_SECONDS = float(os.environ.get("OKJA_HISTORY_IDLE_RESET_SECONDS", "45"))
+MAX_PACKET_BYTES = int(os.environ.get("OKJA_MAX_PACKET_BYTES", "262144"))
+MAX_TRANSCRIPT_CHARS = int(os.environ.get("OKJA_MAX_TRANSCRIPT_CHARS", "6000"))
+MAX_RESPONSE_CHARS = int(os.environ.get("OKJA_MAX_RESPONSE_CHARS", "16000"))
 HISTORY_TURNS = 6
 
 
+async def _read_exactly(reader: asyncio.StreamReader, size: int) -> bytes:
+    return await asyncio.wait_for(reader.readexactly(size), timeout=PACKET_READ_TIMEOUT_SECONDS)
+
+
 async def read_packet(reader: asyncio.StreamReader) -> str:
-    header = await reader.readexactly(4)
+    header = await _read_exactly(reader, 4)
     (size,) = struct.unpack("!I", header)
-    if size < 0 or size > 2_000_000:
+    if size < 1 or size > MAX_PACKET_BYTES:
         raise ValueError(f"invalid packet size: {size}")
-    data = await reader.readexactly(size)
+    data = await _read_exactly(reader, size)
     return data.decode("utf-8")
 
 
 async def write_packet(writer: asyncio.StreamWriter, text: str) -> None:
     data = text.encode("utf-8")
+    if len(data) > MAX_PACKET_BYTES:
+        raise ValueError(f"response packet too large: {len(data)}")
     writer.write(struct.pack("!I", len(data)))
     writer.write(data)
-    await writer.drain()
+    await asyncio.wait_for(writer.drain(), timeout=PACKET_READ_TIMEOUT_SECONDS)
 
 
 def parse_request(raw: str):
-    return parse_transcript_request(json.loads(raw))
+    req = parse_transcript_request(json.loads(raw))
+    if len(req["text"]) > MAX_TRANSCRIPT_CHARS:
+        raise ValueError("transcript exceeds maximum length")
+    return req
 
 
 def make_prompt(profile: str, language: str, text: str, history: list[tuple[str, str]]) -> str:
@@ -135,6 +148,13 @@ async def codex_reply(prompt: str) -> str:
         proc.kill()
         await proc.wait()
         raise TimeoutError(f"Codex request exceeded {CODEX_TIMEOUT_SECONDS:.0f}s")
+    except asyncio.CancelledError:
+        # A newer voice turn superseded this one. Do not leave an orphan Codex CLI
+        # process consuming the single phone-side model slot.
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
 
     out = stdout.decode("utf-8", errors="replace").strip()
     err = stderr.decode("utf-8", errors="replace").strip()
@@ -143,12 +163,15 @@ async def codex_reply(prompt: str) -> str:
         raise RuntimeError(f"Codex CLI failed: {detail}")
     if not out:
         raise RuntimeError("Codex CLI returned an empty response")
+    if len(out) > MAX_RESPONSE_CHARS:
+        out = out[:MAX_RESPONSE_CHARS].rstrip() + "…"
     return out
 
 
 async def main() -> None:
     intent_session = VoiceIntentSession()
     model_lock = asyncio.Lock()
+    active_model_task: asyncio.Task[str] | None = None
     histories = {
         "grandma": deque(maxlen=HISTORY_TURNS * 2),
         "personal": deque(maxlen=HISTORY_TURNS * 2),
@@ -157,6 +180,7 @@ async def main() -> None:
     last_correlation = {"grandma": None, "personal": None}
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal active_model_task
         req = None
         try:
             raw = await read_packet(reader)
@@ -191,27 +215,40 @@ async def main() -> None:
                 await write_packet(writer, json.dumps(response, ensure_ascii=False))
                 return
 
-            now = time.monotonic()
-            history = histories[profile]
-            correlation = envelope["correlation_id"]
-            if last_correlation[profile] != correlation or now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:
-                history.clear()
-            last_correlation[profile] = correlation
+            # New voice turns are more valuable than an obsolete answer. Cancel any
+            # currently running Codex call before waiting for the serialized model slot.
+            prior = active_model_task
+            if prior is not None and not prior.done():
+                prior.cancel()
+                try:
+                    await prior
+                except (asyncio.CancelledError, Exception):
+                    pass
+
             started = time.perf_counter()
             print(
                 f"[Okja/Codex] event={envelope['event_id']} "
                 f"correlation={envelope['correlation_id']} {profile}/{language} request"
             )
 
-            # Serialize model calls on the phone to avoid stacking multiple Codex CLI
-            # processes if repeated wake/STT events arrive while a response is pending.
             async with model_lock:
+                now = time.monotonic()
+                history = histories[profile]
+                correlation = envelope["correlation_id"]
+                if last_correlation[profile] != correlation or now - last_model_turn[profile] > HISTORY_IDLE_RESET_SECONDS:
+                    history.clear()
+                last_correlation[profile] = correlation
                 prompt = make_prompt(profile, language, text, list(history))
-                reply = await codex_reply(prompt)
-
-            history.append(("user", text))
-            history.append(("assistant", reply))
-            last_model_turn[profile] = time.monotonic()
+                task = asyncio.create_task(codex_reply(prompt))
+                active_model_task = task
+                try:
+                    reply = await task
+                finally:
+                    if active_model_task is task:
+                        active_model_task = None
+                history.append(("user", text))
+                history.append(("assistant", reply))
+                last_model_turn[profile] = time.monotonic()
 
             elapsed = time.perf_counter() - started
             print(
@@ -220,6 +257,10 @@ async def main() -> None:
             response = assistant_response(envelope, reply)
             await write_packet(writer, json.dumps(response, ensure_ascii=False))
 
+        except asyncio.CancelledError:
+            # Superseded request: close quietly. The Android interaction epoch will also
+            # discard any stale response if transport cancellation races with the UI.
+            print("[Okja/Codex] request superseded by newer voice turn")
         except Exception as exc:
             error_code = type(exc).__name__
             print(f"[Okja/Codex] request failed: {error_code}: {exc}")
