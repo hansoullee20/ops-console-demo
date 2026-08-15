@@ -1,0 +1,193 @@
+name: Okja quiet wake gate once
+
+on:
+  push:
+    branches: [aihub-voice-test]
+    paths: [.github/workflows/okja-quiet-wake-gate-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aihub-voice-test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Add quiet local audio gate and wire wake polling
+        shell: bash
+        run: |
+          cat > aihub/app/src/main/java/com/soul/aihub/QuietWakeGate.java <<'JAVA'
+          package com.soul.aihub;
+
+          import android.media.AudioFormat;
+          import android.media.AudioRecord;
+          import android.media.MediaRecorder;
+          import android.os.Handler;
+          import android.os.Looper;
+
+          /**
+           * Interim quiet gate for the SpeechRecognizer fallback wake path.
+           * It does NOT recognize the wake word. It only waits locally for sustained
+           * microphone energy before allowing one short SpeechRecognizer wake session.
+           * The validated dedicated wake-word model will replace this gate later.
+           */
+          final class QuietWakeGate {
+              interface Callback { void onSpeechActivity(); void onFailure(String reason); }
+
+              private static final int SAMPLE_RATE = 16000;
+              private static final int FRAME_SAMPLES = 640; // 40 ms
+              private static final double RMS_THRESHOLD = 900.0;
+              private static final int REQUIRED_HOT_FRAMES = 3;
+
+              private final Callback callback;
+              private final Handler main = new Handler(Looper.getMainLooper());
+              private volatile boolean running;
+              private Thread worker;
+              private AudioRecord record;
+
+              QuietWakeGate(Callback callback) { this.callback = callback; }
+
+              synchronized boolean isRunning() { return running; }
+
+              synchronized void start() {
+                  if (running) return;
+                  int min = AudioRecord.getMinBufferSize(
+                          SAMPLE_RATE,
+                          AudioFormat.CHANNEL_IN_MONO,
+                          AudioFormat.ENCODING_PCM_16BIT);
+                  if (min <= 0) {
+                      main.post(() -> callback.onFailure("audio_buffer_unavailable"));
+                      return;
+                  }
+                  try {
+                      record = new AudioRecord(
+                              MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                              SAMPLE_RATE,
+                              AudioFormat.CHANNEL_IN_MONO,
+                              AudioFormat.ENCODING_PCM_16BIT,
+                              Math.max(min, FRAME_SAMPLES * 4));
+                      if (record.getState() != AudioRecord.STATE_INITIALIZED) {
+                          releaseRecord();
+                          main.post(() -> callback.onFailure("audio_record_uninitialized"));
+                          return;
+                      }
+                      running = true;
+                      worker = new Thread(this::loop, "okja-quiet-wake-gate");
+                      worker.setDaemon(true);
+                      worker.start();
+                  } catch (SecurityException e) {
+                      releaseRecord();
+                      main.post(() -> callback.onFailure("audio_permission"));
+                  } catch (RuntimeException e) {
+                      releaseRecord();
+                      main.post(() -> callback.onFailure("audio_start_failure"));
+                  }
+              }
+
+              private void loop() {
+                  short[] frame = new short[FRAME_SAMPLES];
+                  int hot = 0;
+                  try {
+                      record.startRecording();
+                      while (running) {
+                          int n = record.read(frame, 0, frame.length, AudioRecord.READ_BLOCKING);
+                          if (n <= 0) continue;
+                          double sum = 0.0;
+                          for (int i = 0; i < n; i++) {
+                              double s = frame[i];
+                              sum += s * s;
+                          }
+                          double rms = Math.sqrt(sum / n);
+                          hot = rms >= RMS_THRESHOLD ? hot + 1 : Math.max(0, hot - 1);
+                          if (hot >= REQUIRED_HOT_FRAMES) {
+                              running = false;
+                              break;
+                          }
+                      }
+                  } catch (RuntimeException e) {
+                      if (running) main.post(() -> callback.onFailure("audio_read_failure"));
+                      running = false;
+                  } finally {
+                      releaseRecord();
+                  }
+                  if (hot >= REQUIRED_HOT_FRAMES) main.post(callback::onSpeechActivity);
+              }
+
+              synchronized void stop() {
+                  running = false;
+                  if (record != null) {
+                      try { record.stop(); } catch (Exception ignored) {}
+                  }
+                  releaseRecord();
+              }
+
+              private synchronized void releaseRecord() {
+                  if (record != null) {
+                      try { record.release(); } catch (Exception ignored) {}
+                      record = null;
+                  }
+              }
+          }
+          JAVA
+
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aihub/app/src/main/java/com/soul/aihub/MainActivity.java')
+          s = p.read_text()
+
+          old = '    private SpeechRecognizer recognizer;\n    private TextToSpeech tts;'
+          new = '''    private SpeechRecognizer recognizer;\n    private QuietWakeGate quietWakeGate;\n    private TextToSpeech tts;'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''    private void disableMicrophone(){\n        handsFree=false;\n        endConversation(false);\n        if(recognizer!=null){try{recognizer.destroy();}catch(Exception ignored){}recognizer=null;}\n        renderMicOff();\n    }'''
+          new = '''    private void disableMicrophone(){\n        handsFree=false;\n        stopQuietWakeGate();\n        endConversation(false);\n        if(recognizer!=null){try{recognizer.destroy();}catch(Exception ignored){}recognizer=null;}\n        renderMicOff();\n    }'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '    private void scheduleWakeListening(long delayMs){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;main.postDelayed(()->{if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startWakeListening();},delayMs);}'
+          new = '''    private void scheduleWakeListening(long delayMs){\n        if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;\n        main.postDelayed(()->{\n            if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();\n        },delayMs);\n    }\n    private void startQuietWakeGate(){\n        if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;\n        if(quietWakeGate==null){\n            quietWakeGate=new QuietWakeGate(new QuietWakeGate.Callback(){\n                @Override public void onSpeechActivity(){\n                    if(!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();\n                }\n                @Override public void onFailure(String reason){\n                    if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;\n                    uiState=VoiceUiState.State.ERROR_RECOVERY;\n                    stateText.setText("조용한 깨움 대기 실패 · 지금 말하기를 사용해주세요");\n                    talkButton.setEnabled(true);\n                }\n            });\n        }\n        if(!quietWakeGate.isRunning()){\n            uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;\n            stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());\n            quietWakeGate.start();\n        }\n    }\n    private void stopQuietWakeGate(){if(quietWakeGate!=null)quietWakeGate.stop();}'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '    private void startWakeListening(){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;try{recognizer.cancel();listenMode=ListenMode.WAKE;'
+          new = '    private void startWakeListening(){if(conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;stopQuietWakeGate();try{recognizer.cancel();listenMode=ListenMode.WAKE;'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '        try{if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();recognizer.cancel();listenMode=ListenMode.COMMAND;'
+          new = '        try{stopQuietWakeGate();if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();recognizer.cancel();listenMode=ListenMode.COMMAND;'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '        try{recognizer.cancel();listenMode=ListenMode.FOLLOW_UP;'
+          new = '        try{stopQuietWakeGate();recognizer.cancel();listenMode=ListenMode.FOLLOW_UP;'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '    @Override protected void onDestroy(){destroyed=true;main.removeCallbacksAndMessages(null);eventLedger.clear();if(recognizer!=null)recognizer.destroy();'
+          new = '    @Override protected void onDestroy(){destroyed=true;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Build Android debug APK
+        working-directory: aihub
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Remove one-shot workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/okja-quiet-wake-gate-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aihub/app/src/main/java/com/soul/aihub/MainActivity.java aihub/app/src/main/java/com/soul/aihub/QuietWakeGate.java .github/workflows/okja-quiet-wake-gate-once.yml
+          git commit -m 'Reduce idle SpeechRecognizer churn with quiet local wake gate'
+          git push origin HEAD:aihub-voice-test
