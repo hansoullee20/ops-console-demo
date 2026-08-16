@@ -7,6 +7,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 
+import org.json.JSONObject;
+
 /**
  * Interim quiet onset gate for the SpeechRecognizer fallback wake path.
  *
@@ -46,10 +48,13 @@ final class QuietWakeGate {
     synchronized boolean isRunning() { return running; }
 
     synchronized void start() {
+        DiagnosticTrace.log("GATE_START_REQUESTED", null);
         if (running) return;
         main.removeCallbacks(delayedStart);
         long remaining = nextEligibleStartMs - SystemClock.elapsedRealtime();
         if (remaining > 0L) {
+            JSONObject p = new JSONObject(); try { p.put("remaining_ms", remaining); } catch (Exception ignored) {}
+            DiagnosticTrace.log("GATE_START_DELAYED", p);
             main.postDelayed(delayedStart, remaining);
             return;
         }
@@ -74,6 +79,7 @@ final class QuietWakeGate {
                 return;
             }
             running = true;
+            DiagnosticTrace.log("GATE_STARTED", null);
             worker = new Thread(this::loop, "okja-quiet-wake-gate");
             worker.setDaemon(true);
             worker.start();
@@ -89,9 +95,12 @@ final class QuietWakeGate {
     private void loop() {
         short[] frame = new short[FRAME_SAMPLES];
         double noiseFloor = INITIAL_NOISE_FLOOR;
+        double maxRms = 0.0;
+        long frameCount = 0L;
         boolean onset = false;
         try {
             record.startRecording();
+            DiagnosticTrace.log("AUDIO_RECORD_STARTED", null);
             while (running) {
                 int n = record.read(frame, 0, frame.length, AudioRecord.READ_BLOCKING);
                 if (n <= 0) continue;
@@ -101,8 +110,18 @@ final class QuietWakeGate {
                     sum += sample * sample;
                 }
                 double rms = Math.sqrt(sum / n);
+                if (rms > maxRms) maxRms = rms;
+                frameCount++;
                 double trigger = Math.max(MIN_TRIGGER_RMS, noiseFloor * NOISE_MULTIPLIER);
+                if (frameCount == 1 || frameCount % 12 == 0) {
+                    JSONObject p = new JSONObject();
+                    try { p.put("rms", rms); p.put("noise_floor", noiseFloor); p.put("trigger", trigger); p.put("max_rms", maxRms); p.put("frames_since_start", frameCount); } catch (Exception ignored) {}
+                    DiagnosticTrace.log("GATE_CALIBRATION", p);
+                }
                 if (rms >= trigger) {
+                    JSONObject p = new JSONObject();
+                    try { p.put("rms", rms); p.put("noise_floor", noiseFloor); p.put("trigger", trigger); p.put("max_rms", maxRms); p.put("frames_since_start", frameCount); } catch (Exception ignored) {}
+                    DiagnosticTrace.log("GATE_ONSET", p);
                     onset = true;
                     nextEligibleStartMs = SystemClock.elapsedRealtime() + RETRIGGER_GUARD_MS;
                     running = false;
@@ -125,7 +144,8 @@ final class QuietWakeGate {
         running = false;
         main.removeCallbacks(delayedStart);
         if (record != null) {
-            try { record.stop(); } catch (Exception ignored) {}
+            DiagnosticTrace.log("AUDIO_STOP_REQUESTED", null);
+            try { record.stop(); DiagnosticTrace.log("AUDIO_STOPPED", null); } catch (Exception ignored) {}
         }
         releaseRecord();
     }
@@ -134,6 +154,7 @@ final class QuietWakeGate {
         if (record != null) {
             try { record.release(); } catch (Exception ignored) {}
             record = null;
+            DiagnosticTrace.log("AUDIO_RELEASED", null);
         }
     }
 }
