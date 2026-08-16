@@ -5,6 +5,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 /**
  * Interim quiet onset gate for the SpeechRecognizer fallback wake path.
@@ -13,6 +14,10 @@ import android.os.Looper;
  * speech-like energy onset before handing the microphone to SpeechRecognizer.
  * The threshold adapts to the room noise floor so a fixed RMS value does not
  * become either deaf in a quiet room or permanently hot in a noisy one.
+ *
+ * A refractory period is enforced after every detected onset. This prevents
+ * SpeechRecognizer/system audio emitted during the handoff from immediately
+ * re-opening the gate and creating a beep/retrigger loop.
  */
 final class QuietWakeGate {
     interface Callback { void onSpeechActivity(); void onFailure(String reason); }
@@ -23,12 +28,18 @@ final class QuietWakeGate {
     private static final double MIN_TRIGGER_RMS = 480.0;
     private static final double NOISE_MULTIPLIER = 3.0;
     private static final double NOISE_ALPHA = 0.025;
+    private static final long RETRIGGER_GUARD_MS = 2600L;
 
     private final Callback callback;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean running;
     private Thread worker;
     private AudioRecord record;
+    private long nextEligibleStartMs = 0L;
+
+    private final Runnable delayedStart = new Runnable() {
+        @Override public void run() { start(); }
+    };
 
     QuietWakeGate(Callback callback) { this.callback = callback; }
 
@@ -36,6 +47,12 @@ final class QuietWakeGate {
 
     synchronized void start() {
         if (running) return;
+        main.removeCallbacks(delayedStart);
+        long remaining = nextEligibleStartMs - SystemClock.elapsedRealtime();
+        if (remaining > 0L) {
+            main.postDelayed(delayedStart, remaining);
+            return;
+        }
         int min = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
@@ -87,6 +104,7 @@ final class QuietWakeGate {
                 double trigger = Math.max(MIN_TRIGGER_RMS, noiseFloor * NOISE_MULTIPLIER);
                 if (rms >= trigger) {
                     onset = true;
+                    nextEligibleStartMs = SystemClock.elapsedRealtime() + RETRIGGER_GUARD_MS;
                     running = false;
                     break;
                 }
@@ -105,6 +123,7 @@ final class QuietWakeGate {
 
     synchronized void stop() {
         running = false;
+        main.removeCallbacks(delayedStart);
         if (record != null) {
             try { record.stop(); } catch (Exception ignored) {}
         }
