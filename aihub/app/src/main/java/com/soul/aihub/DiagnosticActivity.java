@@ -10,7 +10,6 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -22,6 +21,8 @@ import java.io.FileInputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 
+/** Purpose-built Fold4 causal-isolation harness. Modes A-E must remain behaviorally
+ * separate; especially C is one-shot with no rearm and no command listener. */
 public class DiagnosticActivity extends Activity {
     private static final int REQ_AUDIO = 2001;
     private static final int REQ_EXPORT = 2002;
@@ -71,7 +72,14 @@ public class DiagnosticActivity extends Activity {
         root.addView(startButton);
 
         Button beep = button("띠링 들림 · MARK");
-        beep.setOnClickListener(v -> { DiagnosticTrace.markBeep(state); resultText.setText("USER_BEEP_MARK 저장됨"); });
+        // The marker itself must not generate a click sound or haptic transient that
+        // could contaminate the microphone/retrigger experiment.
+        beep.setSoundEffectsEnabled(false);
+        beep.setHapticFeedbackEnabled(false);
+        beep.setOnClickListener(v -> {
+            DiagnosticTrace.markBeep(state);
+            resultText.setText("USER_BEEP_MARK 저장됨");
+        });
         root.addView(beep);
 
         Button export = button("Export JSONL");
@@ -81,22 +89,50 @@ public class DiagnosticActivity extends Activity {
     }
 
     private Button addModeButton(LinearLayout parent, String label, Mode m) {
-        Button b = button(label); b.setOnClickListener(v -> selectMode(m)); parent.addView(b); return b;
+        Button b = button(label);
+        b.setOnClickListener(v -> selectMode(m));
+        parent.addView(b);
+        return b;
     }
-    private Button button(String label) { Button b = new Button(this); b.setAllCaps(false); b.setText(label); b.setTextSize(16); return b; }
-    private TextView text(String s, float sp, int color) { TextView t = new TextView(this); t.setText(s); t.setTextSize(sp); t.setTextColor(color); t.setGravity(Gravity.CENTER); t.setPadding(6,10,6,10); return t; }
+
+    private Button button(String label) {
+        Button b = new Button(this);
+        b.setAllCaps(false);
+        b.setText(label);
+        b.setTextSize(16);
+        return b;
+    }
+
+    private TextView text(String s, float sp, int color) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(sp);
+        t.setTextColor(color);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(6,10,6,10);
+        return t;
+    }
 
     private void selectMode(Mode m) {
-        stopAll(); mode = m; DiagnosticTrace.setMode(m.name());
-        modeText.setText("Mode " + m.name()); state = "IDLE"; stateText.setText(state);
-        resultText.setText(m == Mode.D ? "START 후 production control 화면으로 이동" : "동일 문구: ‘옥자 뭐하니’");
+        stopAll();
+        mode = m;
+        DiagnosticTrace.setMode(m.name());
+        modeText.setText("Mode " + m.name());
+        state = "IDLE";
+        stateText.setText(state);
+        resultText.setText(m == Mode.D
+                ? "START 후 production control 화면으로 이동 · 20초 이내 중단"
+                : "동일 문구: ‘옥자 뭐하니’");
     }
 
     private void startTrial() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO); return;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+            return;
         }
-        stopAll(); DiagnosticTrace.beginTrial(); DiagnosticTrace.beginAttempt();
+        stopAll();
+        DiagnosticTrace.beginTrial();
+        DiagnosticTrace.beginAttempt();
         resultText.setText("Trial running…");
         if (mode == Mode.A) startGateOnly();
         else if (mode == Mode.B1) startRecognizer(false, false);
@@ -104,29 +140,49 @@ public class DiagnosticActivity extends Activity {
         else if (mode == Mode.C) startGateThenRecognizer();
         else if (mode == Mode.D) {
             DiagnosticTrace.setMode("D");
-            Intent i = new Intent(this, PerfActivity.class); i.putExtra("okja_diag_mode", "D"); startActivity(i);
+            Intent i = new Intent(this, PerfActivity.class);
+            i.putExtra("okja_diag_mode", "D");
+            startActivity(i);
         } else if (mode == Mode.E) startRecognizer(false, true);
     }
 
-    private QuietWakeGate newGate(QuietWakeGate.Callback callback) { return new QuietWakeGate(callback); }
+    private QuietWakeGate newGate(QuietWakeGate.Callback callback) {
+        return new QuietWakeGate(callback);
+    }
 
     private void startGateOnly() {
-        state = "GATE_WAIT"; stateText.setText(state);
+        state = "GATE_WAIT";
+        stateText.setText(state);
         gate = newGate(new QuietWakeGate.Callback() {
-            @Override public void onSpeechActivity() { state="GATE_ONSET_STOP"; stateText.setText(state); resultText.setText("A complete · onset captured · no SR started"); }
-            @Override public void onFailure(String reason) { state="GATE_ERROR"; stateText.setText(state); resultText.setText(reason); }
+            @Override public void onSpeechActivity() {
+                state = "GATE_ONSET_STOP";
+                stateText.setText(state);
+                resultText.setText("A complete · onset captured · no SR started");
+            }
+            @Override public void onFailure(String reason) {
+                state = "GATE_ERROR";
+                stateText.setText(state);
+                resultText.setText(reason);
+            }
         });
         gate.start();
     }
 
     private void startGateThenRecognizer() {
-        state = "GATE_WAIT"; stateText.setText(state);
+        state = "GATE_WAIT";
+        stateText.setText(state);
         gate = newGate(new QuietWakeGate.Callback() {
             @Override public void onSpeechActivity() {
-                state="HANDOFF_TO_SR"; stateText.setText(state);
+                state = "HANDOFF_TO_SR";
+                stateText.setText(state);
+                // Mode C deliberately performs exactly one recognizer invocation.
                 startRecognizer(false, false);
             }
-            @Override public void onFailure(String reason) { state="GATE_ERROR"; stateText.setText(state); resultText.setText(reason); }
+            @Override public void onFailure(String reason) {
+                state = "GATE_ERROR";
+                stateText.setText(state);
+                resultText.setText(reason);
+            }
         });
         gate.start();
     }
@@ -146,41 +202,81 @@ public class DiagnosticActivity extends Activity {
             }
             DiagnosticTrace.nextGeneration();
             DiagnosticTrace.log("SR_START_REQUESTED", null);
-            state="SR_START_REQUESTED"; stateText.setText(state);
+            state = "SR_START_REQUESTED";
+            stateText.setText(state);
             recognizer.startListening(recognizerIntent(true));
             DiagnosticTrace.log("SR_START_RETURNED", null);
         } catch (Exception e) {
-            JSONObject p=new JSONObject(); try { p.put("error", e.getClass().getSimpleName()); p.put("message", String.valueOf(e.getMessage())); } catch(Exception ignored){}
-            DiagnosticTrace.log("SR_START_EXCEPTION", p); state="SR_START_EXCEPTION"; stateText.setText(state); resultText.setText(e.toString());
+            JSONObject p = new JSONObject();
+            try {
+                p.put("error", e.getClass().getSimpleName());
+                p.put("message", String.valueOf(e.getMessage()));
+            } catch (Exception ignored) {}
+            DiagnosticTrace.log("SR_START_EXCEPTION", p);
+            state = "SR_START_EXCEPTION";
+            stateText.setText(state);
+            resultText.setText(e.toString());
         }
     }
 
     private RecognitionListener listener() {
         return new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle params) { state="SR_ON_READY"; stateText.setText(state); DiagnosticTrace.log("SR_ON_READY", null); }
-            @Override public void onBeginningOfSpeech() { state="SR_BEGIN_SPEECH"; stateText.setText(state); DiagnosticTrace.log("SR_BEGIN_SPEECH", null); }
+            @Override public void onReadyForSpeech(Bundle params) {
+                state = "SR_ON_READY";
+                stateText.setText(state);
+                DiagnosticTrace.log("SR_ON_READY", null);
+            }
+            @Override public void onBeginningOfSpeech() {
+                state = "SR_BEGIN_SPEECH";
+                stateText.setText(state);
+                DiagnosticTrace.log("SR_BEGIN_SPEECH", null);
+            }
             @Override public void onRmsChanged(float rmsdB) {}
             @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() { state="SR_END_SPEECH"; stateText.setText(state); DiagnosticTrace.log("SR_END_SPEECH", null); }
-            @Override public void onError(int error) { JSONObject p=new JSONObject(); try{p.put("error_code",error);}catch(Exception ignored){} DiagnosticTrace.log("SR_ERROR",p); state="SR_ERROR_"+error; stateText.setText(state); resultText.setText("SR error " + error + " · STOP (no rearm)"); destroyRecognizer(); }
+            @Override public void onEndOfSpeech() {
+                state = "SR_END_SPEECH";
+                stateText.setText(state);
+                DiagnosticTrace.log("SR_END_SPEECH", null);
+            }
+            @Override public void onError(int error) {
+                JSONObject p = new JSONObject();
+                try { p.put("error_code", error); } catch (Exception ignored) {}
+                DiagnosticTrace.log("SR_ERROR", p);
+                state = "SR_ERROR_" + error;
+                stateText.setText(state);
+                resultText.setText("SR error " + error + " · STOP (no rearm)");
+                destroyRecognizer();
+            }
             @Override public void onResults(Bundle results) {
                 ArrayList<String> m = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 DiagnosticTrace.logCandidates("SR_RESULTS", m);
                 boolean wake = containsWake(m);
-                JSONObject p=new JSONObject(); try { p.put("wake_present", wake); } catch(Exception ignored){}
-                DiagnosticTrace.log(wake?"WAKE_ACCEPT":"WAKE_REJECT",p);
-                state = wake?"WAKE_ACCEPT":"WAKE_REJECT"; stateText.setText(state);
-                resultText.setText(m==null?"[]":m.toString());
+                JSONObject p = new JSONObject();
+                try { p.put("wake_present", wake); } catch (Exception ignored) {}
+                DiagnosticTrace.log(wake ? "WAKE_ACCEPT" : "WAKE_REJECT", p);
+                state = wake ? "WAKE_ACCEPT" : "WAKE_REJECT";
+                stateText.setText(state);
+                resultText.setText(m == null ? "[]" : m.toString());
                 destroyRecognizer();
             }
-            @Override public void onPartialResults(Bundle partialResults) { ArrayList<String> m=partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION); DiagnosticTrace.logCandidates("SR_PARTIAL",m); }
-            @Override public void onEvent(int eventType, Bundle params) { JSONObject p=new JSONObject(); try{p.put("event_type",eventType);}catch(Exception ignored){} DiagnosticTrace.log("SR_EVENT",p); }
+            @Override public void onPartialResults(Bundle partialResults) {
+                ArrayList<String> m = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                DiagnosticTrace.logCandidates("SR_PARTIAL", m);
+            }
+            @Override public void onEvent(int eventType, Bundle params) {
+                JSONObject p = new JSONObject();
+                try { p.put("event_type", eventType); } catch (Exception ignored) {}
+                DiagnosticTrace.log("SR_EVENT", p);
+            }
         };
     }
 
     private boolean containsWake(ArrayList<String> m) {
         if (m == null) return false;
-        for(String s:m){String n=s.toLowerCase(java.util.Locale.ROOT).replace(" ","").replace("-",""); if(n.contains("옥자")||n.contains("옥짜")||n.contains("okja")||n.contains("heyokja")||n.contains("okayokja")) return true;}
+        for (String s : m) {
+            String n = s.toLowerCase(java.util.Locale.ROOT).replace(" ", "").replace("-", "");
+            if (n.contains("옥자") || n.contains("옥짜") || n.contains("okja") || n.contains("heyokja") || n.contains("okayokja")) return true;
+        }
         return false;
     }
 
@@ -195,33 +291,69 @@ public class DiagnosticActivity extends Activity {
     }
 
     private void logRecognizerIdentity(boolean onDevice) {
-        JSONObject p=new JSONObject();
+        JSONObject p = new JSONObject();
         try {
             p.put("on_device", onDevice);
             p.put("on_device_available", android.os.Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this));
             p.put("voice_recognition_service", android.provider.Settings.Secure.getString(getContentResolver(), "voice_recognition_service"));
-        } catch(Exception ignored){}
-        DiagnosticTrace.log("SR_IMPLEMENTATION",p);
+        } catch (Exception ignored) {}
+        DiagnosticTrace.log("SR_IMPLEMENTATION", p);
     }
 
-    private void stopAll() { if(gate!=null){gate.stop();gate=null;} destroyRecognizer(); }
-    private void destroyRecognizer() { if(recognizer!=null){ try{DiagnosticTrace.log("SR_DESTROYED",null);recognizer.destroy();}catch(Exception ignored){} recognizer=null; } }
-
-    private void exportLog() {
-        File f=DiagnosticTrace.currentFile(); if(f==null||!f.exists()){resultText.setText("No log file");return;}
-        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT); i.setType("application/json"); i.putExtra(Intent.EXTRA_TITLE,f.getName()); startActivityForResult(i,REQ_EXPORT);
+    private void stopAll() {
+        if (gate != null) {
+            gate.stop();
+            gate = null;
+        }
+        destroyRecognizer();
     }
 
-    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
-        super.onActivityResult(requestCode,resultCode,data);
-        if(requestCode==REQ_EXPORT&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
-            File f=DiagnosticTrace.currentFile();
-            try(FileInputStream in=new FileInputStream(f); OutputStream out=getContentResolver().openOutputStream(data.getData())){
-                byte[] b=new byte[8192]; int n; while((n=in.read(b))>0)out.write(b,0,n); resultText.setText("Export complete");
-            }catch(Exception e){resultText.setText("Export failed: "+e.getClass().getSimpleName());}
+    private void destroyRecognizer() {
+        if (recognizer != null) {
+            try {
+                DiagnosticTrace.log("SR_DESTROYED", null);
+                recognizer.destroy();
+            } catch (Exception ignored) {}
+            recognizer = null;
         }
     }
 
-    @Override protected void onPause(){ stopAll(); super.onPause(); }
-    @Override protected void onDestroy(){ stopAll(); super.onDestroy(); }
+    private void exportLog() {
+        DiagnosticTrace.flush(1500);
+        File f = DiagnosticTrace.currentFile();
+        if (f == null || !f.exists()) {
+            resultText.setText("No log file");
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.setType("application/json");
+        i.putExtra(Intent.EXTRA_TITLE, f.getName());
+        startActivityForResult(i, REQ_EXPORT);
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_EXPORT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            DiagnosticTrace.flush(1500);
+            File f = DiagnosticTrace.currentFile();
+            try (FileInputStream in = new FileInputStream(f); OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                byte[] b = new byte[8192];
+                int n;
+                while ((n = in.read(b)) > 0) out.write(b, 0, n);
+                resultText.setText("Export complete");
+            } catch (Exception e) {
+                resultText.setText("Export failed: " + e.getClass().getSimpleName());
+            }
+        }
+    }
+
+    @Override protected void onPause() {
+        stopAll();
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        stopAll();
+        super.onDestroy();
+    }
 }
