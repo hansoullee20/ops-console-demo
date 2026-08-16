@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        DiagnosticTrace.init(this);
+        if ("D".equals(getIntent().getStringExtra("okja_diag_mode"))) { DiagnosticTrace.setMode("D"); DiagnosticTrace.beginTrial(); }
         deviceId = getSharedPreferences("okja_identity", MODE_PRIVATE).getString("device_id", "");
         if (deviceId == null || deviceId.isEmpty()) {
             deviceId = "device-" + UUID.randomUUID();
@@ -124,7 +126,7 @@ public class MainActivity extends Activity {
         handsFree=false;
         stopQuietWakeGate();
         endConversation(false);
-        if(recognizer!=null){try{recognizer.destroy();}catch(Exception ignored){}recognizer=null;}
+        if(recognizer!=null){try{DiagnosticTrace.log("SR_DESTROYED",null);recognizer.destroy();}catch(Exception ignored){}recognizer=null;}
         renderMicOff();
     }
 
@@ -152,15 +154,18 @@ public class MainActivity extends Activity {
             talkButton.setEnabled(false);handsFreeButton.setText("마이크: 사용 불가");return;
         }
         recognizer=SpeechRecognizer.createSpeechRecognizer(this);
+        JSONObject impl=new JSONObject();try{impl.put("on_device",false);impl.put("on_device_available",android.os.Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(this));impl.put("voice_recognition_service",android.provider.Settings.Secure.getString(getContentResolver(),"voice_recognition_service"));}catch(Exception ignored){}DiagnosticTrace.log("SR_IMPLEMENTATION",impl);
         recognizer.setRecognitionListener(new RecognitionListener(){
-            @Override public void onReadyForSpeech(Bundle params){uiState=VoiceUiState.State.LISTENING;stateText.setText(listenMode==ListenMode.WAKE?wakePrompt():(listenMode==ListenMode.FOLLOW_UP?followUpPrompt():"듣고 있습니다…"));}
-            @Override public void onBeginningOfSpeech(){if(listenMode==ListenMode.COMMAND||listenMode==ListenMode.FOLLOW_UP)stateText.setText("말씀하세요");}
+            @Override public void onReadyForSpeech(Bundle params){DiagnosticTrace.log("SR_ON_READY",null);uiState=VoiceUiState.State.LISTENING;stateText.setText(listenMode==ListenMode.WAKE?wakePrompt():(listenMode==ListenMode.FOLLOW_UP?followUpPrompt():"듣고 있습니다…"));}
+            @Override public void onBeginningOfSpeech(){DiagnosticTrace.log("SR_BEGIN_SPEECH",null);if(listenMode==ListenMode.COMMAND||listenMode==ListenMode.FOLLOW_UP)stateText.setText("말씀하세요");}
             @Override public void onRmsChanged(float rmsdB){}
             @Override public void onBufferReceived(byte[] buffer){}
             @Override public void onEndOfSpeech(){
+                DiagnosticTrace.log("SR_END_SPEECH",null);
                 if(listenMode==ListenMode.COMMAND||listenMode==ListenMode.FOLLOW_UP){uiState=VoiceUiState.State.THINKING;stateText.setText("인식 중…"); try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("reason","end_of_speech");lifecycleEventId=voiceEvent("listening.stopped",listeningEventId,"info","household",p).getString("event_id");}catch(Exception ignored){}}
             }
             @Override public void onError(int error){
+                JSONObject ep=new JSONObject();try{ep.put("error_code",error);ep.put("listen_mode",listenMode.name());}catch(Exception ignored){}DiagnosticTrace.log("SR_ERROR",ep);
                 ListenMode failed=listenMode;listenMode=ListenMode.IDLE;
                 if(uiState==VoiceUiState.State.MIC_OFF)return;
                 if((error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT||error==SpeechRecognizer.ERROR_NO_MATCH)&&failed==ListenMode.WAKE){
@@ -191,14 +196,14 @@ public class MainActivity extends Activity {
                 if(handsFree&&VoiceUiState.automaticWakeAllowed(uiState))scheduleWakeListening(350);
             }
             @Override public void onResults(Bundle results){
-                ArrayList<String> matches=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);ListenMode completed=listenMode;listenMode=ListenMode.IDLE;if(uiState!=VoiceUiState.State.MIC_OFF)uiState=VoiceUiState.State.READY;
+                ArrayList<String> matches=results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);DiagnosticTrace.logCandidates("SR_RESULTS",matches);ListenMode completed=listenMode;listenMode=ListenMode.IDLE;if(uiState!=VoiceUiState.State.MIC_OFF)uiState=VoiceUiState.State.READY;
                 int count=matches==null?0:matches.size();
                 if(completed==ListenMode.WAKE){
                     correlationId="corr-"+UUID.randomUUID();
                     try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("candidate_count",count);JSONObject candidate=voiceEvent("wake.candidate",null,"debug","household",p);lifecycleEventId=candidate.getString("event_id");
-                        if(count==0){JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",0);r.put("reason","empty_result");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);clearInteractionChain();if(handsFree)scheduleWakeListening(350);return;}
-                        if(containsWakePhrase(matches)){conversationActive=true;followUpNoMatchRetries=0;JSONObject d=new JSONObject();d.put("language",recognitionLanguage());d.put("candidate_count",count);JSONObject detected=voiceEvent("wake.detected",lifecycleEventId,"info","household",d);listeningEventId=detected.getString("event_id");transcriptText.setText(profile==Profile.GRANDMA?"네, 말씀하세요.":"Listening…");stateText.setText("깨움 감지");main.postDelayed(()->startCommandListening(true),250);}
-                        else{JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",count);r.put("reason","phrase_mismatch");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);clearInteractionChain();if(handsFree)scheduleWakeListening(250);}
+                        if(count==0){JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",0);r.put("reason","empty_result");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);DiagnosticTrace.log("WAKE_REJECT",r);clearInteractionChain();if(handsFree)scheduleWakeListening(350);return;}
+                        if(containsWakePhrase(matches)){conversationActive=true;followUpNoMatchRetries=0;JSONObject d=new JSONObject();d.put("language",recognitionLanguage());d.put("candidate_count",count);JSONObject detected=voiceEvent("wake.detected",lifecycleEventId,"info","household",d);DiagnosticTrace.log("WAKE_ACCEPT",d);listeningEventId=detected.getString("event_id");transcriptText.setText(profile==Profile.GRANDMA?"네, 말씀하세요.":"Listening…");stateText.setText("깨움 감지");JSONObject cp=new JSONObject();try{cp.put("delay_ms",250);}catch(Exception ignored){}DiagnosticTrace.log("COMMAND_LISTENER_REQUESTED",cp);main.postDelayed(()->startCommandListening(true),250);}
+                        else{JSONObject r=new JSONObject();r.put("language",recognitionLanguage());r.put("candidate_count",count);r.put("reason","phrase_mismatch");voiceEvent("wake.rejected",lifecycleEventId,"debug","household",r);DiagnosticTrace.log("WAKE_REJECT",r);clearInteractionChain();if(handsFree)scheduleWakeListening(250);}
                     }catch(Exception ignored){clearInteractionChain();if(handsFree)scheduleWakeListening(350);}return;
                 }
                 if(count==0){
@@ -220,8 +225,8 @@ public class MainActivity extends Activity {
                 if(completed==ListenMode.FOLLOW_UP&&isConversationExit(spoken)){answerText.setText(recognitionLanguage().equals("en-US")?"Okay.":"네, 알겠습니다.");endConversation(true);return;}
                 if(completed==ListenMode.COMMAND||completed==ListenMode.FOLLOW_UP){conversationActive=true;followUpNoMatchRetries=0;uiState=VoiceUiState.State.THINKING;transcriptText.setText((profile==Profile.GRANDMA?"할머니: ":"You: ")+spoken);stateText.setText("AI 처리 중…");sendToBridge(spoken,lifecycleEventId);}
             }
-            @Override public void onPartialResults(Bundle partialResults){if(listenMode!=ListenMode.COMMAND&&listenMode!=ListenMode.FOLLOW_UP)return;ArrayList<String> m=partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(m!=null&&!m.isEmpty()&&!m.get(0).trim().isEmpty()){String text=m.get(0).trim();transcriptText.setText(text);try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("text",text);voiceEvent("transcript.partial",listeningEventId,"debug","sensitive",p);}catch(Exception ignored){}}}
-            @Override public void onEvent(int eventType,Bundle params){}
+            @Override public void onPartialResults(Bundle partialResults){ArrayList<String> m=partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);DiagnosticTrace.logCandidates("SR_PARTIAL",m);if(listenMode!=ListenMode.COMMAND&&listenMode!=ListenMode.FOLLOW_UP)return;if(m!=null&&!m.isEmpty()&&!m.get(0).trim().isEmpty()){String text=m.get(0).trim();transcriptText.setText(text);try{JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("text",text);voiceEvent("transcript.partial",listeningEventId,"debug","sensitive",p);}catch(Exception ignored){}}}
+            @Override public void onEvent(int eventType,Bundle params){JSONObject p=new JSONObject();try{p.put("event_type",eventType);}catch(Exception ignored){}DiagnosticTrace.log("SR_EVENT",p);}
         });
         uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;
         talkButton.setEnabled(true);applyProfileUi();scheduleWakeListening(700);
@@ -234,6 +239,7 @@ public class MainActivity extends Activity {
     }
     private Intent recognizerIntent(String lang,boolean partial){Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,lang);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,lang);i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,partial);i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,5);return i;}
     private void scheduleWakeListening(long delayMs){
+        JSONObject p=new JSONObject();try{p.put("delay_ms",delayMs);p.put("conversation_active",conversationActive);p.put("listen_mode",listenMode.name());}catch(Exception ignored){}DiagnosticTrace.log("REARM_SCHEDULED",p);
         if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.automaticWakeAllowed(uiState))return;
         main.postDelayed(()->{
             if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.automaticWakeAllowed(uiState))startQuietWakeGate();
@@ -247,6 +253,7 @@ public class MainActivity extends Activity {
                     if(foreground&&!conversationActive&&handsFree&&listenMode==ListenMode.IDLE&&!destroyed&&VoiceUiState.microphoneAllowed(uiState))startWakeListening();
                 }
                 @Override public void onFailure(String reason){
+                    JSONObject p=new JSONObject();try{p.put("reason",reason);}catch(Exception ignored){}DiagnosticTrace.log("GATE_FAILURE",p);
                     if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;
                     uiState=VoiceUiState.State.ERROR_RECOVERY;
                     stateText.setText("조용한 깨움 대기 실패 · 지금 말하기를 사용해주세요");
@@ -255,27 +262,28 @@ public class MainActivity extends Activity {
             });
         }
         if(!quietWakeGate.isRunning()){
+            DiagnosticTrace.beginAttempt();DiagnosticTrace.log("GATE_RESTART",null);
             uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;
             stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());
             quietWakeGate.start();
         }
     }
     private void stopQuietWakeGate(){if(quietWakeGate!=null)quietWakeGate.stop();}
-    private void startWakeListening(){if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;stopQuietWakeGate();try{recognizer.cancel();listenMode=ListenMode.WAKE;uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());recognizer.startListening(recognizerIntent(recognitionLanguage(),false));}catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성인식 시작 실패 · 다시 시도합니다");scheduleWakeListening(750);}}
+    private void startWakeListening(){if(!foreground||conversationActive||!handsFree||recognizer==null||destroyed||!VoiceUiState.microphoneAllowed(uiState))return;stopQuietWakeGate();try{DiagnosticTrace.log("SR_CANCEL_REQUESTED",null);recognizer.cancel();DiagnosticTrace.log("SR_CANCEL_RETURNED",null);listenMode=ListenMode.WAKE;uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());DiagnosticTrace.nextGeneration();DiagnosticTrace.log("SR_START_REQUESTED",null);recognizer.startListening(recognizerIntent(recognitionLanguage(),false));DiagnosticTrace.log("SR_START_RETURNED",null);}catch(Exception e){JSONObject p=new JSONObject();try{p.put("error",e.getClass().getSimpleName());}catch(Exception ignored){}DiagnosticTrace.log("SR_START_EXCEPTION",p);listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;stateText.setText("음성인식 시작 실패 · 다시 시도합니다");scheduleWakeListening(750);}}
     private void startCommandListening(boolean fromWake){
         if(!foreground)return;
         if(uiState==VoiceUiState.State.MIC_OFF){renderMicOff();return;}
         if(recognizer==null||destroyed){initSpeech();if(recognizer==null)return;}
-        try{stopQuietWakeGate();if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();recognizer.cancel();listenMode=ListenMode.COMMAND;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);answerText.setText("");stateText.setText("듣고 있습니다…");JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint",fromWake?"wake":"button");JSONObject listening=voiceEvent("listening.started",listeningEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;recognizer.startListening(recognizerIntent(recognitionLanguage(),true));}
-        catch(Exception e){listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);stateText.setText("음성인식 시작 실패 · 다시 시도해주세요");if(handsFree)scheduleWakeListening(700);}
+        try{stopQuietWakeGate();if(correlationId.isEmpty())correlationId="corr-"+UUID.randomUUID();DiagnosticTrace.log("SR_CANCEL_REQUESTED",null);recognizer.cancel();DiagnosticTrace.log("SR_CANCEL_RETURNED",null);listenMode=ListenMode.COMMAND;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);answerText.setText("");stateText.setText("듣고 있습니다…");JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint",fromWake?"wake":"button");JSONObject listening=voiceEvent("listening.started",listeningEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;DiagnosticTrace.nextGeneration();DiagnosticTrace.log("SR_START_REQUESTED",p);recognizer.startListening(recognizerIntent(recognitionLanguage(),true));DiagnosticTrace.log("SR_START_RETURNED",null);}
+        catch(Exception e){JSONObject p=new JSONObject();try{p.put("error",e.getClass().getSimpleName());}catch(Exception ignored){}DiagnosticTrace.log("SR_START_EXCEPTION",p);listenMode=ListenMode.IDLE;uiState=VoiceUiState.State.ERROR_RECOVERY;talkButton.setEnabled(true);stateText.setText("음성인식 시작 실패 · 다시 시도해주세요");if(handsFree)scheduleWakeListening(700);}
     }
     private void startFollowUpListening(){
         if(!foreground||!conversationActive||!handsFree||uiState==VoiceUiState.State.MIC_OFF||bridgeDegraded||destroyed)return;
         if(recognizer==null){initSpeech();if(recognizer==null)return;}
-        try{stopQuietWakeGate();recognizer.cancel();listenMode=ListenMode.FOLLOW_UP;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);stateText.setText(followUpPrompt());JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint","follow_up");JSONObject listening=voiceEvent("listening.started",lifecycleEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;recognizer.startListening(recognizerIntent(recognitionLanguage(),true));}
+        try{stopQuietWakeGate();DiagnosticTrace.log("SR_CANCEL_REQUESTED",null);recognizer.cancel();DiagnosticTrace.log("SR_CANCEL_RETURNED",null);listenMode=ListenMode.FOLLOW_UP;uiState=VoiceUiState.State.LISTENING;talkButton.setEnabled(false);stateText.setText(followUpPrompt());JSONObject p=new JSONObject();p.put("language",recognitionLanguage());p.put("entrypoint","follow_up");JSONObject listening=voiceEvent("listening.started",lifecycleEventId,"info","household",p);listeningEventId=listening.getString("event_id");lifecycleEventId=listeningEventId;DiagnosticTrace.nextGeneration();DiagnosticTrace.log("SR_START_REQUESTED",p);recognizer.startListening(recognizerIntent(recognitionLanguage(),true));DiagnosticTrace.log("SR_START_RETURNED",null);}
         catch(Exception e){endConversation(true);}
     }
-    private void resetListening(){listenMode=ListenMode.IDLE;if(recognizer!=null)try{recognizer.cancel();}catch(Exception ignored){}}
+    private void resetListening(){listenMode=ListenMode.IDLE;if(recognizer!=null)try{DiagnosticTrace.log("SR_CANCEL_REQUESTED",null);recognizer.cancel();DiagnosticTrace.log("SR_CANCEL_RETURNED",null);}catch(Exception ignored){}}
     private void endConversation(boolean resumeWake){interactionEpoch++;conversationActive=false;followUpNoMatchRetries=0;resetListening();clearInteractionChain();if(uiState!=VoiceUiState.State.MIC_OFF){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;stateText.setText(bridgeDegraded?offlinePrompt():wakePrompt());talkButton.setEnabled(true);if(resumeWake&&handsFree) scheduleWakeListening(650);}}
 
     private void sendToBridge(String prompt,String causationId){
@@ -327,5 +335,5 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();foreground=true;if(destroyed||uiState==VoiceUiState.State.MIC_OFF)return;if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){uiState=bridgeDegraded?VoiceUiState.State.OFFLINE_DEGRADED:VoiceUiState.State.READY;talkButton.setEnabled(recognizer!=null);scheduleWakeListening(350);}
     }
-    @Override protected void onDestroy(){destroyed=true;foreground=false;ttsReady=false;interactionEpoch++;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null)recognizer.destroy();if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy(){destroyed=true;foreground=false;ttsReady=false;interactionEpoch++;main.removeCallbacksAndMessages(null);stopQuietWakeGate();eventLedger.clear();if(recognizer!=null){DiagnosticTrace.log("SR_DESTROYED",null);recognizer.destroy();}if(tts!=null){tts.stop();tts.shutdown();}ioPool.shutdownNow();super.onDestroy();}
 }
