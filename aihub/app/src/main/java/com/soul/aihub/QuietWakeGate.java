@@ -2,6 +2,7 @@ package com.soul.aihub;
 
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.AudioTimestamp;
 import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,6 +21,9 @@ import org.json.JSONObject;
  * A refractory period is enforced after every detected onset. This prevents
  * SpeechRecognizer/system audio emitted during the handoff from immediately
  * re-opening the gate and creating a beep/retrigger loop.
+ *
+ * Diagnostic logging below is observational only. Thresholds, frame size,
+ * refractory timing, release ordering, and callback behavior are unchanged.
  */
 final class QuietWakeGate {
     interface Callback { void onSpeechActivity(); void onFailure(String reason); }
@@ -53,7 +57,8 @@ final class QuietWakeGate {
         main.removeCallbacks(delayedStart);
         long remaining = nextEligibleStartMs - SystemClock.elapsedRealtime();
         if (remaining > 0L) {
-            JSONObject p = new JSONObject(); try { p.put("remaining_ms", remaining); } catch (Exception ignored) {}
+            JSONObject p = new JSONObject();
+            try { p.put("remaining_ms", remaining); } catch (Exception ignored) {}
             DiagnosticTrace.log("GATE_START_DELAYED", p);
             main.postDelayed(delayedStart, remaining);
             return;
@@ -115,12 +120,31 @@ final class QuietWakeGate {
                 double trigger = Math.max(MIN_TRIGGER_RMS, noiseFloor * NOISE_MULTIPLIER);
                 if (frameCount == 1 || frameCount % 12 == 0) {
                     JSONObject p = new JSONObject();
-                    try { p.put("rms", rms); p.put("noise_floor", noiseFloor); p.put("trigger", trigger); p.put("max_rms", maxRms); p.put("frames_since_start", frameCount); } catch (Exception ignored) {}
+                    try {
+                        p.put("rms", rms);
+                        p.put("noise_floor", noiseFloor);
+                        p.put("trigger", trigger);
+                        p.put("max_rms", maxRms);
+                        p.put("frames_since_start", frameCount);
+                    } catch (Exception ignored) {}
                     DiagnosticTrace.log("GATE_CALIBRATION", p);
                 }
                 if (rms >= trigger) {
                     JSONObject p = new JSONObject();
-                    try { p.put("rms", rms); p.put("noise_floor", noiseFloor); p.put("trigger", trigger); p.put("max_rms", maxRms); p.put("frames_since_start", frameCount); } catch (Exception ignored) {}
+                    try {
+                        p.put("rms", rms);
+                        p.put("noise_floor", noiseFloor);
+                        p.put("trigger", trigger);
+                        p.put("max_rms", maxRms);
+                        p.put("frames_since_start", frameCount);
+                        AudioTimestamp ts = new AudioTimestamp();
+                        int timestampStatus = record.getTimestamp(ts, AudioTimestamp.TIMEBASE_BOOTTIME);
+                        p.put("audio_timestamp_status", timestampStatus);
+                        if (timestampStatus == AudioRecord.SUCCESS) {
+                            p.put("audio_frame_position", ts.framePosition);
+                            p.put("audio_t_ns_boottime", ts.nanoTime);
+                        }
+                    } catch (Exception ignored) {}
                     DiagnosticTrace.log("GATE_ONSET", p);
                     onset = true;
                     nextEligibleStartMs = SystemClock.elapsedRealtime() + RETRIGGER_GUARD_MS;
@@ -135,6 +159,10 @@ final class QuietWakeGate {
             if (running) main.post(() -> callback.onFailure("audio_read_failure"));
             running = false;
         } finally {
+            // Production behavior intentionally releases directly here; do not insert
+            // an explicit stop() in the diagnostic build because that would change the
+            // handoff being measured.
+            DiagnosticTrace.log("AUDIO_CAPTURE_END_BY_RELEASE", null);
             releaseRecord();
         }
         if (onset) main.post(callback::onSpeechActivity);
@@ -145,7 +173,10 @@ final class QuietWakeGate {
         main.removeCallbacks(delayedStart);
         if (record != null) {
             DiagnosticTrace.log("AUDIO_STOP_REQUESTED", null);
-            try { record.stop(); DiagnosticTrace.log("AUDIO_STOPPED", null); } catch (Exception ignored) {}
+            try {
+                record.stop();
+                DiagnosticTrace.log("AUDIO_STOPPED", null);
+            } catch (Exception ignored) {}
         }
         releaseRecord();
     }
