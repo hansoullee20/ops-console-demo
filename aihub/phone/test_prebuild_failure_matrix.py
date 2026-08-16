@@ -149,6 +149,12 @@ class AndroidSafetyInvariantTests(unittest.TestCase):
         self.assertIn("FRAME_SAMPLES = 320", self.wake)
         self.assertIn("noiseFloor", self.wake)
 
+    def test_wake_gate_has_retrigger_refractory_period(self):
+        self.assertIn("RETRIGGER_GUARD_MS", self.wake)
+        self.assertIn("nextEligibleStartMs", self.wake)
+        self.assertIn("main.postDelayed(delayedStart, remaining)", self.wake)
+        self.assertIn("main.removeCallbacks(delayedStart)", self.wake)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
