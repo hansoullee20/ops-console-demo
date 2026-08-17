@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "device": {
+    "product_model": "SC-1",
+    "device_model_string": "SmartCard_I",
+    "algorithm_version": "EASY_A6",
+    "firmware_version": "W806C6_SC1 v2.38"
+  },
+  "golden_usb": {
+    "captured_at_utc": null,
+    "vendor_id": null,
+    "product_id": null,
+    "manufacturer": null,
+    "product": null,
+    "serial": null,
+    "device_size_bytes": null,
+    "logical_sector_size": null,
+    "physical_sector_size": null,
+    "partition_table": null,
+    "partition_number": null,
+    "partition_start_sector": null,
+    "partition_size_bytes": null,
+    "partition_type": null,
+    "filesystem_type": null,
+    "filesystem_version": null,
+    "volume_label": null,
+    "filesystem_uuid": null
+  },
+  "verification": {
+    "source": "known-good physical USB used with the real SC-1",
+    "reviewed": false,
+    "notes": "Populate only from captured hardware evidence. Do not guess missing fields."
+  }
+}
