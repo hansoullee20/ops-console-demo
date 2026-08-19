@@ -27,6 +27,7 @@ data class AsrBenchmarkResult(
     val caseId: String,
     val engineName: String,
     val finalTranscript: String,
+    val transcriptMatchesExpected: Boolean?,
     val commandSuffixPreserved: Boolean?,
     val firstPartialLatencyMs: Long?,
     val finalLatencyMs: Long?,
@@ -47,8 +48,10 @@ class AsrBenchmarkHarness(
         case: RecordedPcmCase,
         engineName: String,
         engine: StreamingAsrEngine,
+        captureStartElapsedRealtimeNs: Long = 0L,
     ): AsrBenchmarkResult {
         require(engineName.isNotBlank()) { "engineName must not be blank" }
+        require(captureStartElapsedRealtimeNs >= 0L) { "captureStartElapsedRealtimeNs must be non-negative" }
 
         val preRoll = case.pcm16.copyOfRange(0, case.preRollSamples)
         val live = case.pcm16.copyOfRange(case.preRollSamples, case.pcm16.size)
@@ -69,7 +72,7 @@ class AsrBenchmarkHarness(
                 val samples = live.copyOfRange(offset, end)
                 val frame = PcmFrame(
                     samples = samples,
-                    capturedAtElapsedRealtimeNs = sequence * frameDurationNs,
+                    capturedAtElapsedRealtimeNs = captureStartElapsedRealtimeNs + sequence * frameDurationNs,
                     sequence = sequence,
                     startSampleIndex = case.preRollSamples.toLong() + offset.toLong(),
                 )
@@ -100,6 +103,9 @@ class AsrBenchmarkHarness(
 
         val finalTranscript = updates.lastOrNull { it.isFinal }?.text
             ?: updates.lastOrNull()?.text.orEmpty()
+        val transcriptMatch = case.expectedTranscript?.let { expected ->
+            normalize(finalTranscript) == normalize(expected)
+        }
         val suffixPreserved = case.expectedCommandSuffix?.let { suffix ->
             normalize(finalTranscript).contains(normalize(suffix))
         }
@@ -108,12 +114,18 @@ class AsrBenchmarkHarness(
             caseId = case.id,
             engineName = engineName,
             finalTranscript = finalTranscript,
+            transcriptMatchesExpected = transcriptMatch,
             commandSuffixPreserved = suffixPreserved,
-            firstPartialLatencyMs = firstPartialAtNs?.div(1_000_000L),
-            finalLatencyMs = finalAtNs?.div(1_000_000L),
+            firstPartialLatencyMs = latencyMs(firstPartialAtNs, captureStartElapsedRealtimeNs),
+            finalLatencyMs = latencyMs(finalAtNs, captureStartElapsedRealtimeNs),
             discontinuityDetected = discontinuityDetected,
             updateCount = updates.size,
         )
+    }
+
+    private fun latencyMs(producedAtNs: Long?, startAtNs: Long): Long? {
+        if (producedAtNs == null || producedAtNs < startAtNs) return null
+        return (producedAtNs - startAtNs) / 1_000_000L
     }
 
     private fun normalize(text: String): String =
