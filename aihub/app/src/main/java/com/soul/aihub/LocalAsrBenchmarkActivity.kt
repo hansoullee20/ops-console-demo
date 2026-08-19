@@ -159,7 +159,9 @@ class LocalAsrBenchmarkActivity : Activity() {
                 .collect { frame ->
                     val observation = continuity.observe(frame)
                     check(observation.continuous) {
-                        "PCM capture discontinuity: ${observation.reason}"
+                        "PCM capture discontinuity: expected sequence=${observation.expectedSequence}, " +
+                            "actual=${observation.actualSequence}, missingFrames=${observation.missingFrames}, " +
+                            "missingSamples=${observation.missingSamples}"
                     }
                     buffer.append(frame.samples)
                 }
@@ -186,11 +188,11 @@ class LocalAsrBenchmarkActivity : Activity() {
         val outcomes = mutableListOf<EngineOutcome>()
 
         outcomes += runEngine("moonshine-tiny-ko") {
-            SherpaMoonshineBenchmarkEngine(assetManager)
+            SherpaMoonshineBenchmarkEngine(assets)
         }.invoke(harness, recorded)
 
         outcomes += runEngine("zipformer-ko-smoke") {
-            SherpaStreamingAsrEngine(assetManager)
+            SherpaStreamingAsrEngine(assets)
         }.invoke(harness, recorded)
 
         return outcomes
