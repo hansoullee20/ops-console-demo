@@ -48,10 +48,21 @@ Pass only if:
 
 A failure does not block Okja; it removes SpeechRecognizer from the primary path.
 
-## Primary ASR candidate: sherpa-onnx
-Current sherpa-onnx Android support includes prebuilt Android libraries/APKs and examples for ASR, VAD+ASR, keyword spotting and other speech functions. It is the preferred prototype runtime because it can consume application-owned PCM without an OS microphone handoff.
+## Primary ASR direction: benchmark-first sherpa-onnx
+Current sherpa-onnx Android support includes prebuilt Android libraries/APKs and examples for streaming/non-streaming ASR, VAD, keyword spotting and other speech functions. It remains the preferred **runtime prototype family** because it can consume application-owned PCM without an OS microphone handoff.
 
-Benchmark Korean-capable models rather than hard-coding a model before device measurement. Record:
+However, no single Korean sherpa model is approved as the production default yet. A currently open upstream issue reports that both variants of `sherpa-onnx-streaming-zipformer-korean-2024-06-16` returned empty transcription on Android 1.12.17 despite loading and consuming PCM successfully. This means runtime capability and model viability must be treated separately.
+
+### ASR selection rule
+Do not hard-code the 2024 Korean streaming Zipformer as the production model. Maintain adapters so candidate models can be swapped without changing `core-audio` or app lifecycle code. A model becomes production-eligible only after passing the Fold4 corpus gate.
+
+Benchmark at minimum:
+- Android SpeechRecognizer Mode F;
+- latest viable sherpa Korean streaming model(s);
+- latest viable sherpa simulated-streaming/non-streaming Korean model(s) where latency is acceptable;
+- any later Korean streaming model that resolves the upstream regression.
+
+Record:
 - full-utterance preservation;
 - WER / command exact-match rate;
 - wake -> first partial latency;
@@ -60,7 +71,8 @@ Benchmark Korean-capable models rather than hard-coding a model before device me
 - peak RSS;
 - thermal behavior;
 - battery drain;
-- model size and cold-start time.
+- model size and cold-start time;
+- empty-transcript/error rate.
 
 ## Wake-word candidates
 ### Baseline
@@ -86,7 +98,7 @@ Keep the existing failing handoff implementation and Fold4 observations reproduc
 Implement `AudioEngine`, one AudioRecord, canonical PCM format, 3–5 s circular buffer, timestamp/frame counters, consumer fan-out, and capture diagnostics.
 
 ### M2 — Engine benchmark harness
-Feed identical PCM/corpus into SpeechRecognizer Mode F and sherpa candidates. Produce machine-readable benchmark results.
+Feed identical PCM/corpus into SpeechRecognizer Mode F and sherpa candidates. Produce machine-readable benchmark results. Include explicit detection of empty-transcript failures and model/runtime version metadata.
 
 ### M3 — Wake + VAD
 Attach wake and VAD as PCM consumers. Compare Porcupine low-level against sherpa KWS where Korean support is viable.
@@ -109,8 +121,8 @@ Long-run tests for process death, screen off/lock, network loss, Bluetooth/audio
 ## Sources reviewed
 - Android Developers: SpeechRecognizer API — continuous-recognition warning and recognizer lifecycle.
 - Android Developers: RecognizerIntent.EXTRA_AUDIO_SOURCE — API 33+, supplied PFD audio and fallback behavior.
-- sherpa-onnx documentation — Android build/prebuilt binaries, ASR/VAD/KWS applications.
-- sherpa-onnx keyword spotting documentation — open-vocabulary KWS and Android app support.
+- sherpa-onnx documentation/repository — Android build/prebuilt binaries, streaming/non-streaming ASR, VAD and KWS applications.
+- sherpa-onnx issue #2886 (opened 2025-12-10; still open at 2026-08-19 review) — Korean 2024 streaming Zipformer variants reported empty transcription on Android 1.12.17.
 - Home Assistant Assist Satellite developer documentation — explicit satellite states and wake/VAD/pipeline concepts.
 - Home Assistant Android 2026 issues — active work around Assist settings/custom wake-word behavior.
 
