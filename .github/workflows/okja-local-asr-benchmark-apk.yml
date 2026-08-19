@@ -1,13 +1,12 @@
 name: Build Okja local ASR benchmark APK
 
+# Model provisioning adds roughly 200 MB of ASR assets. Keep this workflow opt-in
+# except when the workflow itself is intentionally changed; ordinary PR/status/code
+# commits should use the lightweight verification workflow instead.
 on:
   workflow_dispatch:
   push:
     branches: [ feat/voice-pipeline-v2 ]
-    paths:
-      - '.github/workflows/okja-local-asr-benchmark-apk.yml'
-  pull_request:
-    branches: [ aihub-voice-test ]
     paths:
       - '.github/workflows/okja-local-asr-benchmark-apk.yml'
 
