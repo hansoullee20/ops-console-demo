@@ -2,209 +2,130 @@
 
 Last updated: 2026-08-19 (Asia/Seoul)
 
-This file is the authoritative answer to: **Where is Project Okja right now, what is done, what is blocked, and what happens next?**
+This is the authoritative current-state source for Project Okja.
 
-## Project state
+## State
 
-**STATE: READY TO CONTINUE — NOT BLOCKED**
+**STATE: WAITING FOR DEVICE BENCHMARK INPUT — CODE NOT BLOCKED**
 
-The current voice direction is established. Work has advanced through the PCM integrity layer and the first same-PCM ASR replay harness. The next step is a real sherpa-onnx Korean streaming adapter and Fold4 benchmark.
+Repository: `hansoullee20/ops-console-demo`
+Branch: `feat/voice-pipeline-v2`
+Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
+Base: `aihub-voice-test`
+Latest verified engineering head before this documentation update: `a08b57ff96b1227d6a100b09b183375d27b591e5`
+Verified CI: GitHub Actions run `#175` / `32243714119` — success
+Root-cause checkpoint preserved in history: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
 
-## Active development
+## Established architecture
 
-- Repository: `hansoullee20/ops-console-demo`
-- Active branch: `feat/voice-pipeline-v2`
-- Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
-- Base branch for the PR: `aihub-voice-test`
-- Current verified head: `c34f928cb25fca0e84256edfa61f16dec711f238`
-- Current verified CI: GitHub Actions run `#164` / run ID `32243222671` — success
-- Diagnostic/root-cause checkpoint preserved in history: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
+- `AudioEngine` is the only production microphone owner.
+- Canonical audio is 16 kHz, mono, signed PCM16, 20 ms frames.
+- `PcmRingBuffer` provides bounded pre-roll without releasing/reacquiring the microphone.
+- Wake/VAD/ASR/diagnostics are PCM consumers and must not create their own `AudioRecord`.
+- Deterministic device intent/policy remains ahead of generative AI.
+- Android SpeechRecognizer Mode F remains compatibility evidence only, not the production continuous-ASR target.
 
-## What works / what is established
+## Completed engineering work
 
-### Voice root cause
+### 1. PCM integrity contract — core complete
 
-Fold4 diagnostics established the important architecture failure in the old path:
-
-```text
-QuietWakeGate / AudioRecord
-        -> release AudioRecord
-        -> Android SpeechRecognizer
-```
-
-This handoff can lose the beginning of a connected utterance such as `옥자야 뭐하니`. A separate issue in the old `MainActivity` also discards the already-recognized command suffix and starts another SpeechRecognizer session.
-
-The old cooldown/retrigger tuning is therefore not treated as a root fix.
-
-### New audio-core architecture
-
-PR #20 establishes:
-
-- `AudioEngine` as the only production microphone owner.
-- Canonical PCM: 16 kHz, mono, signed PCM16, 20 ms frames.
-- `PcmRingBuffer` with configurable capacity; initial capacity is 3000 ms.
-- Configurable pre-roll; initial default is 1500 ms.
-- `PcmAudioSource` consumer contract.
-- Microphone-free `WakeDetector` contract.
-- Microphone-free `StreamingAsrEngine` contract.
-- Unit tests for wrap-around and pre-roll behavior.
-
-Production rule: wake, VAD, ASR, and diagnostics consume PCM. They do not create a competing `AudioRecord`.
-
-### PCM continuity integrity
-
-The current branch now includes:
+Implemented and tested:
 
 - monotonic `PcmFrame.sequence`;
-- absolute `startSampleIndex` / end sample position;
-- `PcmContinuityTracker` for missing/out-of-order PCM detection;
-- `UtteranceAudioIntegrityGate`, which latches an utterance untrusted after any detected gap until a new utterance begins;
-- tests covering continuous input, skipped-frame gaps, out-of-order input, reset epochs, and fail-closed utterance trust.
+- absolute `startSampleIndex`;
+- `PcmContinuityTracker` for missing/out-of-order frames;
+- `UtteranceAudioIntegrityGate`, which latches an utterance untrusted after a gap until a new utterance begins;
+- gap/out-of-order/reset/fail-closed unit tests.
 
-Issue #24 remains open until this gate is wired into the real ASR -> transcript -> physical-device authorization path. The core integrity mechanism itself is implemented and tested.
+Issue #24 stays open only because final enforcement must be wired into the future ASR -> transcript -> physical-device authorization path.
 
-### Same-PCM ASR benchmark foundation
+### 2. Same-PCM ASR benchmark harness — core complete
 
-`AsrBenchmarkHarness` now exists and replays the exact same recorded 16 kHz PCM into any `StreamingAsrEngine` without microphone ownership.
+`AsrBenchmarkHarness` now:
 
-It records:
+- replays the exact same recorded PCM into any `StreamingAsrEngine`;
+- preserves canonical frame sequence/sample-position metadata;
+- records final transcript, normalized expected-transcript match, command-suffix preservation, first-partial latency, final latency, continuity status, and update count;
+- has tests proving different engines receive identical PCM.
 
-- final transcript;
-- exact normalized expected-transcript match where supplied;
-- command-suffix preservation;
-- first-partial latency;
-- final latency;
-- replay continuity status;
-- ASR update count.
+Post-task review caught and fixed a latency bug: absolute monotonic timestamps were initially treated as latency. The corrected code subtracts the explicit capture-start monotonic timestamp and has a regression test with a non-zero clock origin.
 
-The harness includes tests proving that different engines receive identical PCM and canonical frame metadata.
+CI run #164 passed after that correction.
 
-Post-implementation review found and fixed a real timing bug in the first version: absolute monotonic `producedAtElapsedRealtimeNs` values were initially treated as latency values. The corrected implementation subtracts an explicit capture-start monotonic timestamp, with a regression test using a non-zero clock origin.
+### 3. sherpa-onnx Korean streaming adapter — code complete
 
-CI run #164 passed deterministic checks, Android JVM tests, APK build, and artifact upload on the reviewed harness.
+Implemented:
 
-### Intent / device boundary
+- pinned Android runtime dependency `com.github.k2-fsa:sherpa-onnx:v1.13.4`;
+- JitPack repository configuration;
+- `SherpaStreamingAsrEngine` implementing the existing `StreamingAsrEngine` contract;
+- official Korean streaming Zipformer model type `14` (`sherpa-onnx-streaming-zipformer-korean-2024-06-16`);
+- PCM16 -> normalized float conversion;
+- pre-roll + live PCM ingestion without any `AudioRecord` ownership;
+- partial/final `AsrUpdate` timestamps using Android monotonic time;
+- model provisioning script `aihub/tools/fetch_sherpa_korean_model.sh`;
+- large model assets excluded from Git with `aihub/.gitignore`.
 
-Existing deterministic handling remains valuable and should be preserved:
+CI run #175 passed deterministic checks, Android JVM tests, debug APK build, and artifact upload on this integration.
 
-- known device intents are handled before generative AI;
-- explicit negation patterns reject commands such as `켜지 마`;
-- confirmation is scoped to device/profile/session/correlation;
-- device-command contracts validate target/action/parameters, expiry, and idempotency;
-- physical adapters are not yet considered production-ready.
+## Remaining execution plan
 
-### Backend
+### Task 4 — Real same-PCM Fold4 benchmark — NEXT
 
-Two prototype bridge implementations exist under `phone/`:
+Required inputs not yet present in the repository:
 
-- `aihub_bridge.py` — Claude Agent SDK path;
-- `aihub_bridge_codex.py` — Codex CLI path.
+- a recorded 16 kHz PCM benchmark corpus from the target Fold4 / target speaking conditions;
+- the provisioned Korean sherpa model files on the device build.
 
-For the current prototype, these remain development backends. Fresh Codex CLI execution is not the intended long-term household production backend.
+Minimum connected-utterance set should include repeated trials of:
 
-## What is intentionally NOT finished
+- `옥자야 뭐하니`
+- `옥자 TV 켜줘`
+- `옥자 에어컨 꺼줘`
+- negatives / TV-background / quieter speech samples.
 
-- No final wake-word engine is selected.
-- No final Korean ASR engine is selected.
-- No real sherpa-onnx `StreamingAsrEngine` implementation is integrated yet.
-- The benchmark harness does not yet collect real-device CPU/PSS/thermal/battery data.
-- WER/CER scoring is not yet added to the real-engine/device benchmark layer.
-- `MainActivity` has not yet been migrated to the new `AudioEngine` path.
-- Android SpeechRecognizer Mode F is compatibility evidence only, not the target architecture.
-- PCM discontinuity fail-closed logic is not yet connected to the real physical-command authorization path.
-- No production barge-in implementation yet.
-- No QNN/NPU optimization yet.
-- No real security-sensitive home-device integration yet.
-- Dedicated `project-okja` repository extraction has not yet been performed.
+Compare sherpa streaming Zipformer against the Android SpeechRecognizer compatibility path on identical PCM where technically possible.
 
-## Itemized execution plan
+Measure:
 
-### Task 1 — PCM integrity contract
-
-**Status: CORE COMPLETE; ROUTER INTEGRATION PENDING.**
-
-- Add sequence/sample-position metadata to `PcmFrame`. — DONE
-- Add consumer continuity detection. — DONE
-- Add utterance-level fail-closed trust latch. — DONE
-- Add unit tests for gap/out-of-order/fail-closed behavior. — DONE
-- Verify CI. — DONE
-- Enforce gate in the eventual ASR/device authorization path. — PENDING integration
-
-Tracked by issue #24.
-
-### Task 2 — Same-PCM benchmark harness
-
-**Status: CORE HARNESS COMPLETE AND REVIEWED.**
-
-- Replay identical PCM into multiple `StreamingAsrEngine` implementations. — DONE
-- Preserve canonical 20 ms frame metadata. — DONE
-- Capture transcript/suffix/latency fields. — DONE
-- Verify two engines receive identical PCM. — DONE
-- Review latency math against real monotonic timestamps. — DONE / bug fixed
-- Add real engine adapters and device metrics. — NEXT
-
-Tracked by issue #23.
-
-### Task 3 — sherpa-onnx Korean streaming adapter
-
-**Status: NEXT ACTIVE ENGINEERING TASK.**
-
-Integrate a pinned sherpa-onnx Android runtime behind `StreamingAsrEngine` using the Korean streaming Zipformer model as the first real candidate.
-
-Requirements:
-
-- consume PCM only; never create `AudioRecord`;
-- normalize PCM16 to float input expected by sherpa;
-- accept pre-roll followed by live frames;
-- expose partial/final `AsrUpdate` timestamps on the same monotonic clock;
-- pin runtime/model version and record model hashes/provenance;
-- keep model files out of source control unless deliberately vendored.
-
-### Task 4 — Fold4 same-PCM benchmark
-
-Run the same corpus against the real sherpa engine and the Android SpeechRecognizer compatibility path.
-
-Initial acceptance target:
-
-- connected utterance command suffix preserved >= 98/100;
-- no microphone reacquisition between wake and command capture;
-- no Android SpeechRecognizer system cue on the final local path;
-- no duplicate command execution.
-
-Add real-device metrics:
-
-- exact transcript / command accuracy;
-- WER/CER;
+- command suffix preservation;
+- transcript accuracy and later WER/CER;
 - first-partial/final latency;
 - CPU;
 - peak PSS;
-- thermal/battery behavior.
+- thermal/battery behavior;
+- PCM discontinuity count;
+- system recognition cue count;
+- duplicate execution count.
+
+Initial production-path acceptance target remains:
+
+- command suffix preserved >= 98/100 connected wake+command trials;
+- no microphone reacquisition between wake and command capture;
+- no Android SpeechRecognizer system cue on the final local path;
+- duplicate physical command execution = 0.
 
 ### Task 5 — VoiceSessionController
 
-Move voice lifecycle authority out of `MainActivity` after the first PCM-fed ASR passes the device gate.
+After the first PCM-fed local ASR passes the device gate:
 
-Required properties include:
-
-- one microphone owner;
-- no unnecessary second recognizer when command audio/transcript already exists;
-- bounded retries;
-- stale callback rejection;
-- deterministic MIC_OFF and TTS transitions;
-- reject physical-device execution from an utterance marked PCM-discontinuous.
+- move voice lifecycle authority out of `MainActivity`;
+- enforce one microphone owner and one ASR decoding path per utterance;
+- reject stale callbacks;
+- bound retries;
+- make MIC_OFF and TTS transitions deterministic;
+- require `UtteranceAudioIntegrityGate.canAuthorizeDeviceCommand()` before physical execution.
 
 ### Task 6 — Wake engine benchmark
 
-Attach PCM-fed wake candidates without changing microphone ownership:
+Compare PCM-fed wake candidates without changing microphone ownership:
 
 - Porcupine low-level baseline;
-- sherpa-onnx KWS candidate.
-
-Measure false reject, false activations/hour, TV/background robustness, quiet/elderly speech, CPU and battery.
+- sherpa-onnx KWS.
 
 ### Task 7 — Production migration
 
-Only after the local ASR/wake gates are proven:
+After ASR/wake acceptance:
 
 - migrate `MainActivity` to `AudioEngine` + `VoiceSessionController`;
 - remove the old Gate -> release -> SpeechRecognizer production path;
@@ -216,31 +137,17 @@ Only after the local ASR/wake gates are proven:
 - deferred security release gates (#21);
 - archive legacy `AIHUB_*.md` after canonical docs remain stable (#25).
 
-## Current blocker
+## Current blocker / required external input
 
-**None.**
+No architecture or compile blocker remains.
 
-The next likely external dependency is obtaining/deploying the selected sherpa Korean model onto the Fold4 for runtime benchmarking. That is not yet a blocker for code integration.
-
-If work is not actively being performed, the correct status is `WAITING FOR NEXT TURN`, not `WORKING`.
-
-## Security posture
-
-Current prototype security findings are tracked in [`SECURITY_BACKLOG.md`](SECURITY_BACKLOG.md).
-
-Security hardening is deliberately deferred enough to avoid blocking the family prototype, but the following become release gates **before** broader deployment or security-sensitive devices:
-
-- authenticated local IPC / peer identity;
-- actuator-boundary authorization;
-- production AI backend without broad coding-agent machine privileges;
-- trusted command risk tiers;
-- production/diagnostic build separation.
+The next meaningful step is a **real Fold4 benchmark**, which cannot be truthfully completed from repository code alone because the target-device recorded corpus and provisioned model runtime on that device are not currently available here. Do not claim device performance until those measurements exist.
 
 ## Documentation hierarchy
 
 1. `STATUS.md` — current state and next actions.
 2. `ARCHITECTURE.md` — intended production architecture.
-3. `architecture/ADR-*.md` — why major decisions were made.
+3. `architecture/ADR-*.md` — decision rationale.
 4. `SECURITY_BACKLOG.md` — known security work and release gates.
 5. `architecture/VOICE_ENGINE_BENCHMARK_PLAN.md` — benchmark methodology.
-6. Historical `AIHUB_*.md`, wake-word evidence, and diagnostic notes — preserved context, not current source of truth.
+6. Historical `AIHUB_*.md` and diagnostic notes — evidence/context, not current source of truth.
