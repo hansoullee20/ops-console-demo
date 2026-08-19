@@ -15,6 +15,19 @@ class VoiceAudioContractTest {
     }
 
     @Test
+    fun pcmFrameCarriesContinuityMetadata() {
+        val frame = PcmFrame(
+            samples = ShortArray(320),
+            capturedAtElapsedRealtimeNs = 123L,
+            sequence = 7L,
+            startSampleIndex = 2_240L,
+        )
+        assertEquals(7L, frame.sequence)
+        assertEquals(2_240L, frame.startSampleIndex)
+        assertEquals(2_560L, frame.endSampleIndexExclusive)
+    }
+
+    @Test
     fun wakeAndAsrContractsArePcmConsumersOnly() {
         val wakeMethods = WakeDetector::class.java.methods.map { it.name }.toSet()
         val asrMethods = StreamingAsrEngine::class.java.methods.map { it.name }.toSet()

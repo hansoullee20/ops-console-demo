@@ -10,11 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.channels.BufferOverflow
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -111,6 +111,8 @@ class AudioEngine(
         }
 
         val frame = ShortArray(FRAME_SAMPLES)
+        var nextSequence = 0L
+        var nextSampleIndex = 0L
         try {
             localRecord.startRecording()
             while (running.get()) {
@@ -122,8 +124,12 @@ class AudioEngine(
                     PcmFrame(
                         samples = samples,
                         capturedAtElapsedRealtimeNs = SystemClock.elapsedRealtimeNanos(),
+                        sequence = nextSequence,
+                        startSampleIndex = nextSampleIndex,
                     ),
                 )
+                nextSequence += 1L
+                nextSampleIndex += samples.size.toLong()
             }
         } finally {
             synchronized(recordLock) {
