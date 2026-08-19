@@ -16,10 +16,9 @@ The project is not waiting on an unresolved architecture decision. The current v
 - Active branch: `feat/voice-pipeline-v2`
 - Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
 - Base branch for the PR: `aihub-voice-test`
-- Last code milestone head verified before this documentation cleanup: `63d39792255ffe6d3a4d53e8b11a9c1885f0f980`
+- Current verified head: `ff4f08a2aae40e1ead811a512934ab7193d2d9cd`
+- Current verified CI: GitHub Actions run `#150` / run ID `32242653598` — success
 - Diagnostic/root-cause checkpoint preserved in history: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
-
-The documentation cleanup commits that follow the code milestone do not change runtime behavior.
 
 ## What works / what is established
 
@@ -52,6 +51,18 @@ PR #20 establishes:
 
 Production rule: wake, VAD, ASR, and diagnostics consume PCM. They do not create a competing `AudioRecord`.
 
+### PCM continuity integrity
+
+Commit `ff4f08a` adds the first SEC-006 audio-integrity layer:
+
+- every `PcmFrame` now carries a monotonic capture `sequence`;
+- every frame carries an absolute `startSampleIndex`;
+- `PcmContinuityTracker` detects gaps and out-of-order frames;
+- unit tests cover continuous input, skipped-frame gaps, out-of-order input, and reset epochs;
+- CI run #150 passed JVM tests, Android build, and the existing deterministic pre-build matrix.
+
+Important remaining integration rule: when the new ASR/router path is connected, any utterance with a detected PCM discontinuity must fail closed for physical-device execution until a clean utterance begins. Issue #24 remains open until that enforcement is wired into the real transcript/device path.
+
 ### Intent / device boundary
 
 Existing deterministic handling remains valuable and should be preserved:
@@ -77,14 +88,29 @@ For the current prototype, these remain development backends. Fresh Codex CLI ex
 - No final Korean ASR engine is selected.
 - `MainActivity` has not yet been migrated to the new `AudioEngine` path.
 - Android SpeechRecognizer Mode F is compatibility evidence only, not the target architecture.
+- PCM discontinuity is detectable but is not yet wired into ASR/device-command fail-closed routing because the new ASR/router path does not exist yet.
 - No production barge-in implementation yet.
 - No QNN/NPU optimization yet.
 - No real security-sensitive home-device integration yet.
 - Dedicated `project-okja` repository extraction has not yet been performed.
 
-## Next three engineering actions
+## Itemized execution plan
 
-### 1. Same-PCM benchmark harness
+### Task 1 — PCM integrity contract
+
+**Status: implementation complete; integration enforcement pending.**
+
+- Add sequence/sample-position metadata to `PcmFrame`. — DONE
+- Add consumer continuity detection. — DONE
+- Add unit tests for gap/out-of-order detection. — DONE
+- Verify CI. — DONE
+- Fail closed on discontinuous utterances in the eventual ASR/device router. — PENDING integration
+
+Tracked by issue #24.
+
+### Task 2 — Same-PCM benchmark harness
+
+**Status: NEXT ACTIVE ENGINEERING TASK.**
 
 Create a harness that feeds identical recorded PCM to candidate ASR engines without changing microphone ownership.
 
@@ -96,7 +122,9 @@ Primary comparisons:
 
 Measure transcript quality, connected wake+command preservation, first-partial latency, final latency, CPU, memory, and device stability.
 
-### 2. Fold4 local-ASR spike
+Tracked by issue #23.
+
+### Task 3 — Fold4 local-ASR spike
 
 Integrate the first sherpa-onnx Korean streaming model behind `StreamingAsrEngine` and validate on the Galaxy Z Fold4.
 
@@ -107,7 +135,7 @@ Initial acceptance target:
 - no Android SpeechRecognizer system cue on the final local path;
 - no duplicate command execution.
 
-### 3. VoiceSessionController
+### Task 4 — VoiceSessionController
 
 Move voice lifecycle authority out of `MainActivity` into an explicit state machine after the first PCM-fed ASR passes the device gate.
 
@@ -117,7 +145,31 @@ Required properties include:
 - no unnecessary second recognizer when command audio/transcript already exists;
 - bounded retries;
 - stale callback rejection;
-- deterministic MIC_OFF and TTS transitions.
+- deterministic MIC_OFF and TTS transitions;
+- reject device execution from an utterance marked PCM-discontinuous.
+
+### Task 5 — Wake engine benchmark
+
+Attach PCM-fed wake candidates without changing microphone ownership:
+
+- Porcupine low-level baseline;
+- sherpa-onnx KWS candidate.
+
+Measure false reject, false activations/hour, TV/background robustness, quiet/elderly speech, CPU and battery.
+
+### Task 6 — Production migration
+
+Only after the local ASR/wake gates are proven:
+
+- migrate `MainActivity` to `AudioEngine` + `VoiceSessionController`;
+- remove the old Gate -> release -> SpeechRecognizer production path;
+- separate diagnostic and release build surfaces.
+
+### Task 7 — Later release gates
+
+- dedicated `project-okja` repository extraction (#22);
+- deferred security release gates (#21);
+- archive legacy `AIHUB_*.md` after canonical docs remain stable (#25).
 
 ## Current blocker
 
