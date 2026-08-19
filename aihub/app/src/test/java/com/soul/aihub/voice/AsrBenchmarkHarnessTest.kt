@@ -44,6 +44,7 @@ class AsrBenchmarkHarnessTest {
         val case = RecordedPcmCase(
             id = "tv-on",
             pcm16 = pcm,
+            expectedTranscript = "옥자 TV 켜줘",
             expectedCommandSuffix = "TV 켜줘",
             preRollSamples = 160,
         )
@@ -59,6 +60,7 @@ class AsrBenchmarkHarnessTest {
         assertEquals(1L, engine.accepted[1].sequence)
         assertEquals(480L, engine.accepted[1].startSampleIndex)
         assertFalse(result.discontinuityDetected)
+        assertTrue(result.transcriptMatchesExpected == true)
         assertTrue(result.commandSuffixPreserved == true)
         assertEquals(40L, result.firstPartialLatencyMs)
         assertEquals(80L, result.finalLatencyMs)
@@ -81,6 +83,28 @@ class AsrBenchmarkHarnessTest {
             assertEquals(first.accepted[index].sequence, second.accepted[index].sequence)
             assertEquals(first.accepted[index].startSampleIndex, second.accepted[index].startSampleIndex)
         }
+    }
+
+    @Test
+    fun latencyIsRelativeToCaptureStartNotAbsoluteMonotonicTime() {
+        val startNs = 5_000_000_000L
+        val engine = RecordingEngine(
+            finalText = "옥자야 뭐하니",
+            partialAtNs = startNs + 25_000_000L,
+            finalAtNs = startNs + 75_000_000L,
+        )
+        val case = RecordedPcmCase(id = "clock", pcm16 = ShortArray(320))
+
+        val result = AsrBenchmarkHarness().run(
+            case = case,
+            engineName = "fake",
+            engine = engine,
+            captureStartElapsedRealtimeNs = startNs,
+        )
+
+        assertEquals(25L, result.firstPartialLatencyMs)
+        assertEquals(75L, result.finalLatencyMs)
+        assertEquals(startNs, engine.accepted.single().capturedAtElapsedRealtimeNs)
     }
 
     @Test
