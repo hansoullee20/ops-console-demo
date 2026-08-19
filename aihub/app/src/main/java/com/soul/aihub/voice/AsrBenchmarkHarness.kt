@@ -21,6 +21,9 @@ data class RecordedPcmCase(
         require(preRollSamples >= 0) { "preRollSamples must be non-negative" }
         require(preRollSamples <= pcm16.size) { "preRollSamples exceeds PCM length" }
     }
+
+    val expectsRecognition: Boolean
+        get() = !expectedTranscript.isNullOrBlank() || !expectedCommandSuffix.isNullOrBlank()
 }
 
 data class AsrBenchmarkResult(
@@ -32,6 +35,7 @@ data class AsrBenchmarkResult(
     val firstPartialLatencyMs: Long?,
     val finalLatencyMs: Long?,
     val discontinuityDetected: Boolean,
+    val recognitionExpectedButEmpty: Boolean,
     val updateCount: Int,
 )
 
@@ -119,6 +123,7 @@ class AsrBenchmarkHarness(
             firstPartialLatencyMs = latencyMs(firstPartialAtNs, captureStartElapsedRealtimeNs),
             finalLatencyMs = latencyMs(finalAtNs, captureStartElapsedRealtimeNs),
             discontinuityDetected = discontinuityDetected,
+            recognitionExpectedButEmpty = case.expectsRecognition && finalTranscript.isBlank(),
             updateCount = updates.size,
         )
     }
