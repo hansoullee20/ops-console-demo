@@ -18,6 +18,7 @@ import com.soul.aihub.voice.PcmContinuityTracker
 import com.soul.aihub.voice.RecordedPcmCase
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
 import com.soul.aihub.voice.SherpaStreamingAsrEngine
+import com.soul.aihub.voice.StreamingAsrEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -200,22 +201,41 @@ class LocalAsrBenchmarkActivity : Activity() {
 
     private fun runEngine(
         name: String,
-        factory: () -> com.soul.aihub.voice.StreamingAsrEngine,
+        factory: () -> StreamingAsrEngine,
     ): (AsrBenchmarkHarness, RecordedPcmCase) -> EngineOutcome = { harness, recorded ->
+        var engine: StreamingAsrEngine? = null
         try {
+            val initStartNs = SystemClock.elapsedRealtimeNanos()
+            engine = factory()
+            val initMs = (SystemClock.elapsedRealtimeNanos() - initStartNs) / 1_000_000L
+
+            // Replay timing starts only after the model/recognizer is initialized. Cold-start
+            // cost is reported separately so it cannot masquerade as ASR latency.
             val replayStartNs = SystemClock.elapsedRealtimeNanos()
-            val beforeNs = SystemClock.elapsedRealtimeNanos()
             val result = harness.run(
                 case = recorded,
                 engineName = name,
-                engine = factory(),
+                engine = engine,
                 captureStartElapsedRealtimeNs = replayStartNs,
             )
-            val processingMs = (SystemClock.elapsedRealtimeNanos() - beforeNs) / 1_000_000L
-            EngineOutcome(name = name, result = result, processingMs = processingMs, error = null)
+            val processingMs = (SystemClock.elapsedRealtimeNanos() - replayStartNs) / 1_000_000L
+            engine = null // harness.run() closes successful engines.
+            EngineOutcome(
+                name = name,
+                result = result,
+                initMs = initMs,
+                processingMs = processingMs,
+                error = null,
+            )
         } catch (t: Throwable) {
-            EngineOutcome(name = name, result = null, processingMs = null,
-                error = "${t.javaClass.simpleName}: ${t.message ?: "unknown"}")
+            try { engine?.close() } catch (_: Throwable) {}
+            EngineOutcome(
+                name = name,
+                result = null,
+                initMs = null,
+                processingMs = null,
+                error = "${t.javaClass.simpleName}: ${t.message ?: "unknown"}",
+            )
         }
     }
 
@@ -243,6 +263,7 @@ class LocalAsrBenchmarkActivity : Activity() {
         root.put("pcm_samples", pcmFile.length() / 2)
         outcomes.forEach { outcome ->
             val value = JSONObject()
+            value.put("init_ms", outcome.initMs ?: JSONObject.NULL)
             value.put("processing_ms", outcome.processingMs ?: JSONObject.NULL)
             value.put("error", outcome.error ?: JSONObject.NULL)
             outcome.result?.let { r ->
@@ -274,7 +295,8 @@ class LocalAsrBenchmarkActivity : Activity() {
                     append("  transcript: ").append(r.finalTranscript.ifBlank { "<EMPTY>" }).append("\n")
                     append("  suffix: ").append(r.commandSuffixPreserved).append("\n")
                     append("  silent-failure: ").append(r.recognitionExpectedButEmpty).append("\n")
-                    append("  processing: ").append(outcome.processingMs).append(" ms\n")
+                    append("  init: ").append(outcome.initMs).append(" ms\n")
+                    append("  replay/decode: ").append(outcome.processingMs).append(" ms\n")
                 }
             }
             append("\nSaved: ").append(pcm.name).append("\n").append(json.name)
@@ -317,6 +339,7 @@ class LocalAsrBenchmarkActivity : Activity() {
     data class EngineOutcome(
         val name: String,
         val result: AsrBenchmarkResult?,
+        val initMs: Long?,
         val processingMs: Long?,
         val error: String?,
     )
