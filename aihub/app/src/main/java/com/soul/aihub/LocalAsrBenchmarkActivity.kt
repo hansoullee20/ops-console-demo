@@ -14,6 +14,7 @@ import com.soul.aihub.voice.AsrBenchmarkHarness
 import com.soul.aihub.voice.AsrBenchmarkResult
 import com.soul.aihub.voice.AudioEngine
 import com.soul.aihub.voice.Pcm16UtteranceBuffer
+import com.soul.aihub.voice.PcmContinuityTracker
 import com.soul.aihub.voice.RecordedPcmCase
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
 import com.soul.aihub.voice.SherpaStreamingAsrEngine
@@ -144,6 +145,7 @@ class LocalAsrBenchmarkActivity : Activity() {
     private suspend fun captureFourSeconds(): ShortArray {
         val targetSamples = AudioEngine.SAMPLE_RATE_HZ * RECORD_SECONDS
         val buffer = Pcm16UtteranceBuffer(maxSamples = AudioEngine.SAMPLE_RATE_HZ * 5)
+        val continuity = PcmContinuityTracker()
         buffer.begin(ShortArray(0))
         val audio = AudioEngine(ringCapacityMs = AudioEngine.DEFAULT_RING_CAPACITY_MS)
         activeAudio = audio
@@ -154,7 +156,13 @@ class LocalAsrBenchmarkActivity : Activity() {
         ) {
             audio.frames
                 .takeWhile { buffer.sampleCount() < targetSamples }
-                .collect { frame -> buffer.append(frame.samples) }
+                .collect { frame ->
+                    val observation = continuity.observe(frame)
+                    check(observation.continuous) {
+                        "PCM capture discontinuity: ${observation.reason}"
+                    }
+                    buffer.append(frame.samples)
+                }
         }
 
         try {
@@ -162,6 +170,7 @@ class LocalAsrBenchmarkActivity : Activity() {
             withTimeout(6_000) { collector.await() }
         } finally {
             audio.stop()
+            collector.cancel()
         }
         return buffer.snapshot()
     }
