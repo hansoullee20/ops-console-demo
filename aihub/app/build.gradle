@@ -19,6 +19,13 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    // ASR model blobs are already binary/quantized and can be hundreds of MB. Avoid
+    // AGP reading them wholesale into heap for asset compression; keeping them
+    // uncompressed also gives native runtimes efficient AssetManager access.
+    androidResources {
+        noCompress += ['onnx', 'ort']
+    }
 }
 
 dependencies {
