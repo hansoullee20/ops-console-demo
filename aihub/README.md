@@ -1,71 +1,57 @@
-# AI Hub / Okja Voice Prototype
+# Project Okja / AI Hub
 
-> **Canonical project state / restart instructions:** [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md)  
-> **Working branch:** `aihub-voice-test`
+Project Okja is the current product direction for the Android household voice assistant work in this repository.
 
-## Current checkpoint
+> **Canonical status:** [`docs/STATUS.md`](docs/STATUS.md)
+>
+> **Canonical architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+>
+> **Security backlog:** [`docs/SECURITY_BACKLOG.md`](docs/SECURITY_BACKLOG.md)
 
-The end-to-end Android assistant path works:
+These three documents are the source of truth for current state, architecture, and deferred security work. Older `AIHUB_*.md`, wake-word evidence, experiment notes, and historical plans remain useful evidence, but they are not authoritative for the current implementation unless referenced by the canonical documents above.
 
-```text
-Android STT
-→ localhost TCP 127.0.0.1:8765
-→ persistent Claude Agent SDK in Ubuntu PRoot
-→ Android TTS
-```
+## Current development state
 
-The product/wake identity is unified as:
+The active architecture work is on `feat/voice-pipeline-v2` in draft PR #20.
 
-```text
-옥자 / Okja
-```
-
-The final wake backend must be local and fully free/open-source.
-
-### Latest wake-word result
-
-LiveKit WakeWord v2 training/export pipeline completed successfully in GitHub Actions:
+The current milestone establishes a **single-owner PCM audio pipeline**:
 
 ```text
-workflow: .github/workflows/okja-wakeword-v2.yml
-run: 31563550569
-head SHA: 7bd3965f8a8f4cb0cb579e1b6bfe8650897377ec
-pipeline: SUCCESS
-ONNX export: SUCCESS
+Microphone
+   |
+   v
+AudioEngine  <-- only AudioRecord owner
+   |
+   +--> PcmRingBuffer
+   +--> WakeDetector
+   +--> VAD
+   +--> Streaming ASR
+   +--> diagnostics
 ```
 
-But the generated v2 model is **not deployable yet**:
+The old production-style path (`QuietWakeGate -> release AudioRecord -> Android SpeechRecognizer`) is retained only as historical/diagnostic code until the new PCM-fed ASR path is device-validated.
 
-```text
-threshold 0.50
-recall 13.28%
-FPPH 2.66
-validation positives 128
-validation negatives 30,404
-validation duration 16.89 h
-```
+## Current priorities
 
-Therefore the next task is **diagnose/fix the v2 data/training problem and build a justified v3**, not Android integration of the current ONNX file.
+1. Keep the single-owner `AudioEngine` contract stable.
+2. Build a same-PCM benchmark harness.
+3. Benchmark sherpa-onnx Korean streaming ASR against Android SpeechRecognizer compatibility mode.
+4. Add wake detection as a PCM consumer; do not let wake/VAD/ASR open their own microphone.
+5. Replace the old MainActivity wake/recognizer path only after device acceptance.
 
-Current wake-word sources:
+## Repository layout
 
-```text
-wakeword/benchmark_melotts.py
-wakeword/generate_melotts_dataset.py
-wakeword/okja_test_voxcpm.yaml
-wakeword/okja_v2_melotts.yaml
-```
+- `app/` — Android application and current voice experiments.
+- `phone/` — local bridge, event contracts, deterministic intent/confirmation, device-command boundary.
+- `wakeword/` — wake-word research, benchmarks, datasets, and historical evidence.
+- `docs/` — current canonical project documentation and ADRs.
 
-Current Android experiment sources include:
+## Documentation rule
 
-```text
-app/src/main/java/com/soul/aihub/MainActivity.java
-app/src/main/java/com/soul/aihub/PerfActivity.java
-app/src/main/java/com/soul/aihub/PerfMeter.java
-app/src/main/java/com/soul/aihub/StableTemplateWakeActivity.java
-app/src/main/java/com/soul/aihub/TemplateWakeActivity.java
-```
+If two documents disagree:
 
-## Do not restart from the old Vosk idea
-
-Vosk was only a feasibility probe. The current engineering line is custom LiveKit WakeWord training with ONNX export. Read [`../AIHUB_HANDOFF.md`](../AIHUB_HANDOFF.md) before making changes; it contains the Fold4 environment, Claude bridge setup, wake performance history, fixed measurement protocol, exact v2 artifacts/metrics, unresolved work, and the next-session resume prompt.
+1. `docs/STATUS.md` wins for what is currently done / next / blocked.
+2. `docs/ARCHITECTURE.md` wins for intended production architecture.
+3. ADRs explain why a major architecture decision was made.
+4. `docs/SECURITY_BACKLOG.md` tracks known security work that is deliberately deferred.
+5. Historical `AIHUB_*.md` and evidence files are context, not active instructions.
