@@ -20,6 +20,9 @@
             android:name=".PerfActivity"
             android:exported="false" />
         <activity
+            android:name=".LocalAsrBenchmarkActivity"
+            android:exported="false" />
+        <activity
             android:name=".DiagnosticActivity"
             android:exported="true">
             <intent-filter>
