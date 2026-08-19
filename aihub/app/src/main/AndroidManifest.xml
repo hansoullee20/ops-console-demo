@@ -5,7 +5,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Okja Fold4 Diagnostic"
+        android:label="Okja Fold4 Mode F"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"
@@ -21,6 +21,9 @@
             android:exported="false" />
         <activity
             android:name=".DiagnosticActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ExternalAudioSourceActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

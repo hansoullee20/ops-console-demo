@@ -3,6 +3,11 @@ name: Verify and build AI Hub test APK
 on:
   workflow_dispatch:
   push:
+    branches: [ aihub-voice-test, diag/external-audio-source ]
+    paths:
+      - 'aihub/**'
+      - '.github/workflows/aihub-build.yml'
+  pull_request:
     branches: [ aihub-voice-test ]
     paths:
       - 'aihub/**'
