@@ -2,6 +2,8 @@
 
 Status: current target architecture for the family prototype and next production-oriented milestones.
 
+Revalidated: 2026-08-19 against current Android platform documentation and actively maintained sherpa-onnx / Picovoice upstream documentation.
+
 This document is authoritative for **what the system should become**. `STATUS.md` is authoritative for **what is actually implemented today**.
 
 ## Product principle
@@ -30,14 +32,16 @@ Wake-word, VAD, ASR, and diagnostics are PCM consumers. They must not independen
 
 Canonical capture format:
 
-- 16 kHz
-- mono
-- signed PCM16
-- 20 ms frames (320 samples)
-- circular buffer capacity: 3000 ms initially
-- actual ASR pre-roll: configurable, initially 1500 ms
+- 16 kHz;
+- mono;
+- signed PCM16;
+- 20 ms frames (320 samples);
+- circular buffer capacity: 3000 ms initially;
+- actual ASR pre-roll: configurable, initially 1500 ms.
 
 Capacity and pre-roll are intentionally independent. At this format, several seconds of raw PCM are inexpensive in memory.
+
+PCM continuity is part of command integrity. Frames carry sequence/sample-position metadata and a discontinuous utterance must not authorize a physical command.
 
 ## Target voice flow
 
@@ -60,7 +64,7 @@ Wake detected                                      |
    +--> continue live PCM from same AudioRecord
    |
    v
-StreamingAsrEngine
+Local PCM-fed ASR
    |
    v
 Transcript Router
@@ -85,33 +89,25 @@ There is no `AudioRecord -> release -> SpeechRecognizer opens microphone` handof
 
 Natural single-utterance speech is a product requirement:
 
-- `옥자야 뭐하니`
-- `옥자 TV 켜줘`
-- `옥자 에어컨 꺼줘`
+- `옥자야 뭐하니`;
+- `옥자 TV 켜줘`;
+- `옥자 에어컨 꺼줘`.
 
 When wake is detected, ASR receives buffered PCM from before the wake decision plus continuing live PCM from the same capture session.
 
 The command suffix must not be discarded simply because the wake phrase was detected in the same utterance.
 
-If the transcript is already:
-
-`옥자야 TV 켜줘`
-
-then routing should normalize/strip the wake prefix and process:
-
-`TV 켜줘`
-
-without launching another microphone/recognizer session.
+If the transcript is already `옥자야 TV 켜줘`, routing should normalize/strip the wake prefix and process `TV 켜줘` without launching another microphone/recognizer session.
 
 ## Wake detector contract
 
 Wake detection is pluggable.
 
-Candidates may include:
+Current candidate order:
 
-- Porcupine low-level PCM API as a baseline;
-- sherpa-onnx keyword spotting if Korean/custom-keyword quality is sufficient;
-- other local PCM-fed detectors proven by the same replay/device benchmark.
+1. Porcupine low-level PCM API as the Android-ready baseline. Use the low-level API only; the high-level Manager owns microphone capture and therefore does not fit Okja's topology.
+2. sherpa-onnx keyword spotting as a research candidate only after a Korean-capable model/tokenization path is demonstrated. Current documented pretrained KWS models/APKs are Chinese/English, so Korean readiness must not be assumed.
+3. Other local PCM-fed detectors only if proven by the same replay/device benchmark.
 
 Rules:
 
@@ -122,21 +118,26 @@ Rules:
 
 ## ASR contract
 
-Primary architecture direction: local PCM-fed Korean ASR behind `StreamingAsrEngine`.
+Primary architecture direction: local PCM-fed Korean ASR behind the Okja ASR contract.
 
-First benchmark targets:
+Current benchmark order after the 2026-08 upstream recheck:
 
-- sherpa-onnx Korean streaming Zipformer;
-- sherpa Moonshine tiny-ko where applicable;
-- Android SpeechRecognizer Mode F as a compatibility comparison/fallback experiment only.
+1. **sherpa-onnx Moonshine tiny-ko v2** — first primary local Korean benchmark. The initial Okja adapter is bounded utterance-scoped/offline decode and therefore does not pretend to expose native partial streaming; sherpa's official Android path combines Moonshine with VAD for real-time/simulated-streaming use.
+2. **sherpa Korean streaming Zipformer** — short fail-fast smoke before any long benchmark. Upstream issue `k2-fsa/sherpa-onnx#2886` remains open and reports silent empty transcription from the Korean streaming models on Android. A clean Fold4/v1.13.4 smoke can clear that concern for our environment; an empty positive result removes this model from the primary path.
+3. **Android SpeechRecognizer Mode F** — compatibility comparison/fallback experiment only.
+4. **SenseVoice** — optional later local fallback if the dedicated Korean candidates are unsuitable.
 
-Android SpeechRecognizer is not the target continuous production ASR because its implementation behavior and microphone ownership are vendor/service-dependent.
+Android SpeechRecognizer is not the target continuous production ASR. Current Android documentation still says the API is not intended for continuous recognition, and `EXTRA_AUDIO_SOURCE` is implementation-dependent: an implementation that does not support it may open its own microphone.
+
+No engine is selected for production by compile success alone. Fold4 corpus results decide the engine.
 
 ## VAD
 
 VAD is another PCM consumer. A sherpa/Silero-based VAD is a natural candidate if it reduces runtime/dependency complexity.
 
 VAD must not become a second capture owner.
+
+For Moonshine, VAD can provide the utterance boundary while the model performs bounded offline decode; this is compatible with the one-microphone architecture because both consume the same PCM bus.
 
 ## Voice session state
 
@@ -164,6 +165,7 @@ Required invariants:
 6. TTS does not recursively trigger wake/command execution.
 7. MIC_OFF actually stops capture/inference.
 8. Device execution never depends solely on free-form LLM output.
+9. PCM-discontinuous utterances fail closed for physical-device authorization.
 
 ## Deterministic intent before AI
 
@@ -211,6 +213,10 @@ Always-listening behavior must eventually respect Android foreground-service and
 
 The architecture should support a microphone foreground service, but this should be added after the core PCM pipeline and device benchmarks are stable rather than mixed into the first ASR integration.
 
+## Runtime optimization
+
+Start with CPU / standard ONNX Runtime. QNN/NPU is a later optimization after the chosen Korean ASR and wake path pass accuracy, continuity, lifecycle, and battery gates. Accelerator support changes quickly and must not determine the first architecture.
+
 ## Diagnostics
 
 Diagnostics are first-class but not production UI.
@@ -221,6 +227,7 @@ Keep:
 - PCM/replay evidence;
 - recording/playback configuration monitoring where useful;
 - model/engine version identifiers;
+- model/source hashes and benchmark provenance;
 - exported benchmark evidence.
 
 Move long-term diagnostics into a debug/diagnostic build boundary so production does not ship experimental Activities or verbose household traces.
@@ -235,7 +242,8 @@ Before broader deployment or sensitive actuators, the architecture must add:
 - actuator-boundary authorization;
 - command risk tiers;
 - production/diagnostic build separation;
-- least-privilege AI/backend execution.
+- least-privilege AI/backend execution;
+- pinned/reviewed native runtime and model provenance for release artifacts.
 
 ## Repository direction
 
