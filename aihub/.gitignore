@@ -1,0 +1,2 @@
+# Large local ASR model assets are provisioned for device builds, not committed.
+app/src/main/assets/sherpa-onnx-streaming-zipformer-korean-2024-06-16/
