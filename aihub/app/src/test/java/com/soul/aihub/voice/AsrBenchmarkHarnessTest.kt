@@ -37,6 +37,13 @@ class AsrBenchmarkHarnessTest {
         }
     }
 
+    private class EmptyEngine : StreamingAsrEngine {
+        override fun begin(preRollPcm16: ShortArray) = Unit
+        override fun accept(frame: PcmFrame): AsrUpdate? = null
+        override fun finish(): AsrUpdate = AsrUpdate("", true, 50_000_000L)
+        override fun reset() = Unit
+    }
+
     @Test
     fun replaysExactPcmWithCanonicalFrameMetadata() {
         val pcm = ShortArray(800) { it.toShort() }
@@ -60,6 +67,7 @@ class AsrBenchmarkHarnessTest {
         assertEquals(1L, engine.accepted[1].sequence)
         assertEquals(480L, engine.accepted[1].startSampleIndex)
         assertFalse(result.discontinuityDetected)
+        assertFalse(result.recognitionExpectedButEmpty)
         assertTrue(result.transcriptMatchesExpected == true)
         assertTrue(result.commandSuffixPreserved == true)
         assertEquals(40L, result.firstPartialLatencyMs)
@@ -119,6 +127,32 @@ class AsrBenchmarkHarnessTest {
         val result = AsrBenchmarkHarness().run(case, "fake", engine)
 
         assertFalse(result.commandSuffixPreserved == true)
+        assertFalse(result.recognitionExpectedButEmpty)
         assertEquals("옥자", result.finalTranscript)
+    }
+
+    @Test
+    fun flagsSilentRecognizerFailureForPositiveCase() {
+        val case = RecordedPcmCase(
+            id = "positive-empty",
+            pcm16 = ShortArray(640),
+            expectedTranscript = "옥자야 뭐하니",
+            expectedCommandSuffix = "뭐하니",
+        )
+
+        val result = AsrBenchmarkHarness().run(case, "empty", EmptyEngine())
+
+        assertTrue(result.recognitionExpectedButEmpty)
+        assertFalse(result.transcriptMatchesExpected == true)
+        assertFalse(result.commandSuffixPreserved == true)
+    }
+
+    @Test
+    fun emptyTranscriptIsNotFailureForExplicitNegativeCase() {
+        val case = RecordedPcmCase(id = "negative-silence", pcm16 = ShortArray(640))
+
+        val result = AsrBenchmarkHarness().run(case, "empty", EmptyEngine())
+
+        assertFalse(result.recognitionExpectedButEmpty)
     }
 }
