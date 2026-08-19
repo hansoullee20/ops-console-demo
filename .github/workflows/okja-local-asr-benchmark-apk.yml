@@ -6,6 +6,10 @@ on:
     branches: [ feat/voice-pipeline-v2 ]
     paths:
       - '.github/workflows/okja-local-asr-benchmark-apk.yml'
+  pull_request:
+    branches: [ aihub-voice-test ]
+    paths:
+      - '.github/workflows/okja-local-asr-benchmark-apk.yml'
 
 jobs:
   build-benchmark-apk:
@@ -14,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
