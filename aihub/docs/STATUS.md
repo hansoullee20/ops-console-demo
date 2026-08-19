@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WORKING — TARGET-DEVICE BENCHMARK PREPARATION**
+**STATE: NEED INPUT — FIRST FOLD4 SAME-PCM ASR TRIAL**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
@@ -14,10 +14,14 @@ Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
 Base: `aihub-voice-test`
 Root-cause checkpoint preserved in history: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
 
-Latest reviewed runtime-code head before this status update: `4c3c77d1ddc504c2d749d0135c652e8f07936399`
-Verified normal CI for that code: run `#208` / `32247316507` — success (failure matrix, JVM tests, debug APK build, artifact upload).
+Latest reviewed runtime/build-config head: `94403446c965b5828b71495919e9bcc8d207f5ba`.
+Normal CI: run `#213` / `32247600131` — success (failure matrix, JVM tests, debug APK build, artifact upload).
 
-A separate model-provisioned benchmark APK workflow is now tracked as `Build Okja local ASR benchmark APK`; its first PR-visible run is run `#3` / `32247367868`.
+Model-provisioned benchmark CI: `Build Okja local ASR benchmark APK` run `#5` / `32247600046` — success.
+Artifact: `okja-local-asr-benchmark-apk`, artifact ID `9363248026`.
+Artifact bundle digest: `sha256:585f1736843d4fb29a35d03367a2a9d5539ef0dd3ae37a58bbb5c38b35ab6f6c`.
+Benchmark APK SHA-256: `3faa4902253c169484c8f50517cc93637729bffe0e28eab40f0c0ee054829896`.
+Benchmark APK size: `339552580` bytes.
 
 ## 2026-08 current-source revalidation
 
@@ -90,21 +94,20 @@ This is compatible with the target architecture: VAD can establish utterance bou
 
 ### 4. Model provenance tooling
 
-Provisioning scripts now exist for Moonshine tiny-ko and Korean streaming Zipformer.
+Provisioning scripts exist for Moonshine tiny-ko and Korean streaming Zipformer.
 
-They:
+They download from official sherpa-onnx release locations, record archive/file SHA-256 hashes, optionally enforce `OKJA_MODEL_SHA256`, and explicitly distinguish first-seen benchmark provenance from a release trust anchor.
 
-- download from official sherpa-onnx release locations;
-- record archive SHA-256;
-- record selected model-file SHA-256 hashes;
-- optionally enforce an expected `OKJA_MODEL_SHA256`;
-- explicitly warn that a first-seen digest is benchmark provenance, not a release trust anchor.
+Hashes recorded by the successful benchmark build:
 
-Release-grade model hash pinning remains future work after the benchmark candidate is selected.
+- Moonshine archive: `d3b6c5390a7859c9ef20ff4f20b0766fcbad1dc06c0f509fe4840a3a302112dc`.
+- Korean streaming Zipformer archive: `e346a5882a409650472be17326237e24df7bf409db6b4a8a52e1a61422bf2500`.
+
+Release-grade reviewed hash pinning remains future work after the benchmark candidate is selected.
 
 ### 5. Fold4 same-PCM benchmark Activity
 
-`LocalAsrBenchmarkActivity` now:
+`LocalAsrBenchmarkActivity`:
 
 - captures one four-second case using `AudioEngine` only;
 - validates live capture continuity and fails on a PCM gap;
@@ -116,32 +119,37 @@ Release-grade model hash pinning remains future work after the benchmark candida
 
 The Activity is exposed only as an additional launcher entry in the current diagnostic build.
 
-Review history: the first version failed CI because of two Kotlin compile mistakes (`PcmContinuityStatus.reason` and `assetManager`). Those were diagnosed from CI and fixed. A later review also separated cold model initialization from replay/decode timing. Normal CI run #208 is green after those fixes.
+Review history:
+
+1. The first Activity version failed CI because of two Kotlin compile mistakes (`PcmContinuityStatus.reason` and `assetManager`). CI logs identified both; they were fixed.
+2. Review then separated cold model initialization from replay/decode timing so model load cannot masquerade as ASR latency.
+3. The first model-provisioned APK build (workflow run `#3`) failed at `compressDebugAssets` with Gradle `Java heap space` while packaging ~200 MB of model assets. The model downloads themselves succeeded.
+4. The build configuration was corrected to keep `.onnx` / `.ort` model blobs uncompressed. Normal CI run `#213` and model-provisioned run `#5` are green after the fix.
 
 ## Current benchmark order
 
-### Task A — model-provisioned benchmark APK — ACTIVE
+### Task A — model-provisioned benchmark APK — DONE / REVIEWED
 
-Build an APK containing both official Korean model assets and record APK/model provenance.
+Green workflow: run `#5` / `32247600046`.
 
-Workflow: `.github/workflows/okja-local-asr-benchmark-apk.yml`.
+The APK contains both official Korean model asset sets and includes recorded provenance in the workflow artifact.
 
-### Task B — first Fold4 trial — NEXT EXTERNAL GATE
+### Task B — first Fold4 trial — NEED INPUT
 
-Use the `Okja ASR Benchmark` launcher and run exactly one first case:
+Install the model-provisioned `Okja ASR Benchmark` APK and run exactly one first case:
 
 `옥자야 뭐하니`
 
-The app will capture once and feed the same PCM to:
+The app captures once and feeds the same PCM to:
 
 1. Moonshine tiny-ko;
 2. Korean streaming Zipformer smoke.
 
-Do not infer engine quality until this target-device evidence exists.
+For this first trial, record only the two displayed transcripts, suffix result, silent-failure flag, model-init time, and replay/decode time. Do not run the 100-trial acceptance set yet.
 
 ### Task C — expand same-PCM corpus
 
-If the first trial is healthy, collect repeated connected cases:
+Only after the first trial is reviewed, collect repeated connected cases:
 
 - `옥자야 뭐하니`;
 - `옥자 TV 켜줘`;
@@ -189,9 +197,9 @@ After ASR/wake acceptance:
 
 ## Current blocker
 
-No architecture or compile blocker.
+The engineering path is not blocked. The next gate requires physical Galaxy Z Fold4 audio/device evidence that CI cannot produce.
 
-The only meaningful external gate is real Fold4 speech evidence after the model-provisioned benchmark APK is green. Until that trial is performed, do not claim Korean model accuracy, latency, CPU, battery, or production readiness.
+Until that trial exists, do not claim Korean model accuracy, Fold4 latency, CPU, battery, or production readiness.
 
 ## Documentation hierarchy
 
