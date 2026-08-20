@@ -132,6 +132,50 @@ class AsrBenchmarkHarnessTest {
     }
 
     @Test
+    fun spokenKoreanTvAliasPreservesDeviceCommandSuffix() {
+        val engine = RecordingEngine("복자 티비 켜줘.")
+        val case = RecordedPcmCase(
+            id = "tv-spoken-alias",
+            pcm16 = ShortArray(320),
+            expectedTranscript = "옥자 TV 켜줘",
+            expectedCommandSuffix = "TV 켜줘",
+        )
+
+        val result = AsrBenchmarkHarness().run(case, "fake", engine)
+
+        assertFalse(result.transcriptMatchesExpected == true)
+        assertTrue(result.commandSuffixPreserved == true)
+    }
+
+    @Test
+    fun commandSuffixIgnoresPunctuationAndSpacingOnly() {
+        val engine = RecordingEngine("옥자에어컨 꺼줘.")
+        val case = RecordedPcmCase(
+            id = "ac-spacing",
+            pcm16 = ShortArray(320),
+            expectedCommandSuffix = "에어컨 꺼줘",
+        )
+
+        val result = AsrBenchmarkHarness().run(case, "fake", engine)
+
+        assertTrue(result.commandSuffixPreserved == true)
+    }
+
+    @Test
+    fun differentCommandVerbDoesNotPassSemanticSuffixGate() {
+        val engine = RecordingEngine("옥자 에어컨 꺼져.")
+        val case = RecordedPcmCase(
+            id = "ac-wrong-verb",
+            pcm16 = ShortArray(320),
+            expectedCommandSuffix = "에어컨 꺼줘",
+        )
+
+        val result = AsrBenchmarkHarness().run(case, "fake", engine)
+
+        assertFalse(result.commandSuffixPreserved == true)
+    }
+
+    @Test
     fun flagsSilentRecognizerFailureForPositiveCase() {
         val case = RecordedPcmCase(
             id = "positive-empty",
