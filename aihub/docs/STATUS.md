@@ -1,211 +1,185 @@
 # Project Okja — Current Status
 
-Last updated: 2026-08-19 (Asia/Seoul)
+Last updated: 2026-08-20 (Asia/Seoul)
 
 This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: NEED INPUT — FIRST FOLD4 SAME-PCM ASR TRIAL**
+**STATE: NEED INPUT — SECOND FOLD4 SAME-PCM ASR TRIAL**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
 Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
 Base: `aihub-voice-test`
-Root-cause checkpoint preserved in history: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
+Root-cause checkpoint: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
 
-Latest reviewed runtime/build-config head: `94403446c965b5828b71495919e9bcc8d207f5ba`.
-Normal CI: run `#213` / `32247600131` — success (failure matrix, JVM tests, debug APK build, artifact upload).
-
-Model-provisioned benchmark CI: `Build Okja local ASR benchmark APK` run `#5` / `32247600046` — success.
-Artifact: `okja-local-asr-benchmark-apk`, artifact ID `9363248026`.
-Artifact bundle digest: `sha256:585f1736843d4fb29a35d03367a2a9d5539ef0dd3ae37a58bbb5c38b35ab6f6c`.
+Verified normal CI: run `#213` / `32247600131` — success.
+Verified model-provisioned benchmark CI: run `#5` / `32247600046` — success.
 Benchmark APK SHA-256: `3faa4902253c169484c8f50517cc93637729bffe0e28eab40f0c0ee054829896`.
-Benchmark APK size: `339552580` bytes.
 
-## 2026-08 current-source revalidation
+## Current architecture
 
-The execution order was rechecked against current Android platform documentation and actively maintained sherpa-onnx / Picovoice upstream sources before continuing.
-
-The architecture remains correct:
-
-- exactly one `AudioRecord` owner (`AudioEngine`);
-- wake/VAD/ASR consume caller-owned PCM;
-- ring-buffer/pre-roll continuity replaces microphone handoff;
-- deterministic device routing precedes generative AI;
-- Android SpeechRecognizer is compatibility evidence, not the continuous production ASR.
-
-Two implementation priorities changed:
-
-1. `sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27` is now the first primary Korean local-ASR benchmark.
-2. Korean streaming Zipformer is now a short fail-fast Fold4 smoke before any long benchmark because upstream issue `k2-fsa/sherpa-onnx#2886` remains open and reports empty Android transcription from both Korean streaming variants.
-
-Wake priority also changed: Porcupine low-level PCM is the Android-ready Korean baseline. sherpa KWS remains a research candidate until a Korean-capable model/tokenization path is demonstrated; the currently documented pretrained KWS models/APKs are Chinese/English.
-
-## Established audio architecture
-
-- `AudioEngine` is the only production microphone owner.
-- Canonical audio is 16 kHz, mono, signed PCM16, 20 ms frames.
-- `PcmRingBuffer` provides bounded pre-roll without releasing/reacquiring the microphone.
-- Wake/VAD/ASR/diagnostics are PCM consumers and must not create their own `AudioRecord`.
+- `AudioEngine` is the sole production `AudioRecord` owner.
+- Canonical audio: 16 kHz, mono, PCM16, 20 ms frames.
+- Wake/VAD/ASR/diagnostics consume shared PCM and must not acquire the microphone independently.
+- `PcmRingBuffer` supplies pre-roll without microphone handoff.
 - `PcmFrame` carries monotonic sequence/sample-position metadata.
-- `PcmContinuityTracker` detects dropped/out-of-order audio.
-- `UtteranceAudioIntegrityGate` fails closed after a capture gap until a clean utterance begins.
+- `PcmContinuityTracker` and `UtteranceAudioIntegrityGate` detect/fail closed on PCM loss.
+- Deterministic device routing stays ahead of generative AI.
+- Android `SpeechRecognizer` / Mode F remains compatibility evidence, not the continuous production path.
 
-Issue #24 remains open only for wiring this integrity gate into the future transcript -> physical-device authorization path.
+## 2026-08 source revalidation
+
+The execution order was rechecked against current Android platform documentation and maintained sherpa-onnx / Picovoice sources.
+
+Current benchmark priority:
+
+1. sherpa Moonshine tiny-ko v2 as first primary Korean local-ASR candidate;
+2. Korean streaming Zipformer as a short fail-fast comparison because of upstream Android empty-output reports;
+3. Porcupine low-level PCM as the first Android-ready Korean wake baseline;
+4. sherpa KWS only after Korean model/tokenization support is demonstrated.
 
 ## Completed / reviewed engineering work
 
-### 1. Same-PCM replay core
+### PCM and benchmark core
 
-`AsrBenchmarkHarness`:
+- single-owner `AudioEngine`;
+- 3 s ring buffer / configurable pre-roll;
+- PCM sequence and absolute sample-position metadata;
+- continuity tracking and utterance integrity gate;
+- same-PCM `AsrBenchmarkHarness`;
+- exact transcript / command-suffix / silent-empty checks;
+- monotonic replay timing regression test;
+- bounded utterance buffer that fails rather than silently truncating.
 
-- replays identical PCM into interchangeable ASR engines;
-- preserves canonical frame sequence/sample-position metadata;
-- measures transcript/suffix preservation and replay timing;
-- has a regression test ensuring latency is relative to the explicit monotonic replay origin;
-- reports `recognitionExpectedButEmpty` so a positive case that silently produces no text cannot look like success.
+Review previously caught and fixed an absolute-clock latency bug.
 
-Review after implementation caught and fixed the original absolute-clock latency bug.
-
-### 2. Korean Zipformer adapter
-
-`SherpaStreamingAsrEngine`:
-
-- uses pinned sherpa-onnx Android runtime `v1.13.4`;
-- consumes only supplied PCM/pre-roll;
-- owns no microphone;
-- uses the official Korean streaming model configuration.
-
-It remains in the codebase for a short Fold4 smoke, but is no longer presumed to be the preferred production engine because of the current upstream empty-output issue.
-
-### 3. Korean Moonshine benchmark adapter
+### Korean local ASR adapters
 
 `SherpaMoonshineBenchmarkEngine`:
 
-- uses current sherpa-onnx Korean Moonshine tiny-ko v2 model type `51`;
-- consumes supplied pre-roll + live PCM only;
-- buffers one bounded utterance in `Pcm16UtteranceBuffer`;
-- fails on buffer overflow rather than silently truncating command speech;
-- performs utterance-end offline decode and therefore intentionally exposes final-only output in this first adapter;
-- owns no microphone.
+- current Korean Moonshine tiny-ko model;
+- supplied PCM only, no microphone ownership;
+- bounded utterance decode;
+- final-only first benchmark adapter.
 
-This is compatible with the target architecture: VAD can establish utterance boundaries while both VAD and Moonshine consume the same PCM bus.
+`SherpaStreamingAsrEngine`:
 
-### 4. Model provenance tooling
+- sherpa-onnx Android runtime pinned to `v1.13.4`;
+- official Korean streaming Zipformer configuration;
+- supplied PCM only, no microphone ownership.
 
-Provisioning scripts exist for Moonshine tiny-ko and Korean streaming Zipformer.
-
-They download from official sherpa-onnx release locations, record archive/file SHA-256 hashes, optionally enforce `OKJA_MODEL_SHA256`, and explicitly distinguish first-seen benchmark provenance from a release trust anchor.
-
-Hashes recorded by the successful benchmark build:
-
-- Moonshine archive: `d3b6c5390a7859c9ef20ff4f20b0766fcbad1dc06c0f509fe4840a3a302112dc`.
-- Korean streaming Zipformer archive: `e346a5882a409650472be17326237e24df7bf409db6b4a8a52e1a61422bf2500`.
-
-Release-grade reviewed hash pinning remains future work after the benchmark candidate is selected.
-
-### 5. Fold4 same-PCM benchmark Activity
+### Fold4 benchmark surface
 
 `LocalAsrBenchmarkActivity`:
 
-- captures one four-second case using `AudioEngine` only;
-- validates live capture continuity and fails on a PCM gap;
-- stops microphone capture before creating either recognizer;
-- saves the raw PCM16 case;
-- replays that exact PCM through Moonshine first and Zipformer second;
-- records transcript, exact/suffix result, silent-empty failure, model-init time, and replay/decode time to JSON;
-- keeps model initialization separate from ASR replay timing.
+- captures one four-second PCM case through `AudioEngine`;
+- checks capture continuity;
+- stops capture before recognizers are instantiated;
+- saves raw PCM16;
+- replays the identical PCM to Moonshine and Zipformer;
+- reports transcript, command-suffix preservation, silent-empty result, model-init time, replay/decode time;
+- saves JSON evidence.
 
-The Activity is exposed only as an additional launcher entry in the current diagnostic build.
+Post-task review caught/fixed Kotlin compile errors, cold model-init timing contamination, and AGP asset-compression heap exhaustion. `.onnx` / `.ort` model assets are now packaged uncompressed.
 
-Review history:
+## Fold4 evidence
 
-1. The first Activity version failed CI because of two Kotlin compile mistakes (`PcmContinuityStatus.reason` and `assetManager`). CI logs identified both; they were fixed.
-2. Review then separated cold model initialization from replay/decode timing so model load cannot masquerade as ASR latency.
-3. The first model-provisioned APK build (workflow run `#3`) failed at `compressDebugAssets` with Gradle `Java heap space` while packaging ~200 MB of model assets. The model downloads themselves succeeded.
-4. The build configuration was corrected to keep `.onnx` / `.ort` model blobs uncompressed. Normal CI run `#213` and model-provisioned run `#5` are green after the fix.
+### Trial 1 — 2026-08-20 — `옥자야 뭐하니`
 
-## Current benchmark order
+Target: Galaxy Z Fold4.
+One recorded PCM case was replayed unchanged to both engines.
 
-### Task A — model-provisioned benchmark APK — DONE / REVIEWED
+Moonshine tiny-ko:
 
-Green workflow: run `#5` / `32247600046`.
+- transcript: `복자야 뭐하니?`
+- command suffix preserved: `true`
+- silent failure: `false`
+- model init: `603 ms`
+- replay/decode: `151 ms`
 
-The APK contains both official Korean model asset sets and includes recorded provenance in the workflow artifact.
+Korean streaming Zipformer smoke:
 
-### Task B — first Fold4 trial — NEED INPUT
+- transcript: `뭐하니?`
+- command suffix preserved: `true`
+- silent failure: `false`
+- model init: `1266 ms`
+- replay/decode: `422 ms`
 
-Install the model-provisioned `Okja ASR Benchmark` APK and run exactly one first case:
+Saved device evidence shown by benchmark UI:
 
-`옥자야 뭐하니`
+- `1787193143356-0.pcm16le`
+- `1787193143356-0.json`
 
-The app captures once and feeds the same PCM to:
+Review of Trial 1:
 
-1. Moonshine tiny-ko;
-2. Korean streaming Zipformer smoke.
+- Same-PCM path is functioning on Fold4.
+- Both engines preserved the conversational/command suffix `뭐하니`.
+- Moonshine was faster in both cold init and decode for this one case.
+- Neither engine exactly recognized the wake prefix: Moonshine changed `옥자야` to `복자야`; Zipformer omitted it entirely.
+- Zipformer did **not** reproduce a total silent-empty output on this trial, so the upstream issue is not assumed universal on this Fold4/runtime combination.
+- One trial is insufficient for accuracy or production-readiness claims.
 
-For this first trial, record only the two displayed transcripts, suffix result, silent-failure flag, model-init time, and replay/decode time. Do not run the 100-trial acceptance set yet.
+## Next execution order
+
+### Task B2 — second Fold4 same-PCM trial — NEXT
+
+Run exactly one case:
+
+`옥자 TV 켜줘`
+
+Record the same displayed fields for both engines. The key question is whether the actionable command suffix `TV 켜줘` survives even if the wake token is misrecognized or omitted.
 
 ### Task C — expand same-PCM corpus
 
-Only after the first trial is reviewed, collect repeated connected cases:
+After review of the second trial, continue one hardware test at a time with:
 
-- `옥자야 뭐하니`;
-- `옥자 TV 켜줘`;
 - `옥자 에어컨 꺼줘`;
-- quiet speech;
+- repeated connected utterances;
+- quieter speech;
 - TV/background negatives.
 
-Measure exact/suffix accuracy, WER/CER where useful, model init, decode/final latency, CPU/PSS, PCM gaps, and later thermal/battery behavior.
-
-If Zipformer reproduces the upstream silent-empty failure on current Fold4/v1.13.4, record it and stop spending primary benchmark time on that model.
+Only then calculate exact accuracy / WER-CER and collect CPU/PSS/thermal/battery evidence.
 
 ### Task D — VoiceSessionController
 
-After at least one PCM-fed local ASR passes the Fold4 gate:
+After at least one PCM-fed local ASR demonstrates acceptable command continuity:
 
-- move lifecycle authority out of `MainActivity`;
-- preserve the already-captured command suffix;
-- enforce one capture owner / one utterance decoder path;
-- reject stale callbacks;
-- bound retries;
+- move voice lifecycle authority out of `MainActivity`;
+- preserve already-captured command suffixes;
+- enforce one capture owner / one utterance decode path;
+- reject stale callbacks and bound retries;
 - make MIC_OFF/TTS transitions deterministic;
 - require clean PCM integrity before physical command authorization.
 
 ### Task E — wake benchmark
 
-Compare PCM-fed wake candidates without changing microphone ownership:
-
-1. Porcupine low-level Korean/custom wake baseline;
+1. Porcupine low-level Korean/custom wake baseline.
 2. sherpa KWS only if Korean support/model evidence is established.
 
-### Task F — production migration and Android lifecycle
+### Task F — production migration
 
 After ASR/wake acceptance:
 
 - migrate `MainActivity` to `AudioEngine` + `VoiceSessionController`;
-- remove the old Gate -> release -> SpeechRecognizer production path;
-- add the microphone foreground-service lifecycle through a visible/user-authorized start flow required by current Android while-in-use microphone restrictions;
+- remove old Gate -> release -> `SpeechRecognizer` production topology;
+- add current-Android microphone foreground-service lifecycle through a visible/user-authorized start flow;
 - separate diagnostic and release build surfaces.
 
-### Later release gates
-
-- dedicated `project-okja` repository extraction (#22);
-- deferred security release gates (#21);
-- archive legacy `AIHUB_*.md` after canonical docs remain stable (#25).
+Later release gates remain tracked separately: dedicated repo extraction (#22), deferred security work (#21), and legacy-doc archive (#25).
 
 ## Current blocker
 
-The engineering path is not blocked. The next gate requires physical Galaxy Z Fold4 audio/device evidence that CI cannot produce.
+No code/architecture blocker.
 
-Until that trial exists, do not claim Korean model accuracy, Fold4 latency, CPU, battery, or production readiness.
+The next evidence gate is one physical Fold4 trial of `옥자 TV 켜줘`. Do not claim model accuracy, CPU/battery, or production readiness before the repeated device corpus exists.
 
 ## Documentation hierarchy
 
 1. `STATUS.md` — current state and next actions.
-2. `ARCHITECTURE.md` — intended production architecture.
+2. `ARCHITECTURE.md` — intended architecture.
 3. `architecture/ADR-*.md` — decision rationale.
-4. `SECURITY_BACKLOG.md` — known security work and release gates.
-5. `architecture/VOICE_ENGINE_BENCHMARK_PLAN.md` — current-source benchmark methodology.
-6. Historical `AIHUB_*.md` and diagnostic notes — evidence/context, not current source of truth.
+4. `SECURITY_BACKLOG.md` — deferred security/release gates.
+5. `architecture/VOICE_ENGINE_BENCHMARK_PLAN.md` — benchmark methodology.
+6. Historical `AIHUB_*.md` and diagnostic notes — evidence only.
