@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WAITING — SENSEVOICE MODEL-PROVISIONED BENCHMARK ARTIFACT**
+**STATE: NEED INPUT — FOLD4 MOONSHINE VS SENSEVOICE THREE-PHRASE GATE**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
@@ -23,25 +23,64 @@ Base: `aihub-voice-test`
 - SenseVoice 2025 Korean-capable comparator added.
 - Benchmark Activity changed to Moonshine + SenseVoice by default.
 - Per-trial JSON plus aggregate `summary.json` added.
-- Post-implementation review caught that SenseVoice was still using automatic language detection / default ITN. The adapter now pins `language = ko` and disables ITN for the Korean command benchmark.
-- Latest lightweight Android/JVM verification after that review fix: run `#242` / `32326823317` — success.
+- SenseVoice adapter reviewed: explicit `language = ko`; ITN disabled for Korean command fidelity.
+- Normal verification after the final build fix: run `#249` / `32328314338` — success.
+- Model-provisioned Moonshine + SenseVoice build: run `#15` / `32328314309` — success.
+- Artifact `okja-local-asr-benchmark-apk` independently downloaded and inspected; recorded APK SHA-256 matches the downloaded APK byte-for-byte.
 
-### Current
+### Model-provisioned build review
 
-The model-provisioned workflow now builds this pair:
+The first directly observable Moonshine + SenseVoice model build reproduced an AGP packaging failure at `:app:compressDebugAssets` with `Java heap space`. Both official model downloads had already succeeded. SenseVoice's int8 ONNX file is about 227 MB, so the previous `noCompress` handling alone did not provide enough Gradle heap headroom.
 
-1. `sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27`
-2. `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`
+Fix:
 
-The workflow provisions both official model archives, records archive/file SHA-256 benchmark provenance, builds the APK, and uploads the APK plus provenance as a GitHub Actions artifact.
+- added `aihub/gradle.properties` with `org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8`;
+- retained `.onnx` / `.ort` `noCompress` handling;
+- made the model benchmark workflow visible on PR workflow/config changes so the model run can be verified through connected GitHub Actions tooling.
 
-Latest workflow-trigger commit: `97786be2be997e6c62b0b4563f287da5c0cf5717`.
+Fix commits:
 
-### Blocker
+- `8297a37d8eeb623c3ecd8c65b7422fea4c1f6498` — Gradle heap headroom for large model packaging;
+- `5b9c684d4c149da467e23026a8108cca9feedf5a` — model workflow rebuild after heap fix.
 
-No architecture or code blocker.
+Verification:
 
-No user input is needed until the new model-provisioned APK artifact is verified. The next user-side action will be a small Fold4 same-PCM comparison using the same three benchmark phrases.
+- model-provisioned run `#15` / `32328314309`: JVM tests, Moonshine provisioning, SenseVoice provisioning, APK build, provenance recording, artifact upload — all success;
+- normal run `#249` / `32328314338`: deterministic matrix, Android JVM tests, debug APK build, artifact upload — all success.
+
+### Verified artifact / provenance
+
+Artifact:
+
+- name: `okja-local-asr-benchmark-apk`
+- artifact ID: `9392185590`
+- artifact bundle size: `254242578` bytes
+- artifact bundle digest: `sha256:04c0a670e53c130dfd4adaa055740ef87800d5e154624adaa6278e0bff615842`
+- artifact expires: `2026-08-27T03:29:54Z`
+
+APK:
+
+- path inside artifact: `aihub/app/build/outputs/apk/debug/app-debug.apk`
+- size: `435926727` bytes
+- workflow-recorded SHA-256: `9b293f486db2a7068286cba0bd9261b038f35c4b33725805c4803f7ca2bf1e49`
+- independently recomputed SHA-256 after downloading/unzipping the artifact: `9b293f486db2a7068286cba0bd9261b038f35c4b33725805c4803f7ca2bf1e49`
+
+Moonshine model provenance:
+
+- archive: `sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27.tar.bz2`
+- archive SHA-256: `d3b6c5390a7859c9ef20ff4f20b0766fcbad1dc06c0f509fe4840a3a302112dc`
+- `encoder_model.ort`: `947260d46252f48eada86a34986b3f70c01d68a343959949a77375b94debd055`
+- `decoder_model_merged.ort`: `95aa9f2e764b80625d2889d6ec9f05c965808e540ac50c16abd10c7ea33fe44b`
+- `tokens.txt`: `2870d843e14c1e187bf1913a521562a63b53933814bd7f2145120468f494a049`
+
+SenseVoice model provenance:
+
+- archive: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2`
+- archive SHA-256: `7305f7905bfcf77fa0b39388a313f3da35c68d971661a65475b56fb2162c8e63`
+- `model.int8.onnx`: `12ca1a2ae7ecf3e0019ef2822307ee0b5cadc9196569e379b4c4026f8205276d`
+- `tokens.txt`: `f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc`
+
+The provisioning scripts record first-seen archive hashes but do not yet enforce a release-pinned trust manifest; this is benchmark provenance, not release-grade supply-chain verification.
 
 ## Current architecture
 
@@ -54,18 +93,6 @@ No user input is needed until the new model-provisioned APK artifact is verified
 - Deterministic device routing stays ahead of generative AI.
 - Android `SpeechRecognizer` / Mode F remains compatibility evidence, not the continuous production path.
 
-## Source revalidation
-
-The ASR plan was rechecked against current Android documentation and current sherpa-onnx upstream before SenseVoice integration.
-
-Relevant current upstream facts:
-
-- sherpa-onnx v1.13.4 Kotlin API includes `OfflineSenseVoiceModelConfig`;
-- v1.13.4 helper model type `41` maps to `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`;
-- current sherpa-onnx SenseVoice documentation lists Korean support and Android simulated-streaming/VAD+ASR usage;
-- SenseVoice accepts an explicit Korean language hint (`ko`), which Okja now uses for this Korean-only benchmark;
-- Android `SpeechRecognizer` remains unsuitable as the target continuous production ASR architecture.
-
 ## Fold4 baseline corpus
 
 The original benchmark contains exactly three phrases:
@@ -74,7 +101,7 @@ The original benchmark contains exactly three phrases:
 2. `옥자 TV 켜줘`
 3. `옥자 에어컨 꺼줘`
 
-All three phrase categories are present repeatedly in the supplied device evidence. There is no need to block progress on locating an additional screenshot merely to prove phrase coverage.
+All three phrase categories are present repeatedly in the supplied Moonshine/Zipformer evidence. There is no need to locate an additional screenshot merely to prove phrase coverage.
 
 Across the 10 unique saved runs visible in the supplied screenshots:
 
@@ -93,7 +120,7 @@ Important hard failures included:
 - `에어컨 꺼줘` -> `에어컨 꺼져`
 - one unusable AC transcription (`복잡해요. 큰 꺼져.`)
 
-Moonshine therefore remains the best observed candidate so far, but is **not production-ready for physical device commands**.
+Moonshine remains the best observed candidate so far, but is **not production-ready for physical device commands**.
 
 ### Korean streaming Zipformer
 
@@ -123,7 +150,7 @@ Action changes are never normalized away. Examples that remain failures:
 - `켜줘` -> `꺼줘`
 - `꺼줘` -> `꺼져`
 
-A device command must therefore preserve the intended target and action, not merely produce plausible Korean text.
+A device command must preserve the intended target and action, not merely produce plausible Korean text.
 
 ## Current SenseVoice work
 
@@ -139,6 +166,7 @@ Implemented on the feature branch:
 - aggregate per-engine suffix/silent-failure summary
 - `summary.json` export
 - scrollable result UI for larger benchmark output
+- verified model-provisioned APK artifact
 
 Key commits:
 
@@ -146,20 +174,14 @@ Key commits:
 - `a3c3253aa5a57d80115d2243d5b7940e719bcc9a` — SenseVoice model provisioning
 - `5d2f86f2cf5ad7293f1a267ffd1d7feeaefdab74` — Fold4 Moonshine/SenseVoice benchmark Activity + summary
 - `e3361d66bfc8cc4c01358f4976943093ddeba203` — review fix: Korean language hint / ITN off
-- `97786be2be997e6c62b0b4563f287da5c0cf5717` — model-provisioned workflow retrigger for the reviewed code
+- `8297a37d8eeb623c3ecd8c65b7422fea4c1f6498` — Gradle heap fix for large model packaging
+- `5b9c684d4c149da467e23026a8108cca9feedf5a` — verified model build head
 
 ## Next execution order
 
-### Task C2 — verify model-provisioned Moonshine/SenseVoice APK — NEXT
+### Task C3 — minimal Fold4 Moonshine/SenseVoice comparator — NEED INPUT
 
-- confirm official SenseVoice archive download succeeds in CI;
-- confirm Android packaging succeeds with the additional large model;
-- record APK SHA-256 and model provenance;
-- review build logs/artifact before asking for a device test.
-
-### Task C3 — minimal Fold4 comparator
-
-Once the APK is verified, run one pass each of the original three phrases:
+Install the verified APK and run one pass each of the original three phrases:
 
 1. `옥자야 뭐하니`
 2. `옥자 TV 켜줘`
@@ -173,7 +195,7 @@ The same captured PCM in each trial is decoded by Moonshine and SenseVoice. Comp
 - model init;
 - decode latency.
 
-Do not ask for dozens of manual repetitions until this first three-phrase SenseVoice gate shows whether the model is worth continuing.
+Do not ask for dozens of repetitions until this three-phrase SenseVoice gate shows whether SenseVoice is worth continuing.
 
 ### Task D — VoiceSessionController
 
@@ -203,6 +225,10 @@ After ASR/wake acceptance:
 - separate diagnostic and release build surfaces.
 
 Later release gates remain tracked separately: dedicated repo extraction (#22), deferred security work (#21), and legacy-doc archive (#25).
+
+## Current blocker
+
+The repository/build side is verified. The next genuine blocker is **Fold4 device input**: one Moonshine-vs-SenseVoice same-PCM pass for each of the three original phrases.
 
 ## Documentation hierarchy
 
