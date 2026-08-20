@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WORKING — FOLD4 CORPUS REVIEW / BENCHMARK METRIC FIX**
+**STATE: NEED INPUT — ONE UNIQUE FOLD4 TRIAL RESULT MISSING**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
@@ -14,7 +14,7 @@ Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
 Base: `aihub-voice-test`
 Root-cause checkpoint: `8cc9897d6c5898c9ccd5be73599ef91c35f01659`
 
-Verified normal CI before the latest metric fix: run `#213` / `32247600131` — success.
+Latest normal CI after the semantic command-metric correction: run `#224` / `32325631666` — success.
 Verified model-provisioned benchmark CI: run `#5` / `32247600046` — success.
 Benchmark APK SHA-256: `3faa4902253c169484c8f50517cc93637729bffe0e28eab40f0c0ee054829896`.
 
@@ -40,10 +40,10 @@ The execution order was rechecked against current Android platform documentation
 
 Current benchmark priority:
 
-1. sherpa Moonshine tiny-ko v2 as the primary Korean local-ASR candidate;
-2. Korean streaming Zipformer only as a fail-fast comparison because of upstream Android empty-output reports;
-3. Porcupine low-level PCM as the first Android-ready Korean wake baseline;
-4. sherpa KWS only after Korean model/tokenization support is demonstrated.
+1. sherpa Moonshine tiny-ko v2 remains the best current Korean local-ASR candidate from the first Fold4 batch, but its command accuracy is not yet acceptable;
+2. sherpa SenseVoice Korean/Multilingual is now the next comparator because current sherpa-onnx explicitly supports Korean and Android simulated-streaming/offline deployment;
+3. Korean streaming Zipformer is retained only as comparison evidence after a positive-case silent-empty failure and poor device-command preservation;
+4. Porcupine low-level PCM remains the first Android-ready Korean wake baseline.
 
 ## Completed / reviewed engineering work
 
@@ -101,166 +101,106 @@ Regression tests explicitly cover both the TV alias success and AC wrong-verb fa
 
 Post-task review caught/fixed Kotlin compile errors, cold model-init timing contamination, AGP asset-compression heap exhaustion, and the command-alias scoring bug above.
 
-## Fold4 evidence
+## Fold4 evidence — 10 unique saved runs visible in the supplied screenshots
+
+The user reports 11 total trials, but the screenshots currently available to the assistant contain **10 unique saved PCM/JSON IDs**. One additional unique run is still required for a complete 11-run analysis.
 
 All cases below used one captured PCM replayed unchanged to both engines.
 
-### Trial 1 — `옥자야 뭐하니`
+| Saved PCM ID | Phrase | Moonshine transcript | Moon semantic suffix | Moon init/decode | Zipformer transcript | Zip semantic suffix | Zip init/decode |
+|---|---|---|---:|---|---|---:|---|
+| `1787193143356-0` | `옥자야 뭐하니` | `복자야 뭐하니?` | pass | 603 / 151 ms | `뭐하니?` | pass | 1266 / 422 ms |
+| `1787193171113-1` | `옥자 TV 켜줘` | `복자 티비 켜줘.` | pass* | 597 / 156 ms | `<EMPTY>` | fail | 1278 / 419 ms |
+| `1787193359645-2` | `옥자 에어컨 꺼줘` | `옥자 에어컨 꺼져.` | fail | 627 / 166 ms | `옥자에어컨꺼져.` | fail | 1382 / 449 ms |
+| `1787193379289-0` | `옥자야 뭐하니` | `옥자야 뭐하니?` | pass | 607 / 155 ms | `뭐하니?` | pass | 1437 / 424 ms |
+| `1787193396845-1` | `옥자 TV 켜줘` | `복자 티비 켜줘.` | pass* | 635 / 166 ms | `옥자.` | fail | 1400 / 440 ms |
+| `1787193500111-2` | `옥자 에어컨 꺼줘` | `옥자 에어컨 꺼줘.` | pass | 663 / 166 ms | `오빠 에어컨꺼져.` | fail | 1343 / 429 ms |
+| `1787193522270-0` | `옥자야 뭐하니` | `복자야 뭐하니?` | pass | 612 / 158 ms | `옥자야뭐하니?` | pass | 1380 / 456 ms |
+| `1787193542544-1` | `옥자 TV 켜줘` | `옥자 티비 꺼줘.` | fail | 652 / 159 ms | `옥자티비꺼져.` | fail | 1311 / 428 ms |
+| `1787193577193-2` | `옥자 에어컨 꺼줘` | `복잡해요. 큰 꺼져.` | fail | 629 / 173 ms | `옥자에어컨꺼져.` | fail | 1308 / 428 ms |
+| `1787193589738-0` | `옥자야 뭐하니` | `억자야 뭐하니?` | pass | 622 / 150 ms | `옥자야? 뭐하니?` | pass | 1330 / 435 ms |
+
+`*` The old APK displayed `suffix: false` for `TV` vs `티비`; the corrected semantic metric counts this as preserved while keeping transcript exactness separate.
+
+### Aggregate from these 10 unique runs
 
 Moonshine tiny-ko:
 
-- transcript: `복자야 뭐하니?`
-- suffix: `true`
-- silent failure: `false`
-- init: `603 ms`
-- replay/decode: `151 ms`
+- non-empty positive output: **10/10**;
+- semantic suffix preserved overall: **7/10 (70%)**;
+- conversational `뭐하니` suffix: **4/4**;
+- physical-device commands only (`TV 켜줘`, `에어컨 꺼줘`): **3/6 (50%)**;
+- mean model init: **624.7 ms**;
+- mean replay/decode: **160.0 ms**;
+- exact/acceptable wake-token text (`옥자`/`옥자야`) appeared in 4/10 transcripts, but this is ASR text fidelity, not a KWS benchmark.
 
-Zipformer:
+Korean streaming Zipformer:
 
-- transcript: `뭐하니?`
-- suffix: `true`
-- silent failure: `false`
-- init: `1266 ms`
-- replay/decode: `422 ms`
+- non-empty positive output: **9/10**;
+- positive-case silent-empty failure: **1/10**;
+- semantic suffix preserved overall: **4/10 (40%)**;
+- conversational `뭐하니` suffix: **4/4**;
+- physical-device commands only: **0/6 (0%)**;
+- mean model init: **1343.5 ms**;
+- mean replay/decode: **433.0 ms**.
 
-Evidence: `1787193143356-0.pcm16le`, `1787193143356-0.json`.
+Moonshine was about **2.15x faster to initialize** and **2.71x faster to decode** than Zipformer across these 10 runs.
 
-### Trial 2 — `옥자 TV 켜줘`
+### Review / decision
 
-Moonshine tiny-ko:
+The first five-run review was too optimistic for Moonshine. With the larger visible batch, Moonshine remains clearly better than Zipformer, but **3/6 device-command preservation is not acceptable for production device control**.
 
-- transcript: `복자 티비 켜줘.`
-- legacy APK displayed suffix: `false`; corrected semantic command score: **preserved**
-- silent failure: `false`
-- init: `597 ms`
-- replay/decode: `156 ms`
+Important failure modes:
 
-Zipformer:
+- Moonshine changed `TV 켜줘` -> `TV 꺼줘` once, which is a dangerous action inversion and must remain a hard failure.
+- `에어컨 꺼줘` -> `에어컨 꺼져` occurred repeatedly; this must not be normalized into success at the authorization boundary.
+- One Moonshine AC run hallucinated `복잡해요. 큰 꺼져.` rather than a usable device command.
+- Zipformer produced one total `<EMPTY>` positive case and failed all 6 observed physical-device command suffixes.
 
-- transcript: `<EMPTY>`
-- suffix: `false`
-- silent failure: `true`
-- init: `1278 ms`
-- replay/decode: `419 ms`
+**ASR decision:**
 
-Evidence: `1787193171113-1.pcm16le`, `1787193171113-1.json`.
+- do not promote Zipformer;
+- keep Moonshine as the current leading candidate, but do not integrate it as the sole production command recognizer yet;
+- benchmark SenseVoice on the same saved PCM corpus before selecting the local ASR engine;
+- deterministic device routing/authorization must continue to reject ambiguous or action-inverted transcripts.
 
-This reproduces the upstream-style positive-case silent-empty failure on the Fold4.
+Current upstream evidence for SenseVoice:
 
-### Trial 3 — `옥자 에어컨 꺼줘`
-
-Moonshine tiny-ko:
-
-- transcript: `옥자 에어컨 꺼져.`
-- suffix: `false`
-- silent failure: `false`
-- init: `627 ms`
-- replay/decode: `166 ms`
-
-Zipformer:
-
-- transcript: `옥자에어컨꺼져.`
-- suffix: `false`
-- silent failure: `false`
-- init: `1382 ms`
-- replay/decode: `449 ms`
-
-Evidence: `1787193359645-2.pcm16le`, `1787193359645-2.json`.
-
-Both engines changed the actionable verb `꺼줘` -> `꺼져`; this remains a real command-recognition failure and is intentionally **not** normalized away.
-
-### Trial 4 — repeated `옥자야 뭐하니`
-
-Moonshine tiny-ko:
-
-- transcript: `옥자야 뭐하니?`
-- suffix: `true`
-- silent failure: `false`
-- init: `607 ms`
-- replay/decode: `155 ms`
-
-Zipformer:
-
-- transcript: `뭐하니?`
-- suffix: `true`
-- silent failure: `false`
-- init: `1437 ms`
-- replay/decode: `424 ms`
-
-Evidence: `1787193379289-0.pcm16le`, `1787193379289-0.json`.
-
-### Trial 5 — repeated `옥자 TV 켜줘`
-
-Moonshine tiny-ko:
-
-- transcript: `복자 티비 켜줘.`
-- legacy APK displayed suffix: `false`; corrected semantic command score: **preserved**
-- silent failure: `false`
-- init: `635 ms`
-- replay/decode: `166 ms`
-
-Zipformer:
-
-- transcript: `옥자.`
-- suffix: `false`
-- silent failure: `false`
-- init: `1400 ms`
-- replay/decode: `440 ms`
-
-Evidence: `1787193396845-1.pcm16le`, `1787193396845-1.json`.
-
-## Current evidence review
-
-The current Fold4 evidence is enough to change engineering priority, but not enough to claim final production accuracy.
-
-### Moonshine
-
-- consistently produces non-empty Korean output in the recorded positive cases;
-- preserves `뭐하니` in both observed conversational repetitions;
-- preserves the TV-on command semantically in both observed TV trials (`TV` -> `티비`);
-- is materially faster than Zipformer in the observed cold-init and decode measurements;
-- still has an important AC command error (`꺼줘` -> `꺼져`) that must be measured across repeated speakers/conditions rather than normalized away;
-- wake token recognition itself is inconsistent (`옥자`/`옥자야` sometimes becomes `복자`), reinforcing that wake detection should be handled by a dedicated KWS engine rather than relying on full-transcript ASR to identify the wake token.
-
-### Zipformer
-
-- reproduced a positive-case silent-empty failure on Trial 2;
-- omitted the wake prefix on conversational trials;
-- returned only `옥자` on one TV trial;
-- was roughly 2–3x slower than Moonshine in the observed decode/init measurements.
-
-**Decision:** stop treating Korean streaming Zipformer as a primary candidate. Retain it only as recorded comparison evidence unless a future upstream fix materially changes the Android result.
+- sherpa-onnx SenseVoice supports Korean (`ko`) alongside zh/en/ja/yue;
+- sherpa-onnx publishes Android simulated-streaming/VAD+ASR APK guidance for SenseVoice;
+- current Kotlin API includes `OfflineSenseVoiceModelConfig` and SenseVoice model helpers.
 
 ## Next execution order
 
-### Task C1 — finish metric fix CI / review — ACTIVE
+### Task C1 — locate the missing 11th unique run — NEED INPUT
 
-- verify JVM tests and APK build on the semantic command-normalization change;
-- inspect the diff after CI;
-- do not ship a new large model APK merely to change the displayed suffix flag unless further manual testing requires it.
+The screenshots supplied so far expose 10 unique `Saved:` PCM IDs. If 11 trials were actually run, send the one screenshot whose `Saved:` ID is not listed in the table above.
 
-### Task C2 — improve corpus collection before more manual trials
+### Task C2 — add SenseVoice to the identical-PCM harness — NEXT CODE TASK
 
-Reduce user effort before asking for dozens of repetitions:
+- provision the official sherpa SenseVoice Korean-capable int8 model with recorded SHA-256 provenance;
+- add a microphone-free `SherpaSenseVoiceBenchmarkEngine`;
+- replay the same saved PCM cases through Moonshine and SenseVoice;
+- keep Zipformer optional as historical/fail-fast evidence instead of decoding every new trial;
+- preserve the corrected semantic-command metric and wrong-action fail-closed behavior.
 
-- add a compact trial counter and aggregate per-phrase result summary;
-- make Moonshine the default measured engine;
-- keep Zipformer optional/fail-fast rather than decoding every case;
-- export a small corpus summary JSON in addition to per-trial JSON;
-- include semantic command score separately from transcript exactness.
+### Task C3 — improve corpus collection before larger manual runs
+
+- compact trial counter and aggregate per-phrase summary;
+- export corpus-summary JSON;
+- separate transcript exactness, semantic command preservation, and silent failure;
+- make Moonshine/SenseVoice the default pair;
+- keep Zipformer behind an optional diagnostic toggle.
 
 ### Task D — VoiceSessionController
 
-Begin once the metric fix is green and the Moonshine path remains the primary candidate:
+Architecture work can continue independently, but production ASR selection remains gated by the same-PCM comparison. The controller must:
 
-- move voice lifecycle authority out of `MainActivity`;
 - preserve already-captured command suffixes;
 - enforce one capture owner / one utterance decode path;
 - reject stale callbacks and bound retries;
 - make MIC_OFF/TTS transitions deterministic;
 - require clean PCM integrity before physical command authorization.
-
-The controller may initially target Moonshine as the local ASR implementation behind the interface; engine choice remains replaceable.
 
 ### Task E — wake benchmark
 
@@ -282,9 +222,9 @@ Later release gates remain tracked separately: dedicated repo extraction (#22), 
 
 ## Current blocker
 
-No architecture blocker and no immediate user-input blocker.
+No architecture/code blocker for continuing SenseVoice integration.
 
-The current work is code-side: complete CI/review of the metric correction, then improve the benchmark collection flow before requesting a larger Fold4 corpus.
+For the requested **complete 11-trial statistical analysis**, one unique trial screenshot/ID is missing from the material currently visible to the assistant.
 
 ## Documentation hierarchy
 
