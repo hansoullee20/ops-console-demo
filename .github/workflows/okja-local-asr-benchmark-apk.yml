@@ -1,6 +1,7 @@
 name: Build Okja local ASR benchmark APK
 
 # Large ASR models are provisioned only for explicit benchmark builds.
+# Current device pair: Moonshine tiny-ko + SenseVoice 2025.
 # Normal PR/code commits use the lightweight verification workflow.
 on:
   workflow_dispatch:
