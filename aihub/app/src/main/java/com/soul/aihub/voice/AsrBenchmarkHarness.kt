@@ -108,10 +108,10 @@ class AsrBenchmarkHarness(
         val finalTranscript = updates.lastOrNull { it.isFinal }?.text
             ?: updates.lastOrNull()?.text.orEmpty()
         val transcriptMatch = case.expectedTranscript?.let { expected ->
-            normalize(finalTranscript) == normalize(expected)
+            normalizeTranscript(finalTranscript) == normalizeTranscript(expected)
         }
         val suffixPreserved = case.expectedCommandSuffix?.let { suffix ->
-            normalize(finalTranscript).contains(normalize(suffix))
+            normalizeCommand(finalTranscript).contains(normalizeCommand(suffix))
         }
 
         return AsrBenchmarkResult(
@@ -133,6 +133,27 @@ class AsrBenchmarkHarness(
         return (producedAtNs - startAtNs) / 1_000_000L
     }
 
-    private fun normalize(text: String): String =
-        text.lowercase().replace(Regex("\\s+"), " ").trim()
+    /**
+     * Transcript fidelity stays intentionally conservative: case/punctuation/spacing
+     * differences are ignored, but lexical substitutions still count as recognition errors.
+     */
+    private fun normalizeTranscript(text: String): String =
+        text.lowercase()
+            .replace(Regex("[\\p{P}\\p{S}]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    /**
+     * Device-command continuity is semantic rather than orthographic. A recognizer may
+     * emit common Korean spoken spellings for Latin device names (for example `TV` ->
+     * `티비`) without losing the command. Keep this alias list deliberately tiny and
+     * command-domain-specific so genuinely different verbs/targets still fail.
+     */
+    private fun normalizeCommand(text: String): String =
+        normalizeTranscript(text)
+            .replace("텔레비전", "tv")
+            .replace("티브이", "tv")
+            .replace("티비", "tv")
+            .replace("t v", "tv")
+            .replace(Regex("\\s+"), "")
 }
