@@ -33,6 +33,12 @@ class SherpaSenseVoiceBenchmarkEngine(
         val modelConfig = requireNotNull(getOfflineModelConfig(type = modelType)) {
             "Unknown sherpa offline model type: $modelType"
         }
+        // This benchmark corpus is Korean-only. Pin the language instead of paying for
+        // automatic language detection, and keep ITN disabled so command wording is
+        // scored against the recognizer's direct Korean text rather than a formatter.
+        modelConfig.senseVoice.language = "ko"
+        modelConfig.senseVoice.useInverseTextNormalization = false
+
         val config = OfflineRecognizerConfig(
             featConfig = getFeatureConfig(sampleRate = sampleRateHz, featureDim = 80),
             modelConfig = modelConfig,
