@@ -9,10 +9,12 @@ on:
     branches: [ feat/voice-pipeline-v2 ]
     paths:
       - '.github/workflows/okja-local-asr-benchmark-apk.yml'
+      - 'aihub/gradle.properties'
   pull_request:
     branches: [ aihub-voice-test ]
     paths:
       - '.github/workflows/okja-local-asr-benchmark-apk.yml'
+      - 'aihub/gradle.properties'
 
 jobs:
   build-benchmark-apk:
