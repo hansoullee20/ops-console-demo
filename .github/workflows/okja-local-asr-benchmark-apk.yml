@@ -1,8 +1,7 @@
 name: Build Okja local ASR benchmark APK
 
-# Model provisioning adds roughly 200 MB of ASR assets. Keep this workflow opt-in
-# except when the workflow itself is intentionally changed; ordinary PR/status/code
-# commits should use the lightweight verification workflow instead.
+# Large ASR models are provisioned only for explicit benchmark builds.
+# Normal PR/code commits use the lightweight verification workflow.
 on:
   workflow_dispatch:
   push:
@@ -32,9 +31,9 @@ jobs:
       - name: Provision official Korean ASR model assets
         run: |
           bash aihub/tools/fetch_sherpa_moonshine_korean_model.sh
-          bash aihub/tools/fetch_sherpa_korean_model.sh
+          bash aihub/tools/fetch_sherpa_sensevoice_korean_model.sh
 
-      - name: Build benchmark APK with both Korean models
+      - name: Build benchmark APK with Moonshine and SenseVoice
         run: gradle -p aihub assembleDebug --stacktrace
 
       - name: Record APK and model provenance
@@ -46,10 +45,10 @@ jobs:
             benchmark-provenance/moonshine-archive.txt
           cp aihub/app/src/main/assets/sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27/OKJA_MODEL_FILES.sha256 \
             benchmark-provenance/moonshine-files.sha256
-          cp aihub/app/src/main/assets/sherpa-onnx-streaming-zipformer-korean-2024-06-16/OKJA_MODEL_PROVENANCE.txt \
-            benchmark-provenance/zipformer-archive.txt
-          cp aihub/app/src/main/assets/sherpa-onnx-streaming-zipformer-korean-2024-06-16/OKJA_MODEL_FILES.sha256 \
-            benchmark-provenance/zipformer-files.sha256
+          cp aihub/app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/OKJA_MODEL_PROVENANCE.txt \
+            benchmark-provenance/sensevoice-archive.txt
+          cp aihub/app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/OKJA_MODEL_FILES.sha256 \
+            benchmark-provenance/sensevoice-files.sha256
 
       - uses: actions/upload-artifact@v4
         with:
