@@ -23,16 +23,19 @@ Base: `aihub-voice-test`
 - SenseVoice 2025 Korean-capable comparator added.
 - Benchmark Activity changed to Moonshine + SenseVoice by default.
 - Per-trial JSON plus aggregate `summary.json` added.
-- Latest lightweight Android/JVM verification for the new Activity: run `#235` / `32326420960` — success.
+- Post-implementation review caught that SenseVoice was still using automatic language detection / default ITN. The adapter now pins `language = ko` and disables ITN for the Korean command benchmark.
+- Latest lightweight Android/JVM verification after that review fix: run `#242` / `32326823317` — success.
 
 ### Current
 
-The model-provisioned workflow has been changed from Moonshine + Zipformer to:
+The model-provisioned workflow now builds this pair:
 
 1. `sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27`
 2. `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`
 
 The workflow provisions both official model archives, records archive/file SHA-256 benchmark provenance, builds the APK, and uploads the APK plus provenance as a GitHub Actions artifact.
+
+Latest workflow-trigger commit: `97786be2be997e6c62b0b4563f287da5c0cf5717`.
 
 ### Blocker
 
@@ -60,6 +63,7 @@ Relevant current upstream facts:
 - sherpa-onnx v1.13.4 Kotlin API includes `OfflineSenseVoiceModelConfig`;
 - v1.13.4 helper model type `41` maps to `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`;
 - current sherpa-onnx SenseVoice documentation lists Korean support and Android simulated-streaming/VAD+ASR usage;
+- SenseVoice accepts an explicit Korean language hint (`ko`), which Okja now uses for this Korean-only benchmark;
 - Android `SpeechRecognizer` remains unsuitable as the target continuous production ASR architecture.
 
 ## Fold4 baseline corpus
@@ -126,6 +130,7 @@ A device command must therefore preserve the intended target and action, not mer
 Implemented on the feature branch:
 
 - `SherpaSenseVoiceBenchmarkEngine`
+- explicit Korean language hint and ITN disabled for benchmark fidelity
 - official SenseVoice 2025 model provisioning script
 - SHA-256 benchmark provenance recording
 - Moonshine + SenseVoice default benchmark pair
@@ -140,7 +145,8 @@ Key commits:
 - `05c1b9b5a5123cf767211a2b4dd7c65565a6a635` — SenseVoice PCM-only adapter
 - `a3c3253aa5a57d80115d2243d5b7940e719bcc9a` — SenseVoice model provisioning
 - `5d2f86f2cf5ad7293f1a267ffd1d7feeaefdab74` — Fold4 Moonshine/SenseVoice benchmark Activity + summary
-- `70d7c233f52fde8e030456a9362eb3bf5b7f3763` — current model-provisioned workflow pair
+- `e3361d66bfc8cc4c01358f4976943093ddeba203` — review fix: Korean language hint / ITN off
+- `97786be2be997e6c62b0b4563f287da5c0cf5717` — model-provisioned workflow retrigger for the reviewed code
 
 ## Next execution order
 
