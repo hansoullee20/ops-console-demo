@@ -25,8 +25,9 @@ interface OpenWakeWordFramePredictor : AutoCloseable {
  * [OpenWakeWordFramePredictor]. It never opens AudioRecord.
  *
  * A PCM discontinuity drops any partial 80 ms window and resets predictor history
- * instead of stitching model context from opposite sides of a gap. That preserves the
- * same fail-closed principle used by the physical-command path.
+ * instead of stitching model context from opposite sides of a gap. Both monotonic
+ * frame sequence and sample-position continuity are required, matching the shared
+ * [PcmContinuityTracker] contract used elsewhere in the voice pipeline.
  */
 class OpenWakeWordPcmWakeDetector(
     private val predictor: OpenWakeWordFramePredictor,
@@ -49,27 +50,27 @@ class OpenWakeWordPcmWakeDetector(
 
     private val debounceSamples =
         (sampleRateHz.toLong() * debounceMs.toLong() / 1_000L).coerceAtLeast(0L)
+    private val continuity = PcmContinuityTracker()
     private val window = ShortArray(inferenceWindowSamples)
     private var bufferedSamples = 0
-    private var nextExpectedStartSampleIndex: Long? = null
     private var lastDetectionEndSampleIndex: Long? = null
     private var closed = false
 
     override fun accept(frame: PcmFrame): WakeDetection? {
         check(!closed) { "detector is closed" }
-        if (frame.samples.isEmpty()) {
-            nextExpectedStartSampleIndex = frame.endSampleIndexExclusive
-            return null
-        }
 
-        val expected = nextExpectedStartSampleIndex
-        if (expected != null && frame.startSampleIndex != expected) {
+        val continuityStatus = continuity.observe(frame)
+        if (!continuityStatus.continuous) {
             // Never construct an inference window or hidden feature history from PCM
-            // separated by a gap or out-of-order delivery.
+            // separated by a gap, duplicate, or out-of-order frame. Checking both the
+            // sequence and sample index prevents sequence-only discontinuities from
+            // silently carrying model state across an invalid stream boundary.
             bufferedSamples = 0
             lastDetectionEndSampleIndex = null
             predictor.reset()
         }
+
+        if (frame.samples.isEmpty()) return null
 
         var sourceOffset = 0
         var firstDetection: WakeDetection? = null
@@ -113,14 +114,13 @@ class OpenWakeWordPcmWakeDetector(
             }
         }
 
-        nextExpectedStartSampleIndex = frame.endSampleIndexExclusive
         return firstDetection
     }
 
     fun reset() {
         check(!closed) { "detector is closed" }
+        continuity.reset()
         bufferedSamples = 0
-        nextExpectedStartSampleIndex = null
         lastDetectionEndSampleIndex = null
         predictor.reset()
     }
@@ -128,8 +128,8 @@ class OpenWakeWordPcmWakeDetector(
     override fun close() {
         if (closed) return
         closed = true
+        continuity.reset()
         bufferedSamples = 0
-        nextExpectedStartSampleIndex = null
         lastDetectionEndSampleIndex = null
         predictor.close()
     }
