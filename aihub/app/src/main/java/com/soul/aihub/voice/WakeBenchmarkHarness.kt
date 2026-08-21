@@ -6,12 +6,15 @@ package com.soul.aihub.voice
  * [keywordEndSampleIndex] is the sample immediately after the spoken wake phrase.
  * Matching is performed in sample time, not wall-clock time, so offline replay is
  * deterministic even when a detector internally timestamps results with SystemClock.
+ *
+ * Default matching tolerances mirror `aihub/wakeword/v4_eval.py` so short Android
+ * replay cases and the canonical long-recording evaluator use the same window.
  */
 data class ExpectedWake(
     val keyword: String,
     val keywordEndSampleIndex: Long,
-    val matchEarlyMs: Int = 200,
-    val matchLateMs: Int = 1_000,
+    val matchEarlyMs: Int = 500,
+    val matchLateMs: Int = 1_500,
 ) {
     init {
         require(keyword.isNotBlank()) { "keyword must not be blank" }
@@ -120,15 +123,16 @@ data class WakeBenchmarkAggregate(
 }
 
 /**
- * Deterministic same-PCM replay harness for wake detectors.
+ * Deterministic same-PCM replay harness for short Android/device wake cases.
  *
  * The harness never opens the microphone. Detection position is defined as the end
  * sample index of the frame that produced a WakeDetection. This makes scoring stable
  * across detectors regardless of their internal wall-clock timestamp implementation.
  *
- * False-activations/hour is computed only from cases with no intentional wakes. This
- * avoids inflating the denominator with short positive utterance clips; positive cases
- * still report unmatched detections separately.
+ * False-activations/hour is computed only from cases with no intentional wakes. For
+ * mixed long household recordings, canonical release scoring stays in
+ * `aihub/wakeword/v4_eval.py`, which subtracts intentional-invocation windows from
+ * negative exposure instead of treating the whole recording as negative time.
  */
 class WakeBenchmarkHarness(
     private val frameSamples: Int = 320,
