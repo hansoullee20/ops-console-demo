@@ -3,11 +3,12 @@ name: Okja openWakeWord Real Replay
 on:
   workflow_dispatch:
   push:
-    branches: [aihub-voice-test]
+    branches: [aihub-voice-test, feat/voice-pipeline-v2]
     paths:
       - 'aihub/wakeword/v4_replay.py'
       - 'aihub/wakeword/livekit_v3_replay_adapter.py'
       - 'aihub/wakeword/openwakeword_replay_adapter.py'
+      - 'aihub/wakeword/openwakeword_android_golden.py'
       - '.github/workflows/okja-openwakeword-real-replay.yml'
 
 permissions:
@@ -87,6 +88,17 @@ jobs:
               --detections-out "$out/detections.jsonl" \
               --manifest-out "$out/manifest.json"
           done
+
+      - name: Export Android parity golden vector
+        run: |
+          python aihub/wakeword/openwakeword_android_golden.py \
+            --audio replay-inputs/audio/audio/smoke_melotts_01.wav \
+            --classifier replay-inputs/v3/wakeword_v3_output/okja_v3_korean_probe/okja_v3_korean_probe.onnx \
+            --melspec-model replay-inputs/openwakeword/melspectrogram.onnx \
+            --embedding-model replay-inputs/openwakeword/embedding_model.onnx \
+            --expected-engine-version 0.6.0 \
+            --initialization-seed 0 \
+            --output replay-evidence/android-parity-golden.json
 
       - name: Upload deterministic replay evidence
         uses: actions/upload-artifact@v4
