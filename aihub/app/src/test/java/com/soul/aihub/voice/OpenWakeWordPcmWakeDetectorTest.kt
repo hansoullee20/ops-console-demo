@@ -13,11 +13,16 @@ class OpenWakeWordPcmWakeDetectorTest {
     ) : OpenWakeWordFramePredictor {
         override val modelName: String = "okja-test"
         val windows = mutableListOf<ShortArray>()
+        var resetCount = 0
         var closed = false
 
         override fun predict(pcm16: ShortArray): Float {
             windows += pcm16.copyOf()
             return if (scores.isEmpty()) 0.0f else scores.removeAt(0)
+        }
+
+        override fun reset() {
+            resetCount += 1
         }
 
         override fun close() {
@@ -95,15 +100,17 @@ class OpenWakeWordPcmWakeDetectorTest {
     }
 
     @Test
-    fun discontinuityDropsPartialWindowInsteadOfStitchingAcrossGap() {
+    fun discontinuityDropsPartialWindowAndResetsHiddenPredictorHistory() {
         val predictor = FakePredictor(mutableListOf(0.9f))
         val detector = OpenWakeWordPcmWakeDetector(predictor = predictor, threshold = 0.5f)
 
         detector.accept(frame(0, 0, 1))
         detector.accept(frame(1, 320, 1))
 
-        // Missing samples 640..959. The old 640-sample partial window must be dropped.
+        // Missing samples 640..959. Both the local 80 ms buffer and the predictor's
+        // hidden streaming feature state must be reset.
         assertNull(detector.accept(frame(3, 960, 2)))
+        assertEquals(1, predictor.resetCount)
         assertNull(detector.accept(frame(4, 1_280, 2)))
         assertNull(detector.accept(frame(5, 1_600, 2)))
         val detection = detector.accept(frame(6, 1_920, 2))
@@ -114,13 +121,14 @@ class OpenWakeWordPcmWakeDetectorTest {
     }
 
     @Test
-    fun resetClearsPartialWindowAndDebounceState() {
+    fun resetClearsPartialWindowDebounceAndPredictorState() {
         val predictor = FakePredictor(mutableListOf(0.9f, 0.9f))
         val detector = OpenWakeWordPcmWakeDetector(predictor = predictor, threshold = 0.5f)
 
         detector.accept(frame(0, 0, 1))
         detector.accept(frame(1, 320, 1))
         detector.reset()
+        assertEquals(1, predictor.resetCount)
 
         repeat(3) { index ->
             assertNull(detector.accept(frame((10 + index).toLong(), 3_200L + index * 320L, 2)))
@@ -129,6 +137,7 @@ class OpenWakeWordPcmWakeDetectorTest {
         requireNotNull(firstAfterReset)
 
         detector.reset()
+        assertEquals(2, predictor.resetCount)
         repeat(3) { index ->
             assertNull(detector.accept(frame((20 + index).toLong(), 6_400L + index * 320L, 3)))
         }
