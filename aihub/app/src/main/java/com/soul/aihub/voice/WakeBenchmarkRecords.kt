@@ -46,26 +46,29 @@ data class IntentionalWakeAnnotation(
         }
     }
 
-    fun toJsonLine(): String = jsonObject(
-        "schema_version" to 1,
-        "event_id" to eventId,
-        "recording_id" to recordingId,
-        "timestamp_ms" to timestampMs,
-        "intentional_invocation" to true,
-        "phrase" to phrase,
-        "language" to language,
-        "speaker_id" to speakerId,
-        "condition" to condition,
-        "room_id" to roomId,
-        "background" to background,
-        "distance_m" to distanceM,
-        "direction" to direction,
-        "voice_level" to voiceLevel,
-        "mention_context" to mentionContext,
-        "self_tts" to selfTts,
-        "time_bucket" to timeBucket,
-        "keyword_end_sample_index" to keywordEndSampleIndex,
-    )
+    fun toJsonLine(): String {
+        val fields = mutableListOf<Pair<String, Any?>>(
+            "schema_version" to 1,
+            "event_id" to eventId,
+            "recording_id" to recordingId,
+            "timestamp_ms" to timestampMs,
+            "intentional_invocation" to true,
+            "phrase" to phrase,
+            "language" to language,
+            "speaker_id" to speakerId,
+            "condition" to condition,
+            "room_id" to roomId,
+            "background" to background,
+            "mention_context" to mentionContext,
+        )
+        distanceM?.let { fields += "distance_m" to it }
+        direction?.let { fields += "direction" to it }
+        voiceLevel?.let { fields += "voice_level" to it }
+        selfTts?.let { fields += "self_tts" to it }
+        timeBucket?.let { fields += "time_bucket" to it }
+        keywordEndSampleIndex?.let { fields += "keyword_end_sample_index" to it }
+        return jsonObject(*fields.toTypedArray())
+    }
 }
 
 data class WakeCandidateRecord(
@@ -102,25 +105,32 @@ data class WakeCandidateRecord(
         }
     }
 
-    fun toJsonLine(): String = jsonObject(
-        "schema_version" to 1,
-        "detection_id" to detectionId,
-        "recording_id" to recordingId,
-        "timestamp_ms" to timestampMs,
-        "model_name" to modelName,
-        "model_version" to modelVersion,
-        "model_sha" to modelSha,
-        "threshold" to threshold,
-        "score" to score,
-        "device_id" to deviceId,
-        "room_id" to roomId,
-        "latency_ms" to latencyMs,
-        "accepted" to accepted,
-        "detection_sample_index" to detectionSampleIndex,
-        "matched_attempt_id" to matchedAttemptId,
-        "review_class" to reviewClass,
-        "clip_id" to clipId,
-    )
+    fun toJsonLine(): String {
+        val fields = mutableListOf<Pair<String, Any?>>(
+            "schema_version" to 1,
+            "detection_id" to detectionId,
+            "recording_id" to recordingId,
+            "timestamp_ms" to timestampMs,
+            "model_name" to modelName,
+            "model_version" to modelVersion,
+            // Compatibility aliases for the current v4_eval.py loader. The canonical
+            // schema fields above remain authoritative; additional properties are allowed.
+            "model" to modelName,
+            "version" to modelVersion,
+            "model_sha" to modelSha,
+            "threshold" to threshold,
+            "score" to score,
+            "device_id" to deviceId,
+            "accepted" to accepted,
+        )
+        roomId?.let { fields += "room_id" to it }
+        latencyMs?.let { fields += "latency_ms" to it }
+        detectionSampleIndex?.let { fields += "detection_sample_index" to it }
+        matchedAttemptId?.let { fields += "matched_attempt_id" to it }
+        reviewClass?.let { fields += "review_class" to it }
+        clipId?.let { fields += "clip_id" to it }
+        return jsonObject(*fields.toTypedArray())
+    }
 
     companion object {
         private val MODEL_SHA = Regex("^[0-9a-f]{7,64}$")
