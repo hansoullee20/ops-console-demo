@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WORKING — CONTROLLER CORE VERIFIED / WAKE + COMMAND-RECOGNITION NEXT**
+**STATE: WORKING — STAGED WAKE / HYBRID COMMAND PLAN ACCEPTED, WAKE BENCHMARK CORE IN PROGRESS**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
@@ -15,31 +15,29 @@ Base: `aihub-voice-test`
 
 ## Current verdict
 
-The Fold4 local-ASR comparator gate is closed.
+The Fold4 full-ASR comparator gate is closed.
 
 - Korean streaming Zipformer: rejected as a primary candidate.
 - SenseVoice 2025: rejected as a primary candidate after five same-PCM Fold4 trials.
-- Moonshine tiny-ko: remains the incumbent local baseline, but is **not accepted for production physical-device execution**.
-- `VoiceSessionController` core is implemented and verified by CI.
-- `MainActivity` must not be migrated to the new production voice path until wake and command-recognition/ASR gates pass.
+- Moonshine tiny-ko: remains the incumbent local full-ASR baseline, but is **not accepted for production physical-device execution**.
+- `VoiceSessionController` core is implemented and CI-verified.
+- Deep-research findings are now adopted as an implementation direction: staged wake detection, long-negative wake measurement, and hybrid/constrained authorization for physical commands.
+- `MainActivity` must not be migrated until wake and physical-command safety gates are credible.
 
-No additional Fold4 input is required for the Moonshine-vs-SenseVoice comparator.
+No additional Fold4 input is currently required from the user.
 
-## Architecture implemented
+## Implemented architecture
 
 - `AudioEngine` is the sole `AudioRecord` owner.
 - Canonical audio: 16 kHz, mono, PCM16, 20 ms frames.
 - `PcmRingBuffer` provides pre-roll without microphone handoff.
-- Wake/VAD/ASR/diagnostics consume supplied PCM and do not acquire the microphone.
+- Wake/VAD/ASR/diagnostics consume caller-owned PCM.
 - `PcmFrame` carries monotonic sequence/sample-position metadata.
 - `PcmContinuityTracker` detects gaps/out-of-order frames.
-- `UtteranceAudioIntegrityGate` latches an utterance untrusted after any PCM discontinuity.
-- Physical command authorization must fail closed when PCM integrity is lost.
-- Android `SpeechRecognizer` remains compatibility/diagnostic evidence only.
+- `UtteranceAudioIntegrityGate` fails physical command authorization closed after any PCM discontinuity.
+- Android `SpeechRecognizer` is compatibility/diagnostic evidence only.
 
 ## VoiceSessionController — implemented and verified
-
-The ASR-agnostic controller now owns voice-session lifecycle state outside `MainActivity`.
 
 Implemented invariants:
 
@@ -47,10 +45,10 @@ Implemented invariants:
 - generation tokens reject stale PCM/TTS callbacks;
 - bounded recoverable-failure budget;
 - explicit `MIC_OFF` / `DEGRADED` states;
-- full connected transcript is routed once, so an already-captured command suffix is not discarded;
+- a command suffix already captured with the wake phrase is routed once instead of being discarded;
 - TTS speaking state rejects recursive new capture;
-- physical device execution requires `UtteranceAudioIntegrityGate.canAuthorizeDeviceCommand()`;
-- duplicate/stale finish callbacks cannot execute a device command twice.
+- physical execution requires `UtteranceAudioIntegrityGate.canAuthorizeDeviceCommand()`;
+- duplicate/stale finish callbacks cannot execute twice.
 
 Verification:
 
@@ -60,105 +58,37 @@ Verification:
 - debug APK build: success;
 - artifact upload: success.
 
-The controller is implemented as a core component only. It is not yet the production `MainActivity` path.
+The controller is not yet wired as the production `MainActivity` lifecycle owner.
 
 ## Fold4 ASR evidence
 
-Benchmark phrases:
+Core benchmark phrases:
 
 1. `옥자야 뭐하니`
 2. `옥자 TV 켜줘`
 3. `옥자 에어컨 꺼줘`
 
-### Earlier Moonshine vs Zipformer corpus — 10 runs
+### Moonshine tiny-ko
 
-Moonshine tiny-ko:
+Earlier 10-run corpus:
 
-- non-empty output: **10/10**;
 - semantic suffix: **7/10**;
 - conversational `뭐하니`: **4/4**;
 - physical device commands: **3/6**;
 - mean init: **~625 ms**;
 - mean replay/decode: **~160 ms**.
 
-Korean streaming Zipformer:
+Five later same-PCM runs:
 
-- non-empty output: **9/10**;
-- semantic suffix: **4/10**;
-- conversational `뭐하니`: **4/4**;
-- physical device commands: **0/6**;
-- positive `<EMPTY>` failure: **1/10**;
-- mean init: **~1344 ms**;
-- mean replay/decode: **~433 ms**.
-
-Decision: Zipformer is historical/fail-fast evidence only.
-
-## Moonshine vs SenseVoice Fold4 gate — five runs
-
-SenseVoice configuration in the APK:
-
-- model: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`;
-- `language = "ko"`;
-- inverse text normalization disabled.
-
-### Run 1 — `옥자야 뭐하니`
-Saved case: `1787220854150-0`
-
-Moonshine: `옥자야 뭐하니?` — suffix **true**, init 615 ms, decode 135 ms.
-SenseVoice: unusable non-Korean/CJK output — suffix **false**, init 1777 ms, decode 316 ms.
-
-### Run 2 — `옥자 TV 켜줘`
-Saved case: `1787220869070-1`
-
-Moonshine: `옥자 TV 켜줘.` — suffix **true**, init 609 ms, decode 151 ms.
-SenseVoice: unusable mixed Latin/CJK output — suffix **false**, init 2032 ms, decode 339 ms.
-
-### Run 3 — `옥자 에어컨 꺼줘`
-Saved case: `1787220883769-2`
-
-Moonshine: unrelated text — suffix **false**, init 618 ms, decode 168 ms.
-SenseVoice: unusable CJK output — suffix **false**, init 2033 ms, decode 318 ms.
-
-### Run 4 — `옥자 에어컨 꺼줘`
-Saved case: `1787220945621-2`
-
-Moonshine: `독자 에어컨 꺼줘.` — suffix **true**, init 600 ms, decode 161 ms.
-SenseVoice: `O渣 ECO 过做`-like mixed output — suffix **false**, init 1999 ms, decode 324 ms.
-
-### Run 5 — `옥자 에어컨 꺼줘`
-Saved case: `1787220961785-2`
-
-Moonshine: `먹자 에어컨 꺼줘.` — suffix **true**, init 642 ms, decode 161 ms.
-SenseVoice: short unusable CJK output — suffix **false**, init 2050 ms, decode 328 ms.
-
-### Five-run aggregate
-
-Moonshine tiny-ko:
-
-- semantic suffix: **4/5 (80%)**;
-- physical device commands: **3/4 (75%)**;
-- silent failures: **0/5**;
+- semantic suffix: **4/5**;
+- physical device commands: **3/4**;
 - mean init: **616.8 ms**;
 - mean replay/decode: **155.2 ms**.
 
-SenseVoice 2025:
-
-- semantic suffix: **0/5**;
-- physical device commands: **0/4**;
-- silent failures: **0/5** — it returned text, but the text was unusable;
-- mean init: **1978.2 ms**;
-- mean replay/decode: **325.0 ms**.
-
-Decision: **SenseVoice 2025 is removed from the primary candidate path.** No further manual Fold4 repetition is justified for this comparator.
-
-### Combined observed Moonshine evidence
-
-Combining the earlier 10-run corpus with the five SenseVoice-comparison runs:
+Combined observed evidence:
 
 - semantic suffix: **11/15 (73.3%)**;
 - physical device commands: **6/10 (60%)**.
-
-This combined observation is useful engineering evidence, not a production acceptance corpus. The command error modes remain unacceptable for physical actuation.
 
 Known hard failures include:
 
@@ -166,81 +96,192 @@ Known hard failures include:
 - `에어컨 꺼줘` -> `에어컨 꺼져`;
 - unrelated transcription for a valid AC command.
 
-## Benchmark scoring rules
+Decision: Moonshine remains the full-ASR baseline for comparison/conversation, not physical actuator authority.
 
-Transcript fidelity and command preservation remain separate metrics.
+### SenseVoice 2025
 
-Allowed device-token equivalence is deliberately narrow:
+Configuration:
 
-- `TV`;
-- `티비`;
-- `티브이`;
-- `텔레비전`.
+- model: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`;
+- `language = "ko"`;
+- inverse text normalization disabled.
 
-Punctuation/spacing differences may be ignored for semantic suffix scoring.
+Five Fold4 same-PCM trials:
 
-Action changes are always failures:
+- semantic suffix: **0/5**;
+- physical commands: **0/4**;
+- mean init: **1978.2 ms**;
+- mean replay/decode: **325.0 ms**;
+- non-empty but unusable CJK/mixed-script text.
 
-- `켜줘` -> `꺼줘`;
-- `꺼줘` -> `꺼져`.
+Decision: rejected primary candidate; stop manual collection.
 
-A production physical command must preserve the intended target and action and pass PCM-integrity authorization. Uncertain commands should be rejected rather than guessed.
+### Korean streaming Zipformer
 
-## Next execution order
+Earlier Fold4 evidence:
 
-### Task E — wake benchmark
+- semantic suffix: **4/10**;
+- physical commands: **0/6**;
+- positive `<EMPTY>` failure: **1/10**;
+- mean init: **~1344 ms**;
+- mean replay/decode: **~433 ms**.
 
-First candidate: **Porcupine low-level PCM API**, using only caller-supplied 16 kHz PCM from `AudioEngine`.
+Decision: historical/fail-fast evidence only.
 
-Do not use a high-level wake manager that owns microphone capture.
+## Research-backed architecture decisions adopted on 2026-08-21
 
-Initial measurements:
+See `architecture/ADR-0003-STAGED-WAKE-HYBRID-COMMAND.md`.
 
-- false reject rate;
+### Wake
+
+Target topology:
+
+```text
+AudioEngine PCM
+  -> Stage A high-recall KWS
+  -> Stage B high-precision Okja phrase verifier
+  -> optional speaker policy
+  -> directed-speech / command gate
+  -> recognition
+```
+
+Candidate order is now:
+
+1. **openWakeWord** as the first open/custom Stage-A prototype;
+2. **Porcupine low-level PCM** as an independent Korean/Android commercial benchmark control, not the default final licensing choice;
+3. **sherpa-onnx KWS** as a longer-term open runtime candidate after an Okja/Korean model path is evidenced.
+
+Primary benchmark trigger: `옥자야`.
+Short alias/control: `옥자`, with stronger Stage-B scrutiny.
+
+### Physical commands
+
+Unrestricted full-ASR text is no longer considered a sufficient production authorization source.
+
+Target policy:
+
+```text
+full ASR
+  + command-specialized acoustic/verifier evidence
+  + deterministic target/action validation
+  + clean PCM integrity
+  -> execute only when evidence is consistent
+```
+
+Any target/action disagreement becomes abstention / ask-again.
+
+General conversation still uses full ASR.
+
+### Wake measurement progression
+
+```text
+10 min developer replay
+  -> 1 h controlled room
+  -> 24 h household smoke
+  -> 100 h multi-condition negative
+  -> 300+ h release-gate negative
+  -> multi-household pilot
+```
+
+Wake reports must include recall/FRR, false activations/hour, P50/P95 latency, TV/background false activations, self-TTS false activations, CPU/PSS, and later battery/thermal metrics.
+
+Zero false activations over about 300 negative hours corresponds to an approximate 95% Poisson upper bound near 0.01 false activations/hour (`~3/T`).
+
+### TTS and Android lifecycle
+
+- first production behavior stays half-duplex: `VoiceSessionController` blocks wake/capture during TTS;
+- full-duplex/AEC is deferred until measured need;
+- the eventual microphone foreground service must be launched from a visible/user-authorized Android flow rather than assuming arbitrary background microphone-service start is allowed.
+
+## Work started now
+
+A deterministic same-PCM wake benchmark core has been added:
+
+- `WakeBenchmarkHarness.kt`;
+- `WakeBenchmarkHarnessTest.kt`.
+
+It scores detector output in sample time rather than wall-clock time and separates:
+
+- intentional wake recall;
+- miss count;
+- extra detections in positive cases;
+- false activations/hour using negative-only listening time;
+- keyword-end detection latency;
+- P50/P95 aggregate latency.
+
+This core opens no microphone and is compatible with the single-owner PCM invariant.
+
+## Execution order
+
+### Task E0 — wake benchmark infrastructure — CURRENT
+
+1. land/verify deterministic wake benchmark core;
+2. add annotation/JSON persistence format for intentional wakes and negative listening cases;
+3. add threshold/report aggregation suitable for long household replay.
+
+Pass condition: JVM tests and normal CI green; metrics remain deterministic across identical replay.
+
+### Task E1 — Stage-A wake bake-off
+
+1. implement openWakeWord PCM adapter/prototype path;
+2. implement Porcupine low-level PCM benchmark control without its microphone manager;
+3. compare `옥자야` and `옥자` on identical PCM and Fold4.
+
+Initial pass/fail measurements:
+
+- recall / FRR;
 - false activations/hour;
-- keyword-end to detection latency;
-- CPU/PSS;
-- TV/background-speech robustness;
-- TTS self-trigger behavior;
-- `옥자` versus longer `옥자야` trigger behavior.
+- P50/P95 latency;
+- TV/background robustness;
+- self-TTS false activation;
+- CPU/PSS.
 
-### Task F — command-recognition strategy
+Do not pick the final engine from a short positive-only test.
 
-Moonshine remains the incumbent full-ASR baseline, not a production authorization source.
+### Task E2 — Stage-B phrase verification
 
-Before selecting a final physical-command path, benchmark whether constrained/hybrid recognition can reduce dangerous action inversions. Candidate directions include a command-specialized acoustic classifier or second-pass action verification while general conversation remains on full ASR.
+Train/implement a higher-precision verifier using true wakes plus Stage-A false candidates/hard negatives.
 
-No such hybrid path is selected yet; it must be justified by research and same-PCM/device evidence.
+Pass condition: materially reduce false activations without unacceptable recall loss on the same benchmark corpus.
 
-### Task G — end-to-end PCM pipeline
+### Task F — hybrid physical-command authorization
+
+Benchmark Moonshine transcript evidence against a constrained physical-command verifier/classifier focused on target + action minimal contrasts.
+
+Required release behavior:
+
+- opposite-action execution: **0 observed**, release-blocking;
+- false physical execution from non-command/false wake: **0 observed**, release-blocking;
+- uncertain/conflicting evidence: abstain/ask again;
+- representative command correctness target remains **>=98%**, while wrong-action rate is treated as more important than raw accuracy.
+
+### Task G — end-to-end PCM integration
 
 After wake and command-recognition gates are credible:
 
-`AudioEngine -> wake -> pre-roll/live PCM -> ASR/command recognition -> VoiceSessionController -> deterministic router -> TTS`
-
-Keep one microphone owner throughout.
+`AudioEngine -> Stage A/B wake -> pre-roll/live PCM -> ASR/command verifier -> VoiceSessionController -> deterministic router -> TTS`
 
 ### Task H — production migration
 
 Only after the above gates:
 
-- migrate `MainActivity` to `AudioEngine` + `VoiceSessionController`;
-- remove the old Gate -> release -> `SpeechRecognizer` production topology;
-- add Android microphone foreground-service lifecycle;
-- split diagnostic and release build surfaces;
-- run long negative/positive soak tests.
+- migrate `MainActivity`;
+- remove old Gate -> release -> `SpeechRecognizer` production topology;
+- add Android microphone foreground-service lifecycle through visible/user-authorized start;
+- split diagnostic and release surfaces;
+- run long positive/negative soak tests.
 
 ## Current blocker
 
 There is no repository/build blocker.
 
-The open engineering gates are wake reliability and production-safe command recognition. Additional user hardware input is not required until a new benchmark APK is ready.
+The active engineering gate is completion of the wake benchmark infrastructure, followed by the Stage-A bake-off. No user hardware input is required until a new benchmark APK is ready.
 
 ## Documentation hierarchy
 
-1. `STATUS.md` — current implemented state and next actions.
+1. `STATUS.md` — implemented state and next actions.
 2. `ARCHITECTURE.md` — target architecture.
-3. ADRs — decision rationale.
+3. `architecture/ADR-*.md` — accepted decisions and rationale.
 4. `SECURITY_BACKLOG.md` — deferred security/release gates.
 5. `architecture/VOICE_ENGINE_BENCHMARK_PLAN.md` — benchmark methodology and candidate status.
 6. Historical `AIHUB_*.md` / diagnostic notes — evidence only.
