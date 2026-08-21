@@ -7,37 +7,52 @@ import org.junit.Test
 
 class WakeBenchmarkRecordsTest {
     @Test
-    fun intentionalWakeJsonLineIsStableAndEscaped() {
+    fun intentionalWakeJsonLineMatchesExistingV4ContractAndEscapesText() {
         val line = IntentionalWakeAnnotation(
-            caseId = "case-1",
-            attemptId = "attempt-1",
-            keyword = "옥자야",
-            keywordEndSampleIndex = 12_345L,
+            eventId = "attempt-1",
+            recordingId = "case-1",
+            timestampMs = 771.5,
+            phrase = "옥자야",
+            language = "ko-KR",
             speakerId = "speaker\"A",
-            condition = "tv\non",
-            matchEarlyMs = 100,
-            matchLateMs = 800,
+            condition = "intentional",
+            roomId = "livingroom",
+            background = "tv\non",
+            mentionContext = false,
+            keywordEndSampleIndex = 12_345L,
+            distanceM = 2.5,
+            direction = "front",
+            voiceLevel = "normal",
+            selfTts = false,
+            timeBucket = "day",
         ).toJsonLine()
 
         assertEquals(
-            "{\"schema_version\":\"1.0\",\"record_type\":\"intentional_wake\",\"case_id\":\"case-1\",\"attempt_id\":\"attempt-1\",\"keyword\":\"옥자야\",\"keyword_end_sample_index\":12345,\"speaker_id\":\"speaker\\\"A\",\"condition\":\"tv\\non\",\"match_early_ms\":100,\"match_late_ms\":800}",
+            "{\"schema_version\":1,\"event_id\":\"attempt-1\",\"recording_id\":\"case-1\",\"timestamp_ms\":771.5,\"intentional_invocation\":true,\"phrase\":\"옥자야\",\"language\":\"ko-KR\",\"speaker_id\":\"speaker\\\"A\",\"condition\":\"intentional\",\"room_id\":\"livingroom\",\"background\":\"tv\\non\",\"distance_m\":2.5,\"direction\":\"front\",\"voice_level\":\"normal\",\"mention_context\":false,\"self_tts\":false,\"time_bucket\":\"day\",\"keyword_end_sample_index\":12345}",
             line,
         )
     }
 
     @Test
-    fun candidateJsonLinePreservesNullsForReviewFields() {
+    fun candidateJsonLineMatchesExistingDetectionContractAndPreservesReviewNulls() {
         val line = WakeCandidateRecord(
-            caseId = "negative-1",
-            candidateId = "candidate-7",
-            detectorName = "stage-a",
-            keyword = "옥자야",
-            detectionSampleIndex = 3_200L,
+            detectionId = "candidate-7",
+            recordingId = "negative-1",
+            timestampMs = 200.0,
+            modelName = "stage-a",
+            modelVersion = "0.1-test",
+            modelSha = "abcdef1",
+            threshold = 0.5,
             score = 0.61,
-            decision = "rejected",
+            deviceId = "fold4-01",
+            roomId = "livingroom",
+            accepted = false,
+            detectionSampleIndex = 3_200L,
         ).toJsonLine()
 
+        assertTrue(line.contains("\"schema_version\":1"))
         assertTrue(line.contains("\"score\":0.61"))
+        assertTrue(line.contains("\"accepted\":false"))
         assertTrue(line.contains("\"matched_attempt_id\":null"))
         assertTrue(line.contains("\"review_class\":null"))
         assertTrue(line.contains("\"clip_id\":null"))
