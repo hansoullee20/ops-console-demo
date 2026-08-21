@@ -1,24 +1,33 @@
 # Okja Voice Engine Benchmark Plan
 
-Revalidated: 2026-08-21 against current Fold4 evidence and the verified `VoiceSessionController` core.
+Revalidated: 2026-08-21 against Fold4 ASR evidence, the verified `VoiceSessionController`, and the staged-wake research decision in ADR-0003.
 
-All recognition engines must receive the same recorded PCM when compared. Microphone behavior is benchmarked separately on-device.
+All compared engines must receive the same recorded PCM whenever possible. Microphone behavior and Android lifecycle are benchmarked separately on-device.
 
 ## Architecture decision
 
-Android `SpeechRecognizer` remains a compatibility/fallback experiment, not the target continuous-recognition architecture.
+The production direction is one `AudioEngine` microphone owner with all wake/VAD/ASR/command-recognition components consuming supplied PCM.
 
-The production direction remains one `AudioEngine` microphone owner with all wake/VAD/ASR/command-recognition components consuming supplied PCM.
+Android `SpeechRecognizer` remains compatibility/diagnostic evidence only.
 
-## Current recognition candidate status
+Wake is now evaluated as a staged system rather than as one perfect detector:
+
+```text
+Stage A high-recall KWS
+  -> Stage B phrase verifier
+  -> directed-speech / command gate
+  -> recognition
+```
+
+Physical device control is also staged: full ASR can provide transcript evidence, but a physical action requires command-specialized evidence plus deterministic target/action validation and clean PCM integrity.
+
+## Current full-ASR candidate status
 
 ### 1. sherpa-onnx Moonshine tiny-ko — incumbent full-ASR baseline
 
 Model: `sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27`
 
-Observed Fold4 evidence:
-
-Earlier 10-run corpus:
+Earlier 10-run Fold4 corpus:
 
 - semantic suffix: **7/10**;
 - conversational `뭐하니`: **4/4**;
@@ -38,13 +47,13 @@ Combined observed evidence:
 - semantic suffix: **11/15 (73.3%)**;
 - physical device commands: **6/10 (60%)**.
 
-Moonshine remains the fastest and strongest observed local full-ASR baseline, but it is **not production-approved for physical device execution** because action inversions and unrelated transcriptions have occurred.
+Decision: retain as the conversational/full-ASR baseline. Do not authorize physical actions from Moonshine text alone.
 
 ### 2. sherpa-onnx SenseVoice 2025 — rejected primary candidate
 
 Model: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`
 
-Okja adapter configuration:
+Okja adapter:
 
 - explicit `language = "ko"`;
 - inverse text normalization disabled;
@@ -53,12 +62,12 @@ Okja adapter configuration:
 Five Fold4 same-PCM trials:
 
 - semantic suffix: **0/5**;
-- physical device commands: **0/4**;
-- silent failures: **0/5**, but returned text was unusable CJK/mixed-script output;
+- physical commands: **0/4**;
 - mean init: **1978.2 ms**;
-- mean replay/decode: **325.0 ms**.
+- mean replay/decode: **325.0 ms**;
+- returned unusable CJK/mixed-script output rather than empty output.
 
-Decision: stop manual SenseVoice collection. Retain the adapter and evidence only for historical/debug use unless upstream behavior changes materially.
+Decision: stop manual SenseVoice collection. Historical/debug use only unless upstream behavior changes materially.
 
 ### 3. Korean streaming Zipformer — rejected primary candidate
 
@@ -67,46 +76,57 @@ Model: `sherpa-onnx-streaming-zipformer-korean-2024-06-16`
 Observed Fold4 evidence:
 
 - semantic suffix: **4/10**;
-- physical device commands: **0/6**;
+- physical commands: **0/6**;
 - positive `<EMPTY>` failure: **1/10**;
 - mean init: **~1344 ms**;
 - mean replay/decode: **~433 ms**.
 
 Decision: historical/fail-fast evidence only.
 
-### 4. Android SpeechRecognizer / external-audio experiments — compatibility control only
+## Physical-command strategy benchmark
 
-Use only to investigate platform behavior or compare system recognizer characteristics. Passing an external-audio experiment does not make it the continuous production recognizer.
+The next command-safety benchmark compares the incumbent Moonshine transcript path with a constrained command-specialized path.
 
-## Physical-command strategy gate
+Candidate implementations may include:
 
-The current evidence does **not** support authorizing physical actions from unrestricted full-ASR text alone.
-
-The next command-safety benchmark should compare the incumbent Moonshine path against one or more constrained/hybrid approaches when implementation research justifies them, for example:
-
-- command-specialized acoustic intent classifier;
+- acoustic intent classifier for a bounded device/action vocabulary;
 - second-pass action-word verifier;
 - constrained command grammar;
 - confidence/ambiguity abstention;
 - joint scoring between ASR and deterministic command candidates.
 
-The benchmark priority is not generic WER. It is correct target/action preservation with near-zero wrong physical execution.
+The final model form is not predetermined. The authorization behavior is predetermined:
 
-If a verifier disagrees with ASR on an action such as `켜` versus `꺼`, the system should reject/ask again rather than execute.
+```text
+ASR target/action
+  + specialized command evidence
+  + deterministic parser/policy
+  + PCM integrity
+  -> execute only if consistent
+```
 
-## Corpus
+Disagreement on target/action/negation => **ABSTAIN / ASK AGAIN**.
 
-Core connected-utterance phrases remain:
+Generic WER is secondary. The primary metrics are:
+
+- correct physical execution;
+- wrong-opposite-action execution;
+- wrong-target execution;
+- false physical execution;
+- abstention rate;
+- command latency.
+
+## Recognition corpus
+
+Core fail-fast connected utterances:
 
 1. `옥자야 뭐하니`
 2. `옥자 TV 켜줘`
 3. `옥자 에어컨 꺼줘`
 
-The three-phrase set is a fail-fast device gate, not a production acceptance corpus.
+The three-phrase set is not a production acceptance corpus.
 
-Any new recognition approach should first run the same three phrases on identical PCM before expanding to a larger corpus.
-
-A larger acceptance corpus must add minimal-contrast and negative cases, including:
+The larger command-safety corpus must include:
 
 - `켜` / `꺼`;
 - `켜줘` / `꺼줘`;
@@ -114,137 +134,215 @@ A larger acceptance corpus must add minimal-contrast and negative cases, includi
 - negated commands;
 - target substitutions;
 - wake-only speech;
-- conversational speech containing device words without a command.
+- device words used conversationally without commands;
+- TV/AC wording variants;
+- quiet and elderly-soft speech;
+- background TV/news/drama speech.
 
 ## Command scoring rules
 
 Transcript fidelity and device-command preservation remain separate metrics.
 
-Tiny allowed target alias set:
+Tiny allowed target aliases:
 
 - `TV`;
 - `티비`;
 - `티브이`;
 - `텔레비전`.
 
-Punctuation/spacing differences do not by themselves fail a semantic suffix.
+Punctuation/spacing differences do not by themselves fail semantic command scoring.
 
-Action changes are hard failures and must never be normalized away:
+Action changes are hard failures and are never normalized away:
 
 - `켜줘` -> `꺼줘`;
 - `꺼줘` -> `꺼져`.
 
-Production authorization independently validates target/action and PCM integrity. Benchmark normalization is not authorization logic.
+Benchmark normalization is not authorization logic.
 
-## Recognition measurements
+## Wake benchmark infrastructure
 
-Measure where applicable:
+`WakeBenchmarkHarness` replays recorded PCM16 as canonical `PcmFrame`s into a microphone-free `WakeDetector` and scores detections in **sample time**.
 
-- connected-utterance preservation;
-- semantic command-suffix preservation;
-- action inversion count;
-- wrong-target count;
-- abstention/rejection rate;
-- false physical execution rate;
-- transcript exactness / CER on larger corpora;
-- positive-case empty outputs;
-- model cold init;
-- warm/final decode latency;
-- CPU;
-- peak PSS/RSS;
-- thermal/battery impact after correctness passes.
+Why sample time: an offline detector may internally use wall-clock timestamps that do not correspond to replay speed. The harness therefore defines detection position as the end-sample index of the frame that emitted `WakeDetection`.
 
-For physical commands, a rejected uncertain command is preferable to a wrong action.
+Current metrics:
 
-## Closed Fold4 SenseVoice gate
+- intentional attempts;
+- detected attempts / misses;
+- recall;
+- unmatched extra detections in positive cases;
+- false activations from negative-only listening cases;
+- negative listening hours;
+- false activations/hour;
+- keyword-end detection latency;
+- aggregate P50/P95 latency.
 
-The five-run device gate is complete.
+`WakeBenchmarkHarnessTest` covers deterministic sample-time matching, keyword mismatch, negative-case false activations/hour, and aggregate recall/latency behavior.
 
-Final observed comparison:
+Next infrastructure additions:
 
-| Metric | Moonshine | SenseVoice 2025 |
-|---|---:|---:|
-| Semantic suffix | 4/5 | 0/5 |
-| Physical commands | 3/4 | 0/4 |
-| Mean init | 616.8 ms | 1978.2 ms |
-| Mean decode | 155.2 ms | 325.0 ms |
+- immutable annotation JSONL for intentional wake attempts;
+- candidate/near-threshold event records;
+- deterministic threshold sweep/reporting;
+- long negative audio manifests and per-condition breakdowns.
 
-Decision: SenseVoice is not a current production candidate. Do not request more Fold4 repetitions for this pair.
+## Wake candidate order
 
-## VoiceSessionController verification gate
+### 1. openWakeWord — first open Stage-A prototype
 
-The ASR-agnostic controller core is implemented and verified.
+Purpose:
 
-CI run `#259` / `32358751275` completed successfully with:
+- establish an open/custom high-recall Stage-A baseline;
+- retain caller-owned PCM topology;
+- generate candidate clips for Stage-B verifier training/evaluation.
 
-- deterministic pre-build failure matrix;
-- Android JVM tests;
-- debug APK build;
-- artifact upload.
+Do not assume production quality from library reputation. Okja-specific Korean performance must be measured.
 
-Controller tests cover:
+### 2. Porcupine low-level PCM — independent commercial benchmark control
 
-- exactly-once physical execution for a current generation;
-- fail-closed behavior after PCM discontinuity;
-- stale-generation frame rejection;
-- stale TTS callback rejection;
-- TTS recursion blocking;
-- bounded recoverable failures and explicit degraded recovery.
+Use only the low-level `Porcupine` API with caller-owned PCM. Do not use `PorcupineManager` in Okja's production topology because it integrates microphone capture.
 
-The next benchmark work should not re-open controller fundamentals unless integration exposes a real failure.
+Porcupine has credible Android and Korean custom-wake support, making it a useful independent benchmark. It also requires an AccessKey/vendor dependency, so benchmark success does not automatically satisfy the final open/local product constraint.
 
-## Wake candidates
+### 3. sherpa-onnx KWS — longer-term open runtime candidate
 
-### 1. Porcupine low-level PCM API — first benchmark candidate
+sherpa-onnx provides Android keyword-spotting infrastructure, but Okja should not assume Korean readiness until an appropriate Korean/Okja model or tokenization path is demonstrated and benchmarked.
 
-Use the low-level PCM API only. Integrated microphone-manager APIs violate the one-microphone-owner invariant.
+## Wake phrase matrix
 
-Benchmark both `옥자` and a longer `옥자야` form if custom keyword tooling permits it.
+Primary production benchmark phrase:
 
-Porcupine requires an AccessKey, so this is a benchmark baseline rather than a final licensing commitment.
+- `옥자야`.
 
-### 2. sherpa-onnx KWS — research candidate
+Short alias/control:
 
-Do not assume Korean readiness until a Korean-capable model/tokenization path is demonstrated.
+- `옥자`.
 
-### 3. Other PCM-fed wake engines
+Later optional variants:
 
-Evaluate only if they have credible Android ARM64/raw-PCM support and can be benchmarked without acquiring the microphone.
+- `헤이 옥자`;
+- `오케이 옥자`;
+- English variants only if product requirements justify them.
+
+The shorter `옥자` must be tested especially aggressively against conversational mentions and similar-sounding background speech.
+
+## Wake condition matrix
+
+At minimum vary:
+
+| Dimension | Conditions |
+|---|---|
+| Distance | 0.5 m / 2 m / 4 m |
+| Direction | front / side / behind |
+| Voice | normal / quiet / elderly-soft |
+| Environment | quiet / TV / Korean news / drama / YouTube / kitchen / AC-fan |
+| Context | intentional wake / mention of Okja / similar-sounding words |
+| Device audio | idle / Okja TTS / controlled TV playback |
+| Speaker | primary senior / family / other speaker |
+| Time/state | day / evening / screen-off ambient |
 
 ## Wake measurements
 
-- false reject rate;
+Top-line:
+
+- recall;
+- FRR = `1 - recall`;
 - false activations/hour;
-- keyword-end to detection latency;
-- CPU / PSS;
-- TV/background-speech robustness;
-- quiet/elderly-speaker robustness;
-- TTS self-trigger rate;
-- effect of short `옥자` vs longer `옥자야` trigger.
+- mean hours between false activations;
+- P50/P95 detection latency.
+
+Breakdowns:
+
+- phrase-specific recall;
+- speaker-specific recall;
+- distance-specific recall;
+- TV-on recall;
+- TV/background false activations/hour;
+- self-TTS false activations/hour;
+- Stage-A candidate rate/hour;
+- Stage-B rejection rate;
+- CPU average/peak;
+- PSS/RSS average/peak;
+- battery/thermal after correctness gates pass.
+
+## Long-negative statistical gate
+
+A short household test cannot certify a rare false-wake rate.
+
+For zero observed false activations, the approximate 95% Poisson upper bound is:
+
+`lambda_95 ~= 3 / T_hours`.
+
+Therefore:
+
+- zero events in 24 h only supports an upper bound around 0.125/hour;
+- zero events in ~300 h supports an upper bound around 0.01/hour.
+
+Progression:
+
+```text
+10 min developer replay
+  -> 1 h controlled room
+  -> 24 h household smoke
+  -> 100 h multi-condition negative
+  -> 300+ h release-gate negative
+  -> multi-household pilot
+```
+
+The benchmark should preserve near-threshold rejected candidates as well as successful wakes.
 
 ## Initial production-oriented gates
 
-Target: Galaxy Z Fold4 / SM-F936N.
+Target device: Galaxy Z Fold4 / SM-F936N.
 
 Architecture gates:
 
 - one active `AudioRecord` throughout wake -> recognition;
-- duplicate physical command execution = **0**;
-- production path system recognition cue = **0**;
-- PCM-discontinuous utterance physical execution = **0**.
+- duplicate physical execution = **0**;
+- production system recognition cue = **0**;
+- physical execution after PCM discontinuity = **0**.
 
-Recognition gates should separate success from dangerous errors:
+Physical-command gates:
 
-- connected command correctness: target **>= 98%** on the final representative corpus;
-- wrong opposite-action execution: target **0 observed** in acceptance/soak testing and treated as release-blocking;
-- false physical execution from non-command/false wake: release-blocking;
-- uncertain/conflicting recognition should abstain rather than guess.
+- representative correct command execution: target **>=98%**;
+- opposite-action physical execution: **0 observed**, release-blocking;
+- wrong-target physical execution: **0 observed**, release-blocking;
+- false physical execution from non-command/false wake: **0 observed**, release-blocking;
+- uncertain/conflicting evidence must abstain.
 
-Wake initial gate:
+Wake gates are staged rather than one final number:
 
-- false activation target **<= 0.2/hour** in the first long-negative benchmark, subject to adjustment after realistic home-environment measurement.
+- developer/early device gate: show useful recall and a false-activation rate low enough to justify longer testing;
+- 24 h smoke: no catastrophic TV/self-TTS behavior;
+- 100 h: stable threshold and condition breakdowns;
+- 300+ h release gate: target evidence consistent with <~0.01 false activations/hour when zero false events are observed.
 
-These thresholds are engineering gates, not claims that the current small corpus proves production reliability.
+Do not infer production readiness from the three-phrase corpus or a short wake session.
+
+## TTS self-trigger benchmark
+
+First production implementation is half-duplex: new wake/capture entry is blocked while Okja TTS is active.
+
+Still benchmark self-playback explicitly because Stage-A candidates during TTS are useful hard negatives for Stage B even when the controller prevents final activation.
+
+Full-duplex/AEC is deferred until baseline correctness is stable.
+
+## Android lifecycle benchmark
+
+Foreground-service lifecycle is measured after recognition correctness is credible.
+
+The microphone foreground service must be launched from a visible/user-authorized flow compatible with modern Android while-in-use microphone restrictions.
+
+Measure separately:
+
+- restart/recovery behavior;
+- screen-off stability;
+- Samsung background-process behavior;
+- Bluetooth/headset routing;
+- sustained CPU/PSS;
+- battery/thermal.
+
+Do not combine lifecycle failures with wake-model accuracy statistics.
 
 ## Runtime optimization order
 
