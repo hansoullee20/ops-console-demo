@@ -5,10 +5,13 @@ package com.soul.aihub.voice
  *
  * The concrete ONNX implementation owns model/feature runtime state only. It must
  * never acquire the microphone. Input is exactly one 16 kHz PCM16 inference window.
+ * [reset] must clear any stateful feature/history buffers so PCM discontinuities can
+ * fail closed instead of leaving hidden model context spanning the gap.
  */
 interface OpenWakeWordFramePredictor : AutoCloseable {
     val modelName: String
     fun predict(pcm16: ShortArray): Float
+    fun reset() = Unit
     override fun close() = Unit
 }
 
@@ -21,9 +24,9 @@ interface OpenWakeWordFramePredictor : AutoCloseable {
  * continuity and debounce policy; model preprocessing/inference stays behind
  * [OpenWakeWordFramePredictor]. It never opens AudioRecord.
  *
- * A PCM discontinuity drops any partial 80 ms window instead of stitching audio from
- * opposite sides of a gap. That preserves the same fail-closed principle used by the
- * physical-command path.
+ * A PCM discontinuity drops any partial 80 ms window and resets predictor history
+ * instead of stitching model context from opposite sides of a gap. That preserves the
+ * same fail-closed principle used by the physical-command path.
  */
 class OpenWakeWordPcmWakeDetector(
     private val predictor: OpenWakeWordFramePredictor,
@@ -61,9 +64,11 @@ class OpenWakeWordPcmWakeDetector(
 
         val expected = nextExpectedStartSampleIndex
         if (expected != null && frame.startSampleIndex != expected) {
-            // Never construct an inference window from PCM separated by a gap or
-            // out-of-order delivery.
+            // Never construct an inference window or hidden feature history from PCM
+            // separated by a gap or out-of-order delivery.
             bufferedSamples = 0
+            lastDetectionEndSampleIndex = null
+            predictor.reset()
         }
 
         var sourceOffset = 0
@@ -117,6 +122,7 @@ class OpenWakeWordPcmWakeDetector(
         bufferedSamples = 0
         nextExpectedStartSampleIndex = null
         lastDetectionEndSampleIndex = null
+        predictor.reset()
     }
 
     override fun close() {
