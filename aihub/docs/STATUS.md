@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WORKING — STAGED WAKE / HYBRID COMMAND PLAN ACCEPTED, WAKE BENCHMARK CORE IN PROGRESS**
+**STATE: WORKING — STAGED WAKE / HYBRID COMMAND PLAN ACCEPTED, ANDROID WAKE EVIDENCE BRIDGE UNDER VERIFICATION**
 
 Repository: `hansoullee20/ops-console-demo`
 Branch: `feat/voice-pipeline-v2`
@@ -21,7 +21,8 @@ The Fold4 full-ASR comparator gate is closed.
 - SenseVoice 2025: rejected as a primary candidate after five same-PCM Fold4 trials.
 - Moonshine tiny-ko: remains the incumbent local full-ASR baseline, but is **not accepted for production physical-device execution**.
 - `VoiceSessionController` core is implemented and CI-verified.
-- Deep-research findings are now adopted as an implementation direction: staged wake detection, long-negative wake measurement, and hybrid/constrained authorization for physical commands.
+- Deep-research findings are adopted as the implementation direction: staged wake detection, long-negative wake measurement, and hybrid/constrained authorization for physical commands.
+- Existing v4 wake benchmark infrastructure is the canonical long-duration evidence system; new Android code bridges caller-owned PCM into that contract rather than creating a competing benchmark format.
 - `MainActivity` must not be migrated until wake and physical-command safety gates are credible.
 
 No additional Fold4 input is currently required from the user.
@@ -145,18 +146,18 @@ AudioEngine PCM
   -> recognition
 ```
 
-Candidate order is now:
+Candidate order:
 
-1. **openWakeWord** as the first open/custom Stage-A prototype;
-2. **Porcupine low-level PCM** as an independent Korean/Android commercial benchmark control, not the default final licensing choice;
-3. **sherpa-onnx KWS** as a longer-term open runtime candidate after an Okja/Korean model path is evidenced.
+1. **openWakeWord** — first open/custom Stage-A implementation path;
+2. **Porcupine low-level PCM** — independent Korean/Android commercial benchmark control, not the default final licensing choice;
+3. **sherpa-onnx KWS** — longer-term open runtime candidate after an Okja/Korean model path is evidenced.
 
 Primary benchmark trigger: `옥자야`.
 Short alias/control: `옥자`, with stronger Stage-B scrutiny.
 
 ### Physical commands
 
-Unrestricted full-ASR text is no longer considered a sufficient production authorization source.
+Unrestricted full-ASR text is not a sufficient production authorization source.
 
 Target policy:
 
@@ -193,47 +194,69 @@ Zero false activations over about 300 negative hours corresponds to an approxima
 - full-duplex/AEC is deferred until measured need;
 - the eventual microphone foreground service must be launched from a visible/user-authorized Android flow rather than assuming arbitrary background microphone-service start is allowed.
 
-## Work started now
+## Wake benchmark infrastructure — canonical vs Android bridge
 
-A deterministic same-PCM wake benchmark core has been added:
+The branch already contains a mature Python-side v4 benchmark system:
 
-- `WakeBenchmarkHarness.kt`;
-- `WakeBenchmarkHarnessTest.kt`.
+- `wakeword/v4_benchmark_schema.json` — canonical truth/detection JSON contract;
+- `wakeword/v4_benchmark_contract.py` — contract validation;
+- `wakeword/v4_eval.py` — one-to-one matching, recall/FRR, FPPH, confidence intervals, P50/P95, condition breakdowns, threshold sweep;
+- `wakeword/v4_replay.py` — deterministic replay infrastructure;
+- `wakeword/v4_ring_buffer_logger.py` — privacy-first candidate/manual-miss reference capture;
+- `wakeword/AIHUB_V4_HOUSEHOLD_BENCHMARK_SPEC.md` — long-duration household methodology.
 
-It scores detector output in sample time rather than wall-clock time and separates:
+That system remains canonical for mixed/long household recordings and release scoring.
 
-- intentional wake recall;
-- miss count;
-- extra detections in positive cases;
-- false activations/hour using negative-only listening time;
-- keyword-end detection latency;
-- P50/P95 aggregate latency.
+New Android-side work on the current branch:
 
-This core opens no microphone and is compatible with the single-owner PCM invariant.
+- `WakeBenchmarkHarness.kt` — short/device same-PCM replay helper; sample-time scoring; no microphone;
+- `WakeBenchmarkRecords.kt` — Android JSONL records aligned to the existing v4 truth/detection contract plus deterministic threshold-preview utilities;
+- `WakeDiagnosticCaptureBuffer.kt` — bounded in-memory candidate/manual-miss pre/post-roll capture using `AudioEngine.readPreRoll`; no second continuous ring, no filesystem I/O, no microphone ownership;
+- JVM tests for all three areas.
+
+The Android diagnostic capture only returns an in-memory clip. Raw audio persistence must remain explicit and consent/retention-gated by a diagnostic surface.
+
+A normal CI run initially exposed two stale test expectations after optional JSON fields were hardened from `null` to omission. The assertions were corrected; current wake-infrastructure changes are being reverified. This was a test-contract mismatch, not a microphone/PCM architecture failure.
+
+## openWakeWord evidence already available
+
+Do not restart openWakeWord research from zero.
+
+`wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md` already records a successful deterministic compatibility replay using:
+
+- `openwakeword==0.6.0`;
+- CPU ONNX runtime;
+- pinned official feature models;
+- pinned classifier/model provenance;
+- explicit NumPy initialization seed to neutralize openWakeWord's randomized feature-buffer priming;
+- three-repeat deterministic replay.
+
+This proves compatibility of the existing Okja model/replay path, **not production wake quality**. The next openWakeWord work is Android caller-owned PCM inference plus comparison on the canonical benchmark, not another generic library feasibility probe.
 
 ## Execution order
 
-### Task E0 — wake benchmark infrastructure — CURRENT
+### Task E0 — Android wake evidence bridge — CURRENT
 
-1. land/verify deterministic wake benchmark core;
-2. add annotation/JSON persistence format for intentional wakes and negative listening cases;
-3. add threshold/report aggregation suitable for long household replay.
+1. verify `WakeBenchmarkHarness`, v4-aligned JSONL records, and bounded diagnostic capture in CI;
+2. keep `v4_eval.py` / `v4_benchmark_schema.json` as canonical long-duration scoring and schema;
+3. connect future Android detector candidates to these records without introducing automatic raw-audio retention.
 
-Pass condition: JVM tests and normal CI green; metrics remain deterministic across identical replay.
+Pass condition: Android JVM tests and normal build green; identical replay remains deterministic; no new `AudioRecord` owner; emitted JSON is valid under the existing v4 contract.
 
 ### Task E1 — Stage-A wake bake-off
 
-1. implement openWakeWord PCM adapter/prototype path;
-2. implement Porcupine low-level PCM benchmark control without its microphone manager;
-3. compare `옥자야` and `옥자` on identical PCM and Fold4.
+1. adapt openWakeWord inference to Android **caller-owned PCM** using the already-proven model/feature pipeline;
+2. implement Porcupine low-level PCM benchmark control without `PorcupineManager`/microphone ownership;
+3. compare `옥자야` and `옥자` on identical PCM and Fold4;
+4. feed candidate/near-threshold clips into the canonical v4 evaluator and later Stage-B training set.
 
-Initial pass/fail measurements:
+Initial measurements:
 
 - recall / FRR;
 - false activations/hour;
 - P50/P95 latency;
 - TV/background robustness;
-- self-TTS false activation;
+- self-TTS candidate/false activation rate;
 - CPU/PSS.
 
 Do not pick the final engine from a short positive-only test.
@@ -242,7 +265,7 @@ Do not pick the final engine from a short positive-only test.
 
 Train/implement a higher-precision verifier using true wakes plus Stage-A false candidates/hard negatives.
 
-Pass condition: materially reduce false activations without unacceptable recall loss on the same benchmark corpus.
+Pass condition: materially reduce false activations without unacceptable recall loss on the same frozen benchmark corpus.
 
 ### Task F — hybrid physical-command authorization
 
@@ -251,9 +274,10 @@ Benchmark Moonshine transcript evidence against a constrained physical-command v
 Required release behavior:
 
 - opposite-action execution: **0 observed**, release-blocking;
+- wrong-target execution: **0 observed**, release-blocking;
 - false physical execution from non-command/false wake: **0 observed**, release-blocking;
 - uncertain/conflicting evidence: abstain/ask again;
-- representative command correctness target remains **>=98%**, while wrong-action rate is treated as more important than raw accuracy.
+- representative command correctness target remains **>=98%**, while wrong-action rate is more important than raw accuracy.
 
 ### Task G — end-to-end PCM integration
 
@@ -273,9 +297,9 @@ Only after the above gates:
 
 ## Current blocker
 
-There is no repository/build blocker.
+There is no external/user blocker.
 
-The active engineering gate is completion of the wake benchmark infrastructure, followed by the Stage-A bake-off. No user hardware input is required until a new benchmark APK is ready.
+The active engineering gate is CI verification of the Android wake evidence bridge, followed by the Android caller-owned-PCM openWakeWord path. No user hardware input is required until a new benchmark APK is ready.
 
 ## Documentation hierarchy
 
@@ -284,4 +308,5 @@ The active engineering gate is completion of the wake benchmark infrastructure, 
 3. `architecture/ADR-*.md` — accepted decisions and rationale.
 4. `SECURITY_BACKLOG.md` — deferred security/release gates.
 5. `architecture/VOICE_ENGINE_BENCHMARK_PLAN.md` — benchmark methodology and candidate status.
-6. Historical `AIHUB_*.md` / diagnostic notes — evidence only.
+6. `wakeword/AIHUB_V4_HOUSEHOLD_BENCHMARK_SPEC.md` + v4 schema/evaluator — canonical wake evidence contract.
+7. Historical `AIHUB_*.md` / diagnostic notes — evidence only.
