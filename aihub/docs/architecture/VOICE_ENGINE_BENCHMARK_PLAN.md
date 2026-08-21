@@ -1,6 +1,6 @@
 # Okja Voice Engine Benchmark Plan
 
-Revalidated: 2026-08-21 against Fold4 ASR evidence, the verified `VoiceSessionController`, and the staged-wake research decision in ADR-0003.
+Revalidated: 2026-08-21 against Fold4 ASR evidence, the verified `VoiceSessionController`, the existing v4 household benchmark stack, and the staged-wake research decision in ADR-0003.
 
 All compared engines must receive the same recorded PCM whenever possible. Microphone behavior and Android lifecycle are benchmarked separately on-device.
 
@@ -10,7 +10,7 @@ The production direction is one `AudioEngine` microphone owner with all wake/VAD
 
 Android `SpeechRecognizer` remains compatibility/diagnostic evidence only.
 
-Wake is now evaluated as a staged system rather than as one perfect detector:
+Wake is evaluated as a staged system rather than as one perfect detector:
 
 ```text
 Stage A high-recall KWS
@@ -159,44 +159,95 @@ Action changes are hard failures and are never normalized away:
 
 Benchmark normalization is not authorization logic.
 
-## Wake benchmark infrastructure
+## Canonical wake benchmark stack
 
-`WakeBenchmarkHarness` replays recorded PCM16 as canonical `PcmFrame`s into a microphone-free `WakeDetector` and scores detections in **sample time**.
+Do not create a second release benchmark format. The branch already contains the canonical long-duration stack:
 
-Why sample time: an offline detector may internally use wall-clock timestamps that do not correspond to replay speed. The harness therefore defines detection position as the end-sample index of the frame that emitted `WakeDetection`.
+- `aihub/wakeword/AIHUB_V4_HOUSEHOLD_BENCHMARK_SPEC.md` — measurement protocol;
+- `aihub/wakeword/v4_benchmark_schema.json` — canonical truth/detection schema;
+- `aihub/wakeword/v4_benchmark_contract.py` — schema/contract validation;
+- `aihub/wakeword/v4_eval.py` — one-to-one matching, recall/miss/FPPH, confidence intervals, latency/group breakdowns, deterministic threshold sweep;
+- `aihub/wakeword/v4_replay.py` — deterministic replay driver;
+- `aihub/wakeword/v4_ring_buffer_logger.py` — privacy-first candidate/manual-miss reference capture.
 
-Current metrics:
+`v4_eval.py` remains authoritative for mixed and long household recordings. It already supports:
 
-- intentional attempts;
-- detected attempts / misses;
-- recall;
-- unmatched extra detections in positive cases;
-- false activations from negative-only listening cases;
-- negative listening hours;
-- false activations/hour;
-- keyword-end detection latency;
-- aggregate P50/P95 latency.
+- 500 ms pre / 1500 ms post matching tolerance by default;
+- one detection per truth event;
+- duplicate/unmatched detections as false positives;
+- recall and miss rate;
+- FPPH / false alarms per day;
+- Wilson recall confidence interval;
+- Poisson false-positive-rate confidence interval;
+- P50/P95/mean latency;
+- breakdowns by phrase, speaker, condition, room, background, distance, direction, voice level, self-TTS and time bucket;
+- threshold sweep.
 
-`WakeBenchmarkHarnessTest` covers deterministic sample-time matching, keyword mismatch, negative-case false activations/hour, and aggregate recall/latency behavior.
+Long-recording negative exposure must exclude intentional invocation windows according to the v4 benchmark contract.
 
-Next infrastructure additions:
+## Android wake evidence bridge
 
-- immutable annotation JSONL for intentional wake attempts;
-- candidate/near-threshold event records;
-- deterministic threshold sweep/reporting;
-- long negative audio manifests and per-condition breakdowns.
+The new Android code is a bridge into the canonical v4 stack, not a replacement for it.
+
+### `WakeBenchmarkHarness`
+
+Replays short recorded PCM16 cases as canonical `PcmFrame`s into a microphone-free `WakeDetector` and scores detections in **sample time**.
+
+Why sample time: offline replay speed and detector `SystemClock` timestamps are not a stable latency reference. Detection position is therefore the end-sample index of the frame that emitted `WakeDetection`.
+
+Default match windows mirror `v4_eval.py`: 500 ms early / 1500 ms late.
+
+Use this harness for short/device same-PCM regression and detector adapter tests. Use `v4_eval.py` for canonical long/mixed household release scoring.
+
+### `WakeBenchmarkRecords`
+
+Emits Android truth/detection JSONL compatible with the existing `v4_benchmark_schema.json` fields, including model/version/provenance identifiers and optional sample-index provenance.
+
+Optional schema fields are omitted when absent instead of being serialized as invalid `null` values.
+
+Android `WakeThresholdSweep` is a deterministic local/debug preview only. It does not replace the frozen-set threshold-selection and release report in `v4_eval.py`.
+
+### `WakeDiagnosticCaptureBuffer`
+
+Provides bounded, in-memory candidate/manual-miss capture:
+
+- reuses `AudioEngine.readPreRoll` rather than owning a second continuous ring;
+- appends bounded post-roll from forwarded `PcmFrame`s;
+- never opens `AudioRecord`;
+- performs no filesystem I/O;
+- marks post-roll PCM discontinuity and incomplete flushes explicitly.
+
+A debug/benchmark surface may persist a returned clip only under the benchmark consent/retention policy.
+
+## Existing openWakeWord compatibility evidence
+
+`aihub/wakeword/OPENWAKEWORD_REAL_REPLAY_EVIDENCE.md` already proves deterministic compatibility of the current Okja replay path with openWakeWord; do not repeat basic feasibility work.
+
+Recorded compatibility inputs include:
+
+- runtime: `openwakeword==0.6.0`, CPU ONNX;
+- official openWakeWord feature-model assets pinned by SHA-256;
+- Okja classifier/model pinned by SHA-256;
+- explicit NumPy initialization seed because openWakeWord 0.6.0 primes its feature buffer from randomized PCM;
+- successful three-repeat deterministic replay.
+
+This evidence proves **runtime/model compatibility only**. The single positive replay is not a production wake-quality benchmark, and early output from seeded feature history must not be interpreted as quality evidence.
+
+Therefore the next openWakeWord milestone is:
+
+**Android caller-owned PCM inference + canonical v4 same-corpus comparison**, not another generic openWakeWord feasibility probe.
 
 ## Wake candidate order
 
-### 1. openWakeWord — first open Stage-A prototype
+### 1. openWakeWord — first open Stage-A implementation path
 
 Purpose:
 
+- run the already-proven feature/classifier pipeline from caller-owned Android PCM;
 - establish an open/custom high-recall Stage-A baseline;
-- retain caller-owned PCM topology;
-- generate candidate clips for Stage-B verifier training/evaluation.
+- generate real candidate clips for Stage-B verifier training/evaluation.
 
-Do not assume production quality from library reputation. Okja-specific Korean performance must be measured.
+The Android implementation must not import an engine wrapper that silently owns microphone capture. Reuse/adapt inference internals only if they preserve Okja's one-microphone-owner invariant and license requirements.
 
 ### 2. Porcupine low-level PCM — independent commercial benchmark control
 
@@ -265,6 +316,8 @@ Breakdowns:
 - PSS/RSS average/peak;
 - battery/thermal after correctness gates pass.
 
+Near-threshold rejected candidates should be preserved as review/training evidence when consent and retention rules permit it.
+
 ## Long-negative statistical gate
 
 A short household test cannot certify a rare false-wake rate.
@@ -289,8 +342,6 @@ Progression:
   -> multi-household pilot
 ```
 
-The benchmark should preserve near-threshold rejected candidates as well as successful wakes.
-
 ## Initial production-oriented gates
 
 Target device: Galaxy Z Fold4 / SM-F936N.
@@ -312,12 +363,12 @@ Physical-command gates:
 
 Wake gates are staged rather than one final number:
 
-- developer/early device gate: show useful recall and a false-activation rate low enough to justify longer testing;
+- developer/early device gate: useful recall and a false-activation rate low enough to justify longer testing;
 - 24 h smoke: no catastrophic TV/self-TTS behavior;
 - 100 h: stable threshold and condition breakdowns;
 - 300+ h release gate: target evidence consistent with <~0.01 false activations/hour when zero false events are observed.
 
-Do not infer production readiness from the three-phrase corpus or a short wake session.
+Do not infer production readiness from the three-phrase ASR corpus, a single openWakeWord replay, or a short wake session.
 
 ## TTS self-trigger benchmark
 
@@ -352,6 +403,6 @@ QNN/NPU/other acceleration is a later optimization after command correctness, wa
 
 ## Model provenance
 
-Provisioning scripts record archive and selected-file SHA-256 hashes. First-seen digests are benchmark provenance, not release trust anchors.
+Provisioning/replay scripts record archive/model/runtime SHA-256 hashes. First-seen digests are benchmark provenance, not release trust anchors.
 
 Before a release candidate, reviewed model/runtime digests must be promoted into a pinned release manifest.
