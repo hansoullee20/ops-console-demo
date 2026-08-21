@@ -1,6 +1,7 @@
 package com.soul.aihub.voice
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,13 +29,34 @@ class WakeBenchmarkRecordsTest {
         ).toJsonLine()
 
         assertEquals(
-            "{\"schema_version\":1,\"event_id\":\"attempt-1\",\"recording_id\":\"case-1\",\"timestamp_ms\":771.5,\"intentional_invocation\":true,\"phrase\":\"옥자야\",\"language\":\"ko-KR\",\"speaker_id\":\"speaker\\\"A\",\"condition\":\"intentional\",\"room_id\":\"livingroom\",\"background\":\"tv\\non\",\"distance_m\":2.5,\"direction\":\"front\",\"voice_level\":\"normal\",\"mention_context\":false,\"self_tts\":false,\"time_bucket\":\"day\",\"keyword_end_sample_index\":12345}",
+            "{\"schema_version\":1,\"event_id\":\"attempt-1\",\"recording_id\":\"case-1\",\"timestamp_ms\":771.5,\"intentional_invocation\":true,\"phrase\":\"옥자야\",\"language\":\"ko-KR\",\"speaker_id\":\"speaker\\\"A\",\"condition\":\"intentional\",\"room_id\":\"livingroom\",\"background\":\"tv\\non\",\"mention_context\":false,\"distance_m\":2.5,\"direction\":\"front\",\"voice_level\":\"normal\",\"self_tts\":false,\"time_bucket\":\"day\",\"keyword_end_sample_index\":12345}",
             line,
         )
     }
 
     @Test
-    fun candidateJsonLineMatchesExistingDetectionContractAndPreservesReviewNulls() {
+    fun optionalTruthFieldsAreOmittedInsteadOfSerializedAsSchemaInvalidNulls() {
+        val line = IntentionalWakeAnnotation(
+            eventId = "attempt-min",
+            recordingId = "case-min",
+            timestampMs = 100.0,
+            phrase = "옥자야",
+            language = "ko-KR",
+            speakerId = "speaker-1",
+            condition = "quiet",
+            roomId = "livingroom",
+            background = "none",
+            mentionContext = false,
+        ).toJsonLine()
+
+        assertFalse(line.contains("\"distance_m\""))
+        assertFalse(line.contains("\"self_tts\""))
+        assertFalse(line.contains("\"time_bucket\""))
+        assertFalse(line.contains(":null"))
+    }
+
+    @Test
+    fun candidateJsonLineMatchesExistingDetectionContractAndOmitsAbsentReviewFields() {
         val line = WakeCandidateRecord(
             detectionId = "candidate-7",
             recordingId = "negative-1",
@@ -51,11 +73,14 @@ class WakeBenchmarkRecordsTest {
         ).toJsonLine()
 
         assertTrue(line.contains("\"schema_version\":1"))
+        assertTrue(line.contains("\"model_name\":\"stage-a\""))
+        assertTrue(line.contains("\"model\":\"stage-a\""))
         assertTrue(line.contains("\"score\":0.61"))
         assertTrue(line.contains("\"accepted\":false"))
-        assertTrue(line.contains("\"matched_attempt_id\":null"))
-        assertTrue(line.contains("\"review_class\":null"))
-        assertTrue(line.contains("\"clip_id\":null"))
+        assertFalse(line.contains("\"matched_attempt_id\""))
+        assertFalse(line.contains("\"review_class\""))
+        assertFalse(line.contains("\"clip_id\""))
+        assertFalse(line.contains(":null"))
     }
 
     @Test
