@@ -2,44 +2,40 @@
 
 Status: current target architecture for the family prototype and next production-oriented milestones.
 
-Revalidated: 2026-08-19 against current Android platform documentation and actively maintained sherpa-onnx / Picovoice upstream documentation.
+Revalidated: 2026-08-21 against current Fold4 evidence and the implemented voice-session core.
 
 This document is authoritative for **what the system should become**. `STATUS.md` is authoritative for **what is actually implemented today**.
 
 ## Product principle
 
-Project Okja should feel like **one assistant** even if several deterministic components exist internally.
+Project Okja should feel like one assistant even if deterministic and generative components exist internally.
 
-The architecture should optimize for:
+The architecture optimizes for:
 
-- simple hands-free use;
-- elderly/senior usability;
-- predictable device control;
+- predictable household-device control;
 - local-first audio handling;
 - low latency;
-- minimal unexplained system sounds;
+- no unnecessary system recognition cues;
 - deterministic handling before generative AI;
-- clean failure modes;
-- reproducible device tests.
+- fail-closed physical execution;
+- reproducible Fold4 benchmarks.
 
 ## Core invariant: one microphone owner
 
-Exactly one component owns the microphone:
+Exactly one component owns microphone capture:
 
 `AudioEngine`
 
-Wake-word, VAD, ASR, and diagnostics are PCM consumers. They must not independently create their own `AudioRecord` in the production path.
+Wake-word, VAD, ASR, command recognition, and diagnostics are PCM consumers. They must not independently create their own `AudioRecord` in the production path.
 
 Canonical capture format:
 
 - 16 kHz;
 - mono;
 - signed PCM16;
-- 20 ms frames (320 samples);
+- 20 ms frames / 320 samples;
 - circular buffer capacity: 3000 ms initially;
-- actual ASR pre-roll: configurable, initially 1500 ms.
-
-Capacity and pre-roll are intentionally independent. At this format, several seconds of raw PCM are inexpensive in memory.
+- actual ASR/wake pre-roll: configurable, initially around 1500 ms.
 
 PCM continuity is part of command integrity. Frames carry sequence/sample-position metadata and a discontinuous utterance must not authorize a physical command.
 
@@ -64,10 +60,18 @@ Wake detected                                      |
    +--> continue live PCM from same AudioRecord
    |
    v
-Local PCM-fed ASR
+Recognition layer
+   |
+   +--> full local ASR for general language
+   |
+   +--> optional command-specialized verifier/classifier
+        when justified by benchmark evidence
    |
    v
-Transcript Router
+VoiceSessionController
+   |
+   v
+Transcript / Command Router
    |
    +--> deterministic intent / policy / confirmation
    |          |
@@ -93,57 +97,68 @@ Natural single-utterance speech is a product requirement:
 - `옥자 TV 켜줘`;
 - `옥자 에어컨 꺼줘`.
 
-When wake is detected, ASR receives buffered PCM from before the wake decision plus continuing live PCM from the same capture session.
+When wake is detected, recognition receives buffered PCM from before the wake decision plus continuing live PCM from the same capture session.
 
-The command suffix must not be discarded simply because the wake phrase was detected in the same utterance.
-
-If the transcript is already `옥자야 TV 켜줘`, routing should normalize/strip the wake prefix and process `TV 켜줘` without launching another microphone/recognizer session.
+If a completed transcript already contains a wake prefix and command suffix, routing must process that suffix directly. It must not discard the command and open a second recognizer session.
 
 ## Wake detector contract
 
-Wake detection is pluggable.
+Wake detection is pluggable and microphone-free.
 
 Current candidate order:
 
-1. Porcupine low-level PCM API as the Android-ready baseline. Use the low-level API only; the high-level Manager owns microphone capture and therefore does not fit Okja's topology.
-2. sherpa-onnx keyword spotting as a research candidate only after a Korean-capable model/tokenization path is demonstrated. Current documented pretrained KWS models/APKs are Chinese/English, so Korean readiness must not be assumed.
-3. Other local PCM-fed detectors only if proven by the same replay/device benchmark.
+1. **Porcupine low-level PCM API** as the first Android-ready benchmark baseline. Use only the low-level API; a high-level manager that owns microphone capture does not fit Okja's topology.
+2. **sherpa-onnx keyword spotting** as a research candidate only after a Korean-capable model/tokenization path is demonstrated.
+3. Other local PCM-fed detectors only if supported by replay and Fold4 evidence.
 
-Rules:
+The first wake benchmark must compare at least `옥자` and the longer `옥자야` trigger because a short two-syllable keyword may have a higher false-activation cost.
 
-- the wake engine does not own the microphone;
-- the wake engine consumes canonical PCM frames;
-- model/runtime selection is based on measured false reject / false activation / CPU / battery behavior;
-- rejected historical models remain evidence, not default production candidates.
+Wake selection is based on measured false reject, false activation, latency, CPU/PSS, background-speech robustness, and TTS self-trigger behavior.
 
-## ASR contract
+## Recognition / ASR contract
 
-Primary architecture direction: local PCM-fed Korean ASR behind the Okja ASR contract.
+The recognition layer consumes only caller-owned PCM.
 
-Current benchmark order after the 2026-08 upstream recheck:
+### Current on-device evidence
 
-1. **sherpa-onnx Moonshine tiny-ko v2** — first primary local Korean benchmark. The initial Okja adapter is bounded utterance-scoped/offline decode and therefore does not pretend to expose native partial streaming; sherpa's official Android path combines Moonshine with VAD for real-time/simulated-streaming use.
-2. **sherpa Korean streaming Zipformer** — short fail-fast smoke before any long benchmark. Upstream issue `k2-fsa/sherpa-onnx#2886` remains open and reports silent empty transcription from the Korean streaming models on Android. A clean Fold4/v1.13.4 smoke can clear that concern for our environment; an empty positive result removes this model from the primary path.
-3. **Android SpeechRecognizer Mode F** — compatibility comparison/fallback experiment only.
-4. **SenseVoice** — optional later local fallback if the dedicated Korean candidates are unsuitable.
+**Moonshine tiny-ko** remains the incumbent local full-ASR baseline.
 
-Android SpeechRecognizer is not the target continuous production ASR. Current Android documentation still says the API is not intended for continuous recognition, and `EXTRA_AUDIO_SOURCE` is implementation-dependent: an implementation that does not support it may open its own microphone.
+Combined observed Fold4 evidence across the earlier 10-run corpus plus five later same-PCM runs:
 
-No engine is selected for production by compile success alone. Fold4 corpus results decide the engine.
+- semantic suffix: 11/15;
+- physical-device command suffix: 6/10;
+- typical model init around 0.6 s;
+- typical replay/decode around 0.15–0.16 s.
 
-## VAD
+This is insufficient for production physical actuation because dangerous action substitutions have occurred.
 
-VAD is another PCM consumer. A sherpa/Silero-based VAD is a natural candidate if it reduces runtime/dependency complexity.
+**SenseVoice 2025** is rejected as a primary candidate after five Fold4 same-PCM trials returned 0/5 semantic suffix preservation despite explicit `language = "ko"`; the outputs were unusable CJK/mixed-script text and were slower than Moonshine.
 
-VAD must not become a second capture owner.
+**Korean streaming Zipformer** is rejected as a primary candidate after 0/6 physical-command preservation in the earlier Fold4 corpus and one positive `<EMPTY>` failure.
 
-For Moonshine, VAD can provide the utterance boundary while the model performs bounded offline decode; this is compatible with the one-microphone architecture because both consume the same PCM bus.
+**Android SpeechRecognizer** remains compatibility/diagnostic evidence only. It is not the target continuous production path.
 
-## Voice session state
+### Production recognition rule
 
-Voice lifecycle authority should move out of `MainActivity` into a dedicated `VoiceSessionController`.
+No full ASR engine is allowed to authorize a physical action merely because it produced plausible text.
 
-The exact implementation may evolve, but the minimal conceptual states are:
+The next architecture decision may introduce a command-specialized acoustic classifier or second-pass verifier for constrained physical commands while retaining full ASR for general conversation. That direction is not accepted by architecture alone; it must beat the incumbent in same-PCM/Fold4 command-safety benchmarks.
+
+Uncertain or conflicting recognition should abstain rather than execute an opposite action.
+
+## VAD and endpointing
+
+VAD is another PCM consumer and must never become a second capture owner.
+
+The ring buffer and pre-roll exist specifically to preserve audio that precedes the wake decision. Endpointing must close an utterance without clipping connected wake+command speech.
+
+Initial candidates include sherpa/Silero-style neural VAD or another Android-suitable PCM-fed VAD. Runtime choice follows measurement, not dependency preference.
+
+## VoiceSessionController
+
+The ASR-agnostic `VoiceSessionController` core is now implemented and unit-tested. It is not yet wired as the production `MainActivity` lifecycle owner.
+
+Conceptual states:
 
 ```text
 IDLE
@@ -152,106 +167,90 @@ IDLE
   -> SPEAKING
   -> FOLLOW_UP or IDLE
 
-Any state -> MIC_OFF / DEGRADED
+Any active path -> MIC_OFF / DEGRADED
 ```
 
-Required invariants:
+Required and implemented core invariants:
 
-1. Only one active microphone capture owner.
-2. A voice session has at most one active ASR decoding path for the same utterance.
-3. Stale callbacks from an old generation cannot change current state.
-4. A command suffix already captured in the wake utterance is never discarded.
-5. Retries are bounded.
-6. TTS does not recursively trigger wake/command execution.
-7. MIC_OFF actually stops capture/inference.
-8. Device execution never depends solely on free-form LLM output.
-9. PCM-discontinuous utterances fail closed for physical-device authorization.
+1. one active decoder path per utterance;
+2. generation tokens reject stale callbacks;
+3. bounded retries and explicit degraded recovery;
+4. a command suffix already captured in the wake utterance is routed as part of the same transcript;
+5. TTS speaking state blocks recursive new capture;
+6. MIC_OFF invalidates active work;
+7. physical device execution requires clean utterance PCM integrity;
+8. duplicate/stale finish callbacks cannot execute a command twice.
+
+The production integration must preserve these invariants when the controller is connected to `AudioEngine`, wake detection, TTS, and lifecycle events.
 
 ## Deterministic intent before AI
 
-Request routing order:
+Routing order remains:
 
 ```text
-Transcript
+Recognition result
    |
    v
-Normalize
+Normalize / validate
    |
    v
-Deterministic intent / policy
+Deterministic intent + safety policy
    |
-   +--> known safe device action -> confirmation/policy -> adapter
+   +--> known device action -> authorization / confirmation -> adapter
    |
-   +--> unknown conversational request -> AI fallback
+   +--> uncertain device action -> reject / ask again
+   |
+   +--> non-device conversation -> AI fallback
 ```
 
-Existing exact command schemas, parameter bounds, negation handling, idempotency, and correlation-local confirmation are valuable and should be preserved or strengthened.
-
-## AI backend boundary
-
-The family prototype may continue to use local development bridges for experimentation.
-
-Long-term production rule:
-
-- generative AI is a conversational fallback, not the actuator authority;
-- household device adapters are not exposed directly to the model;
-- production AI integration should not require broad shell/filesystem/coding-agent privileges;
-- cloud requests should receive only the minimum transcript/context required for the turn.
+Generative AI is never actuator authority.
 
 ## TTS / self-trigger policy
 
-Initial production behavior should be simple:
+First production implementation should remain simple:
 
-- keep the audio architecture controlled by the same voice controller;
-- suspend or suppress wake execution while Okja TTS is speaking;
-- add barge-in only after baseline wake/ASR reliability is proven;
-- AEC/echo handling is an optimization milestone, not a prerequisite for the first stable pipeline.
+- block wake/capture entry while Okja TTS is speaking;
+- keep state ownership in `VoiceSessionController`;
+- do not add full-duplex barge-in until baseline wake and command recognition are stable;
+- consider AEC/playback-aware refinements later if measured behavior requires them.
 
 ## Android lifecycle
 
-Always-listening behavior must eventually respect Android foreground-service and microphone permission constraints.
+Near-always-listening behavior must eventually respect current Android microphone foreground-service and runtime-permission constraints.
 
-The architecture should support a microphone foreground service, but this should be added after the core PCM pipeline and device benchmarks are stable rather than mixed into the first ASR integration.
+Foreground-service integration is intentionally later than core recognition correctness. It must not be mixed into early ASR/wake selection in a way that obscures audio or command failures.
 
 ## Runtime optimization
 
-Start with CPU / standard ONNX Runtime. QNN/NPU is a later optimization after the chosen Korean ASR and wake path pass accuracy, continuity, lifecycle, and battery gates. Accelerator support changes quickly and must not determine the first architecture.
+Start with CPU / standard ONNX Runtime or the runtime required by the selected model.
+
+QNN/NPU acceleration is a later optimization after correctness, command safety, continuity, lifecycle, and battery gates pass. Accelerator availability must not dictate the recognition architecture prematurely.
 
 ## Diagnostics
 
-Diagnostics are first-class but not production UI.
-
-Keep:
+Keep reproducible diagnostics:
 
 - monotonic timestamps;
-- PCM/replay evidence;
-- recording/playback configuration monitoring where useful;
-- model/engine version identifiers;
-- model/source hashes and benchmark provenance;
-- exported benchmark evidence.
+- captured/replayed PCM evidence;
+- sequence/sample positions;
+- engine/model versions;
+- model/source hashes;
+- benchmark result JSON;
+- CPU/PSS/latency when accuracy gates justify longer runs.
 
-Move long-term diagnostics into a debug/diagnostic build boundary so production does not ship experimental Activities or verbose household traces.
+Long-term diagnostic Activities and verbose household traces belong in a debug/diagnostic build surface, not production UI.
 
 ## Security boundary
 
-Security work is tracked separately in `SECURITY_BACKLOG.md` so it does not disappear while the family prototype prioritizes functionality.
+Security work remains tracked in `SECURITY_BACKLOG.md`.
 
-Before broader deployment or sensitive actuators, the architecture must add:
-
-- authenticated local IPC/peer identity;
-- actuator-boundary authorization;
-- command risk tiers;
-- production/diagnostic build separation;
-- least-privilege AI/backend execution;
-- pinned/reviewed native runtime and model provenance for release artifacts.
+Before broader deployment or sensitive actuators, the architecture must add authenticated local boundaries, explicit actuator authorization, risk tiers, release-grade provenance, and least-privilege AI/backend execution.
 
 ## Repository direction
 
-Project Okja has grown beyond a small sub-feature of `ops-console-demo`.
+A dedicated `project-okja` repository remains the target after the voice-pipeline milestone stabilizes. Repository extraction should not be combined with the active runtime audio rewrite.
 
-Target repository direction remains a dedicated `project-okja` repository, preserving useful Git history. Extraction should happen as a controlled migration after the current voice-pipeline milestone is stable; it should not be combined with the runtime audio rewrite in one giant change.
-
-## Related ADRs / detailed plans
+## Related plans
 
 - `architecture/ADR-0001-SINGLE-MICROPHONE-OWNER.md`
 - `architecture/ADR-0002-MODE-F-IS-COMPATIBILITY-ONLY.md`
