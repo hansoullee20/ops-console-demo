@@ -1,81 +1,130 @@
 package com.soul.aihub.voice
 
 /**
- * Stable JSONL records for reproducible wake benchmarks.
+ * Android-side JSONL records aligned with `aihub/wakeword/v4_benchmark_schema.json`.
  *
- * Keep these records intentionally dependency-free so JVM tests and Android debug
- * tooling can emit identical lines without pulling a JSON runtime into the audio core.
- * Raw household audio is not embedded here; records reference a case/clip id only.
+ * Keep these dependency-free so JVM tests and Android diagnostic tooling emit the
+ * same benchmark contract. Additional sample-index fields are allowed by the v4
+ * schema and let the PCM replay harness preserve exact sample-time provenance.
  */
 data class IntentionalWakeAnnotation(
-    val caseId: String,
-    val attemptId: String,
-    val keyword: String,
-    val keywordEndSampleIndex: Long,
-    val speakerId: String? = null,
-    val condition: String? = null,
-    val matchEarlyMs: Int = 200,
-    val matchLateMs: Int = 1_000,
+    val eventId: String,
+    val recordingId: String,
+    val timestampMs: Double,
+    val phrase: String,
+    val language: String,
+    val speakerId: String,
+    val condition: String,
+    val roomId: String,
+    val background: String,
+    val mentionContext: Boolean,
+    val keywordEndSampleIndex: Long? = null,
+    val distanceM: Double? = null,
+    val direction: String? = null,
+    val voiceLevel: String? = null,
+    val selfTts: Boolean? = null,
+    val timeBucket: String? = null,
 ) {
     init {
-        require(caseId.isNotBlank()) { "caseId must not be blank" }
-        require(attemptId.isNotBlank()) { "attemptId must not be blank" }
-        require(keyword.isNotBlank()) { "keyword must not be blank" }
-        require(keywordEndSampleIndex >= 0L) { "keywordEndSampleIndex must be non-negative" }
-        require(matchEarlyMs >= 0) { "matchEarlyMs must be non-negative" }
-        require(matchLateMs >= 0) { "matchLateMs must be non-negative" }
+        require(eventId.isNotBlank()) { "eventId must not be blank" }
+        require(recordingId.isNotBlank()) { "recordingId must not be blank" }
+        require(timestampMs >= 0.0 && timestampMs.isFinite()) { "timestampMs must be finite and non-negative" }
+        require(phrase.isNotBlank()) { "phrase must not be blank" }
+        require(language.length >= 2) { "language must contain at least two characters" }
+        require(speakerId.isNotBlank()) { "speakerId must not be blank" }
+        require(condition.isNotBlank()) { "condition must not be blank" }
+        require(roomId.isNotBlank()) { "roomId must not be blank" }
+        require(background.isNotBlank()) { "background must not be blank" }
+        require(keywordEndSampleIndex == null || keywordEndSampleIndex >= 0L) {
+            "keywordEndSampleIndex must be non-negative"
+        }
+        require(distanceM == null || (distanceM >= 0.0 && distanceM.isFinite())) {
+            "distanceM must be finite and non-negative"
+        }
+        require(timeBucket == null || timeBucket == "day" || timeBucket == "night") {
+            "timeBucket must be day, night, or null"
+        }
     }
 
     fun toJsonLine(): String = jsonObject(
-        "schema_version" to "1.0",
-        "record_type" to "intentional_wake",
-        "case_id" to caseId,
-        "attempt_id" to attemptId,
-        "keyword" to keyword,
-        "keyword_end_sample_index" to keywordEndSampleIndex,
+        "schema_version" to 1,
+        "event_id" to eventId,
+        "recording_id" to recordingId,
+        "timestamp_ms" to timestampMs,
+        "intentional_invocation" to true,
+        "phrase" to phrase,
+        "language" to language,
         "speaker_id" to speakerId,
         "condition" to condition,
-        "match_early_ms" to matchEarlyMs,
-        "match_late_ms" to matchLateMs,
+        "room_id" to roomId,
+        "background" to background,
+        "distance_m" to distanceM,
+        "direction" to direction,
+        "voice_level" to voiceLevel,
+        "mention_context" to mentionContext,
+        "self_tts" to selfTts,
+        "time_bucket" to timeBucket,
+        "keyword_end_sample_index" to keywordEndSampleIndex,
     )
 }
 
 data class WakeCandidateRecord(
-    val caseId: String,
-    val candidateId: String,
-    val detectorName: String,
-    val keyword: String,
-    val detectionSampleIndex: Long,
-    val score: Double?,
-    val decision: String,
+    val detectionId: String,
+    val recordingId: String,
+    val timestampMs: Double,
+    val modelName: String,
+    val modelVersion: String,
+    val modelSha: String,
+    val threshold: Double,
+    val score: Double,
+    val deviceId: String,
+    val roomId: String? = null,
+    val latencyMs: Double? = null,
+    val accepted: Boolean,
+    val detectionSampleIndex: Long? = null,
     val matchedAttemptId: String? = null,
     val reviewClass: String? = null,
     val clipId: String? = null,
 ) {
     init {
-        require(caseId.isNotBlank()) { "caseId must not be blank" }
-        require(candidateId.isNotBlank()) { "candidateId must not be blank" }
-        require(detectorName.isNotBlank()) { "detectorName must not be blank" }
-        require(keyword.isNotBlank()) { "keyword must not be blank" }
-        require(detectionSampleIndex >= 0L) { "detectionSampleIndex must be non-negative" }
-        require(score == null || score.isFinite()) { "score must be finite" }
-        require(decision.isNotBlank()) { "decision must not be blank" }
+        require(detectionId.isNotBlank()) { "detectionId must not be blank" }
+        require(recordingId.isNotBlank()) { "recordingId must not be blank" }
+        require(timestampMs >= 0.0 && timestampMs.isFinite()) { "timestampMs must be finite and non-negative" }
+        require(modelName.isNotBlank()) { "modelName must not be blank" }
+        require(modelVersion.isNotBlank()) { "modelVersion must not be blank" }
+        require(MODEL_SHA.matches(modelSha)) { "modelSha must be 7-64 lowercase hex characters" }
+        require(threshold.isFinite()) { "threshold must be finite" }
+        require(score.isFinite()) { "score must be finite" }
+        require(deviceId.isNotBlank()) { "deviceId must not be blank" }
+        require(latencyMs == null || latencyMs.isFinite()) { "latencyMs must be finite" }
+        require(detectionSampleIndex == null || detectionSampleIndex >= 0L) {
+            "detectionSampleIndex must be non-negative"
+        }
     }
 
     fun toJsonLine(): String = jsonObject(
-        "schema_version" to "1.0",
-        "record_type" to "wake_candidate",
-        "case_id" to caseId,
-        "candidate_id" to candidateId,
-        "detector_name" to detectorName,
-        "keyword" to keyword,
-        "detection_sample_index" to detectionSampleIndex,
+        "schema_version" to 1,
+        "detection_id" to detectionId,
+        "recording_id" to recordingId,
+        "timestamp_ms" to timestampMs,
+        "model_name" to modelName,
+        "model_version" to modelVersion,
+        "model_sha" to modelSha,
+        "threshold" to threshold,
         "score" to score,
-        "decision" to decision,
+        "device_id" to deviceId,
+        "room_id" to roomId,
+        "latency_ms" to latencyMs,
+        "accepted" to accepted,
+        "detection_sample_index" to detectionSampleIndex,
         "matched_attempt_id" to matchedAttemptId,
         "review_class" to reviewClass,
         "clip_id" to clipId,
     )
+
+    companion object {
+        private val MODEL_SHA = Regex("^[0-9a-f]{7,64}$")
+    }
 }
 
 /**
