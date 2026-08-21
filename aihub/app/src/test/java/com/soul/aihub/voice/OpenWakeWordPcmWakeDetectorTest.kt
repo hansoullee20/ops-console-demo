@@ -121,6 +121,27 @@ class OpenWakeWordPcmWakeDetectorTest {
     }
 
     @Test
+    fun sequenceOnlyDiscontinuityAlsoResetsPredictorHistory() {
+        val predictor = FakePredictor(mutableListOf(0.9f))
+        val detector = OpenWakeWordPcmWakeDetector(predictor = predictor, threshold = 0.5f)
+
+        detector.accept(frame(0, 0, 1))
+        detector.accept(frame(1, 320, 1))
+
+        // Sample positions look contiguous, but frame sequence 2 is missing. The shared
+        // PCM contract treats either metadata discontinuity as untrusted.
+        assertNull(detector.accept(frame(3, 640, 2)))
+        assertEquals(1, predictor.resetCount)
+        assertNull(detector.accept(frame(4, 960, 2)))
+        assertNull(detector.accept(frame(5, 1_280, 2)))
+        val detection = detector.accept(frame(6, 1_600, 2))
+
+        requireNotNull(detection)
+        assertEquals(1, predictor.windows.size)
+        assertArrayEquals(ShortArray(1_280) { 2 }, predictor.windows.single())
+    }
+
+    @Test
     fun resetClearsPartialWindowDebounceAndPredictorState() {
         val predictor = FakePredictor(mutableListOf(0.9f, 0.9f))
         val detector = OpenWakeWordPcmWakeDetector(predictor = predictor, threshold = 0.5f)
