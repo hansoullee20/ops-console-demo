@@ -33,13 +33,17 @@ data class PhysicalCommandThresholds(
  * The interpreter uses the LiteRT runtime supplied by Google Play services rather than packaging a
  * second ONNX Runtime into the APK. If initialization/inference fails, VoiceSessionController treats
  * the authorizer as unavailable and physical commands fail closed.
+ *
+ * Until endpointing is calibrated, capture is allowed to accumulate beyond the model window so an
+ * overlong utterance can be reported as an explicit abstention rather than throwing mid-stream. We
+ * never silently crop an overlong physical command because cropping could remove the target/action.
  */
 class TflitePhysicalCommandAuthorizer private constructor(
     private val interpreter: InterpreterApi,
     private val thresholds: PhysicalCommandThresholds,
     private val minimumSamples: Int,
 ) : PhysicalCommandAuthorizer {
-    private val pcm = Pcm16UtteranceBuffer(INPUT_SAMPLES)
+    private val pcm = Pcm16UtteranceBuffer(MAX_CAPTURE_SAMPLES)
     private var closed = false
 
     init {
@@ -71,6 +75,12 @@ class TflitePhysicalCommandAuthorizer private constructor(
                 "physical-command audio too short: ${samples.size} < $minimumSamples samples",
             )
         }
+        if (samples.size > INPUT_SAMPLES) {
+            return PhysicalCommandDecision.Abstain(
+                "physical-command audio exceeds qualified model window: " +
+                    "${samples.size} > $INPUT_SAMPLES samples",
+            )
+        }
 
         val input = Array(1) { FloatArray(INPUT_SAMPLES) }
         samples.forEachIndexed { index, sample ->
@@ -95,6 +105,7 @@ class TflitePhysicalCommandAuthorizer private constructor(
     companion object {
         const val INPUT_SAMPLES = 48_000
         const val SAMPLE_RATE_HZ = 16_000
+        const val MAX_CAPTURE_SAMPLES = SAMPLE_RATE_HZ * 8
 
         /**
          * Initializes the Google Play services LiteRT module off the UI thread, memory-maps the model
