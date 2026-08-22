@@ -15,12 +15,12 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Canonical Okja microphone owner.
  *
- * Production rule: no wake-word, VAD, ASR, or diagnostic consumer may create a
- * second AudioRecord. They consume [frames] and request pre-roll snapshots.
+ * Production rule: no wake-word, VAD, ASR, or diagnostic consumer may create a second AudioRecord.
+ * They consume [frames] and request pre-roll snapshots.
  *
- * A process-wide lease prevents two AudioEngine instances from owning AudioRecord
- * concurrently. The ring is cleared at every capture start so pre-roll can never
- * contain PCM from a previous microphone epoch.
+ * A process-wide lease prevents two AudioEngine instances from owning AudioRecord concurrently.
+ * The ring exists only for the current capture epoch: it is cleared before capture starts and again
+ * after capture ends so stopped/failed microphone sessions cannot expose stale pre-roll.
  */
 class AudioEngine(
     private val ringCapacityMs: Int = DEFAULT_RING_CAPACITY_MS,
@@ -99,6 +99,7 @@ class AudioEngine(
                 record = null
                 safeStop(localRecord)
                 safeRelease(localRecord)
+                ring.clear()
                 processMicOwner.compareAndSet(this, null)
                 false
             }
@@ -122,7 +123,7 @@ class AudioEngine(
             localThread = captureThread
         }
 
-        localRecord?.let(::safeStop)
+        if (localRecord != null) safeStop(localRecord)
         if (localThread != null && localThread !== Thread.currentThread()) {
             try {
                 localThread.join(STOP_JOIN_TIMEOUT_MS)
@@ -197,6 +198,7 @@ class AudioEngine(
             running.set(false)
             safeStop(localRecord)
             safeRelease(localRecord)
+            ring.clear()
             synchronized(lifecycleLock) {
                 if (record === localRecord) record = null
                 if (captureThread === Thread.currentThread()) captureThread = null
