@@ -14,6 +14,7 @@ class PorcupinePcmWakeDetector private constructor(
     private val context: Context,
     private val accessKey: String,
     private val keywordPath: String,
+    private val modelPath: String,
     private val keyword: String,
     private val sensitivity: Float,
 ) : WakeDetector {
@@ -72,6 +73,7 @@ class PorcupinePcmWakeDetector private constructor(
         val engine = Porcupine.Builder()
             .setAccessKey(accessKey)
             .setKeywordPath(keywordPath)
+            .setModelPath(modelPath)
             .setSensitivity(sensitivity)
             .build(context.applicationContext)
         check(engine.sampleRate == AudioEngine.SAMPLE_RATE_HZ) {
@@ -85,17 +87,20 @@ class PorcupinePcmWakeDetector private constructor(
             context: Context,
             accessKey: String,
             keywordPath: String,
-            keyword: String = "옥자야",
+            modelPath: String,
+            keyword: String = PorcupineKoreanModelProvisioner.DEFAULT_PHRASE,
             sensitivity: Float = 0.5f,
         ): PorcupinePcmWakeDetector {
             require(accessKey.isNotBlank()) { "Picovoice AccessKey must not be blank" }
             require(keywordPath.isNotBlank()) { "Porcupine keyword path must not be blank" }
+            require(modelPath.isNotBlank()) { "Porcupine Korean model path must not be blank" }
             require(keyword.isNotBlank()) { "keyword must not be blank" }
             require(sensitivity in 0f..1f) { "sensitivity must be in [0, 1]" }
             return PorcupinePcmWakeDetector(
                 context = context.applicationContext,
                 accessKey = accessKey,
                 keywordPath = keywordPath,
+                modelPath = modelPath,
                 keyword = keyword,
                 sensitivity = sensitivity,
             )
