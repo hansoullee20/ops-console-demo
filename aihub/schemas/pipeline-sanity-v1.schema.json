@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "okja.pipeline-sanity.v1",
+  "title": "Project Okja pipeline sanity run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "phrase_id",
+    "capture_epoch",
+    "pcm_start_sample",
+    "pcm_end_sample",
+    "continuity_ok",
+    "wake_frame_index",
+    "keyword_end_sample",
+    "keyword_end_to_wake_ms",
+    "onset_to_wake_ms",
+    "preroll_start_sample",
+    "asr_init_ms",
+    "asr_decode_ms",
+    "asr_finalize_ms",
+    "transcript",
+    "apk_sha256"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "phrase_id": { "type": "string", "pattern": "^S(0[1-9]|1[0-2])$" },
+    "capture_epoch": { "type": "integer", "minimum": 1 },
+    "pcm_start_sample": { "type": "integer", "minimum": 0 },
+    "pcm_end_sample": { "type": "integer", "minimum": 1 },
+    "continuity_ok": { "const": true },
+    "wake_frame_index": { "type": ["integer", "null"], "minimum": 0 },
+    "keyword_end_sample": { "type": ["integer", "null"], "minimum": 0 },
+    "keyword_end_to_wake_ms": { "type": ["number", "null"] },
+    "onset_to_wake_ms": { "type": ["number", "null"] },
+    "preroll_start_sample": { "type": ["integer", "null"], "minimum": 0 },
+    "asr_init_ms": { "type": ["number", "null"], "minimum": 0 },
+    "asr_decode_ms": { "type": ["number", "null"], "minimum": 0 },
+    "asr_finalize_ms": { "type": ["number", "null"], "minimum": 0 },
+    "transcript": { "type": ["string", "null"] },
+    "apk_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
