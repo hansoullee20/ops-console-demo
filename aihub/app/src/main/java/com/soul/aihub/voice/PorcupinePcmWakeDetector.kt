@@ -9,6 +9,8 @@ import ai.picovoice.porcupine.Porcupine
  * This class deliberately uses Porcupine.process(short[]) rather than PorcupineManager, so
  * AudioEngine remains the only AudioRecord owner. Input discontinuities rebuild Porcupine before
  * processing the first post-gap frame so internal wake context is never carried across missing PCM.
+ * Native process/delete operations are synchronized because Activity shutdown may race the PCM
+ * collector; Porcupine must never be deleted while a native process call is in flight.
  */
 class PorcupinePcmWakeDetector private constructor(
     private val context: Context,
@@ -23,12 +25,21 @@ class PorcupinePcmWakeDetector private constructor(
     private var accumulator = FixedPcmFrameAccumulator(porcupine.frameLength)
     private var closed = false
 
+    @get:Synchronized
     val engineVersion: String
-        get() = porcupine.version
+        get() {
+            check(!closed) { "detector is closed" }
+            return porcupine.version
+        }
 
+    @get:Synchronized
     val requiredFrameSamples: Int
-        get() = porcupine.frameLength
+        get() {
+            check(!closed) { "detector is closed" }
+            return porcupine.frameLength
+        }
 
+    @Synchronized
     override fun accept(frame: PcmFrame): WakeDetection? {
         check(!closed) { "detector is closed" }
 
@@ -51,6 +62,7 @@ class PorcupinePcmWakeDetector private constructor(
         return firstDetection
     }
 
+    @Synchronized
     override fun close() {
         if (closed) return
         closed = true
@@ -95,7 +107,9 @@ class PorcupinePcmWakeDetector private constructor(
             require(keywordPath.isNotBlank()) { "Porcupine keyword path must not be blank" }
             require(modelPath.isNotBlank()) { "Porcupine Korean model path must not be blank" }
             require(keyword.isNotBlank()) { "keyword must not be blank" }
-            require(sensitivity in 0f..1f) { "sensitivity must be in [0, 1]" }
+            require(sensitivity.isFinite() && sensitivity in 0f..1f) {
+                "sensitivity must be finite and in [0, 1]"
+            }
             return PorcupinePcmWakeDetector(
                 context = context.applicationContext,
                 accessKey = accessKey,
