@@ -2,6 +2,7 @@ package com.soul.aihub
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -105,6 +106,7 @@ class PhysicalCommandDatasetActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildUi()
+        selectFirstIncompleteSanityPrompt()
         renderPrompt()
         renderStats()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -141,7 +143,17 @@ class PhysicalCommandDatasetActivity : Activity() {
         root.addView(speakerIdInput)
         root.addView(text("Condition", 14f, Color.LTGRAY))
         root.addView(conditionInput)
-        sanityMode = Switch(this).apply { text = "Sanity mode"; setTextColor(Color.WHITE); setOnCheckedChangeListener { _, _ -> promptIndex = 0; renderPrompt() } }
+        sanityMode = Switch(this).apply {
+            text = "Sanity mode · 12문장 × 각 5회"
+            setTextColor(Color.WHITE)
+            isChecked = true
+            setOnCheckedChangeListener { _, checked ->
+                promptIndex = 0
+                if (checked) selectFirstIncompleteSanityPrompt()
+                renderPrompt()
+                renderStats()
+            }
+        }
         root.addView(sanityMode)
 
         promptText = text("", 22f, Color.WHITE)
@@ -171,6 +183,22 @@ class PhysicalCommandDatasetActivity : Activity() {
         recordButton = button("3초 녹음 → 라벨 저장")
         recordButton.setOnClickListener { captureCurrentPrompt() }
         root.addView(recordButton)
+
+        val resetSanity = button("Sanity 기록 전체 초기화")
+        resetSanity.setOnClickListener {
+            if (running.get()) return@setOnClickListener
+            if (!sanityMode.isChecked) {
+                stateText.text = "Sanity mode를 먼저 켜세요"
+                return@setOnClickListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Sanity 기록 초기화")
+                .setMessage("저장된 sanity-v2 PCM과 JSON을 모두 삭제하고 0/60부터 다시 시작합니다.")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("초기화") { _, _ -> resetSanityProgress() }
+                .show()
+        }
+        root.addView(resetSanity)
         root.addView(statsText)
 
         val scroll = ScrollView(this)
@@ -199,6 +227,20 @@ class PhysicalCommandDatasetActivity : Activity() {
             .putString(PREF_SPEAKER_ID, speakerId)
             .putString(PREF_CONDITION, condition)
             .apply()
+
+        if (sanityMode.isChecked) {
+            val prompt = sanityPrompts[promptIndex]
+            if (sanityCount(prompt.id!!) >= SANITY_REPEATS_PER_PHRASE) {
+                running.set(false)
+                if (selectFirstIncompleteSanityPrompt()) {
+                    stateText.text = "이 문장은 5/5 완료 · 다음 미완료 문장으로 이동"
+                    renderPrompt()
+                } else {
+                    stateText.text = "SANITY COMPLETE · 60/60"
+                }
+                return
+            }
+        }
 
         recordButton.isEnabled = false
         val prompt = activePrompts()[promptIndex]
@@ -264,7 +306,19 @@ class PhysicalCommandDatasetActivity : Activity() {
             put("apk_sha256", installedApkSha256)
         }
         File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8)
-        stateText.text = "BOOTSTRAP SAVED · ${prompt.id} · $runId"
+
+        val completed = sanityCount(prompt.id!!)
+        if (completed >= SANITY_REPEATS_PER_PHRASE) {
+            if (selectFirstIncompleteSanityPrompt()) {
+                stateText.text = "${prompt.id} 5/5 완료 · 다음 ${sanityPrompts[promptIndex].id}"
+            } else {
+                stateText.text = "SANITY COMPLETE · 60/60"
+            }
+        } else {
+            stateText.text = "${prompt.id} 저장 · $completed/$SANITY_REPEATS_PER_PHRASE"
+        }
+        renderPrompt()
+        renderStats()
     }
 
     private suspend fun capturePcm(seconds: Int, wakeDetector: PorcupinePcmWakeDetector? = null): CaptureResult {
@@ -331,6 +385,44 @@ class PhysicalCommandDatasetActivity : Activity() {
     private fun hasMoonshineAssets() = listOf("$MOONSHINE_ASSET_DIR/encoder_model.ort", "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort", "$MOONSHINE_ASSET_DIR/tokens.txt").all { path -> try { assets.open(path).use { }; true } catch (_: Throwable) { false } }
     private fun saveSanityPcm(runId: String, pcm: ShortArray) { val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN); pcm.forEach { bytes.putShort(it) }; FileOutputStream(File(sanityDir(), "$runId.pcm16le")).use { it.write(bytes.array()) } }
 
+    private fun sanityCounts(): Map<String, Int> {
+        val counts = mutableMapOf<String, Int>()
+        val manifest = File(sanityDir(), SANITY_JSONL)
+        if (!manifest.exists()) return counts
+        manifest.forEachLine(Charsets.UTF_8) { line ->
+            try {
+                val id = JSONObject(line).optString("phrase_id")
+                if (id.isNotBlank()) counts[id] = (counts[id] ?: 0) + 1
+            } catch (_: Throwable) {
+                // Progress display is best-effort. The exported JSONL remains the source of truth.
+            }
+        }
+        return counts
+    }
+
+    private fun sanityCount(id: String): Int = sanityCounts()[id] ?: 0
+
+    private fun selectFirstIncompleteSanityPrompt(): Boolean {
+        if (!::sanityMode.isInitialized || !sanityMode.isChecked) return false
+        val counts = sanityCounts()
+        val next = sanityPrompts.indexOfFirst { (counts[it.id] ?: 0) < SANITY_REPEATS_PER_PHRASE }
+        if (next < 0) return false
+        promptIndex = next
+        return true
+    }
+
+    private fun resetSanityProgress() {
+        val failed = sanityDir().listFiles()?.filterNot { it.deleteRecursively() }.orEmpty()
+        if (failed.isNotEmpty()) {
+            stateText.text = "FAILED · 일부 sanity 파일을 삭제하지 못했습니다"
+            return
+        }
+        promptIndex = 0
+        stateText.text = "RESET · Sanity 0/60"
+        renderPrompt()
+        renderStats()
+    }
+
     private fun saveTrial(
         prompt: Prompt,
         pcm: ShortArray,
@@ -373,10 +465,31 @@ class PhysicalCommandDatasetActivity : Activity() {
 
     private fun renderPrompt() {
         val prompt = activePrompts()[promptIndex]
-        promptText.text = "[${prompt.id ?: prompt.label.name}]\n“${prompt.text}”"
+        if (sanityMode.isChecked) {
+            val completed = sanityCount(checkNotNull(prompt.id))
+            val nextRepeat = minOf(completed + 1, SANITY_REPEATS_PER_PHRASE)
+            promptText.text = "[${prompt.id}] 문장 ${promptIndex + 1}/${sanityPrompts.size} · 반복 $nextRepeat/$SANITY_REPEATS_PER_PHRASE\n“${prompt.text}”"
+            recordButton.text = if (completed >= SANITY_REPEATS_PER_PHRASE) "이 문장 완료 · 5/5" else "녹음 $nextRepeat/$SANITY_REPEATS_PER_PHRASE"
+        } else {
+            promptText.text = "[${prompt.id ?: prompt.label.name}]\n“${prompt.text}”"
+            recordButton.text = "3초 녹음 → 라벨 저장"
+        }
     }
 
     private fun renderStats() {
+        if (sanityMode.isChecked) {
+            val counts = sanityCounts()
+            val total = sanityPrompts.sumOf { counts[it.id] ?: 0 }
+            statsText.text = buildString {
+                append("Sanity progress: ").append(total).append('/').append(SANITY_TOTAL_RUNS).append("\n")
+                sanityPrompts.forEach { prompt ->
+                    append(prompt.id).append(": ").append(counts[prompt.id] ?: 0).append('/').append(SANITY_REPEATS_PER_PHRASE).append("\n")
+                }
+                append("저장 위치: ").append(sanityDir().absolutePath)
+            }
+            return
+        }
+
         val manifest = File(datasetDir(), MANIFEST_NAME)
         val counts = mutableMapOf<PhysicalCommandClass, Int>().withDefault { 0 }
         if (manifest.exists()) {
@@ -432,6 +545,8 @@ class PhysicalCommandDatasetActivity : Activity() {
         private const val REQ_AUDIO = 3201
         private const val RECORD_SECONDS = 3
         private const val SANITY_CUE_DELAY_MS = 1_200L
+        private const val SANITY_REPEATS_PER_PHRASE = 5
+        private const val SANITY_TOTAL_RUNS = 12 * SANITY_REPEATS_PER_PHRASE
         private const val DATASET_DIR = "okja-physical-command-dataset"
         private const val MANIFEST_NAME = "manifest.jsonl"
         private const val SANITY_DIR = "okja-pipeline-sanity-v2"
