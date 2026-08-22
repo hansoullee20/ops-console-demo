@@ -60,9 +60,6 @@ jobs:
       - name: Run Android JVM tests
         run: gradle -p aihub testDebugUnitTest --stacktrace
 
-      - name: Provision Moonshine tiny-ko assets for bootstrap APK
-        run: bash aihub/tools/fetch_sherpa_moonshine_korean_model.sh
-
       - name: Build debug APK after verification
         run: gradle -p aihub assembleDebug --stacktrace
 
