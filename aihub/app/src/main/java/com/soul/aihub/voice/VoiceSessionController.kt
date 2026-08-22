@@ -2,10 +2,7 @@ package com.soul.aihub.voice
 
 /** ASR-agnostic routing result for one completed utterance. */
 sealed interface VoiceRouteDecision {
-    /**
-     * Diagnostic/semantic device intent from ASR text only.
-     * This can never authorize physical execution by itself.
-     */
+    /** Diagnostic/semantic device intent from ASR text only; never actuator authority. */
     data class DeviceCommand(
         val command: String,
         val spokenConfirmation: String? = null,
@@ -46,9 +43,12 @@ data class VoiceSessionResult(
  *
  * AudioEngine remains the only microphone owner. Physical execution requires an independent
  * caller-owned-PCM authorizer; ASR text and the transcript router are never actuator authority.
+ * Conversation ASR and physical authorization are failure-isolated: an ASR-specific model/runtime
+ * failure may remove the transcript for that utterance, but it cannot invalidate otherwise clean
+ * PCM or a qualified acoustic physical authorization.
  *
- * A session can start only from a [PcmWindow] carrying the exact pre-roll sample range. This lets
- * the integrity gate prove that the first live frame begins exactly where pre-roll ended.
+ * A session starts from a [PcmWindow] carrying the exact pre-roll sample range so the integrity
+ * gate can prove continuity into the first live frame.
  */
 class VoiceSessionController(
     private val asr: StreamingAsrEngine,
@@ -82,6 +82,7 @@ class VoiceSessionController(
     private var followUpAfterSpeech = false
     private var closed = false
     private var utteranceActive = false
+    private var asrHealthy = false
     private var physicalAuthorizerHealthy = false
 
     init {
@@ -103,29 +104,31 @@ class VoiceSessionController(
 
         generation += 1L
         followUpAfterSpeech = false
-        utteranceActive = false
+        utteranceActive = true
+        asrHealthy = false
         physicalAuthorizerHealthy = false
-        asr.reset()
+        integrity.beginUtterance(preRoll.endSampleIndexExclusive)
+
         try {
             physicalCommandAuthorizer.reset()
             physicalCommandAuthorizer.begin(preRoll.samples)
             physicalAuthorizerHealthy = true
         } catch (_: Throwable) {
             physicalAuthorizerHealthy = false
-        }
-        integrity.beginUtterance(preRoll.endSampleIndexExclusive)
-
-        return try {
-            asr.begin(preRoll.samples)
-            utteranceActive = true
-            state = State.CAPTURING
-            generation
-        } catch (_: Throwable) {
-            integrity.endUtterance()
             safeResetPhysicalAuthorizerLocked()
-            noteRecoverableFailureLocked()
-            null
         }
+
+        asrHealthy = try {
+            asr.reset()
+            asr.begin(preRoll.samples)
+            true
+        } catch (_: Throwable) {
+            safeResetAsrLocked()
+            false
+        }
+
+        state = State.CAPTURING
+        return generation
     }
 
     @Synchronized
@@ -135,20 +138,29 @@ class VoiceSessionController(
             return null
         }
 
-        return try {
+        try {
             integrity.observe(frame)
-            if (physicalAuthorizerHealthy) {
-                try {
-                    physicalCommandAuthorizer.accept(frame)
-                } catch (_: Throwable) {
-                    physicalAuthorizerHealthy = false
-                    safeResetPhysicalAuthorizerLocked()
-                }
-            }
-            asr.accept(frame)
         } catch (_: Throwable) {
             abortUtteranceLocked()
             noteRecoverableFailureLocked()
+            return null
+        }
+
+        if (physicalAuthorizerHealthy) {
+            try {
+                physicalCommandAuthorizer.accept(frame)
+            } catch (_: Throwable) {
+                physicalAuthorizerHealthy = false
+                safeResetPhysicalAuthorizerLocked()
+            }
+        }
+
+        if (!asrHealthy) return null
+        return try {
+            asr.accept(frame)
+        } catch (_: Throwable) {
+            asrHealthy = false
+            safeResetAsrLocked()
             null
         }
     }
@@ -172,13 +184,17 @@ class VoiceSessionController(
         }
         physicalAuthorizerHealthy = false
 
-        val update = try {
-            asr.finish()
-        } catch (_: Throwable) {
-            abortUtteranceLocked()
-            noteRecoverableFailureLocked()
-            return null
+        val update = if (asrHealthy) {
+            try {
+                asr.finish()
+            } catch (_: Throwable) {
+                safeResetAsrLocked()
+                null
+            }
+        } else {
+            null
         }
+        asrHealthy = false
 
         val transcript = update?.text?.trim().orEmpty()
         val audioTrusted = integrity.canAuthorizeDeviceCommand()
@@ -258,7 +274,12 @@ class VoiceSessionController(
             is VoiceRouteDecision.Speak -> {
                 followUpAfterSpeech = route.expectFollowUp
                 state = State.SPEAKING
-                speechOutput.speak(route.text, generation)
+                try {
+                    speechOutput.speak(route.text, generation)
+                } catch (_: Throwable) {
+                    followUpAfterSpeech = false
+                    state = State.DEGRADED
+                }
             }
 
             VoiceRouteDecision.Ignore -> {
@@ -322,7 +343,11 @@ class VoiceSessionController(
         generation += 1L
         abortUtteranceLocked()
         followUpAfterSpeech = false
-        asr.close()
+        try {
+            asr.close()
+        } catch (_: Throwable) {
+            // Continue closing the independent physical authority.
+        }
         try {
             physicalCommandAuthorizer.close()
         } catch (_: Throwable) {
@@ -342,13 +367,10 @@ class VoiceSessionController(
             integrity.endUtterance()
             utteranceActive = false
         }
+        asrHealthy = false
         physicalAuthorizerHealthy = false
         safeResetPhysicalAuthorizerLocked()
-        try {
-            asr.reset()
-        } catch (_: Throwable) {
-            // The caller will move to DEGRADED/MIC_OFF as appropriate; never let cleanup recurse.
-        }
+        safeResetAsrLocked()
     }
 
     private fun safeResetPhysicalAuthorizerLocked() {
@@ -356,6 +378,14 @@ class VoiceSessionController(
             physicalCommandAuthorizer.reset()
         } catch (_: Throwable) {
             // Failure is fail-closed because physicalAuthorizerHealthy remains false.
+        }
+    }
+
+    private fun safeResetAsrLocked() {
+        try {
+            asr.reset()
+        } catch (_: Throwable) {
+            // Conversation ASR remains unavailable for this utterance; physical authority is separate.
         }
     }
 
