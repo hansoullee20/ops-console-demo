@@ -10,6 +10,9 @@ import org.junit.Test
 class VoiceSessionControllerTest {
     private class FakeAsr : StreamingAsrEngine {
         var finalText: String = ""
+        var failBegin = false
+        var failAccept = false
+        var failFinish = false
         var beginCount = 0
         var resetCount = 0
         var closeCount = 0
@@ -17,18 +20,23 @@ class VoiceSessionControllerTest {
 
         override fun begin(preRollPcm16: ShortArray) {
             beginCount += 1
+            if (failBegin) error("synthetic ASR begin failure")
         }
 
         override fun accept(frame: PcmFrame): AsrUpdate? {
+            if (failAccept) error("synthetic ASR accept failure")
             acceptedSequences += frame.sequence
             return null
         }
 
-        override fun finish(): AsrUpdate = AsrUpdate(
-            text = finalText,
-            isFinal = true,
-            producedAtElapsedRealtimeNs = 123L,
-        )
+        override fun finish(): AsrUpdate {
+            if (failFinish) error("synthetic ASR finish failure")
+            return AsrUpdate(
+                text = finalText,
+                isFinal = true,
+                producedAtElapsedRealtimeNs = 123L,
+            )
+        }
 
         override fun reset() {
             resetCount += 1
@@ -124,6 +132,101 @@ class VoiceSessionControllerTest {
 
         assertNull(controller.finishUtterance(generation))
         assertEquals(1, executed.size)
+    }
+
+    @Test
+    fun physicalAuthorizationSurvivesAsrBeginFailure() {
+        val asr = FakeAsr().apply { failBegin = true }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.AC_ON),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = asr,
+            router = VoiceTranscriptRouter { VoiceRouteDecision.Ignore },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
+        controller.acceptFrame(generation, frame(0, 0))
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertTrue(result.deviceCommandExecuted)
+        assertEquals(listOf(PhysicalCommandClass.AC_ON), executed)
+        assertEquals("", result.transcript)
+    }
+
+    @Test
+    fun physicalAuthorizationSurvivesAsrAcceptFailure() {
+        val asr = FakeAsr().apply { failAccept = true }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.TV_OFF),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = asr,
+            router = VoiceTranscriptRouter { VoiceRouteDecision.Ignore },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
+        controller.acceptFrame(generation, frame(0, 0))
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertTrue(result.deviceCommandExecuted)
+        assertEquals(listOf(PhysicalCommandClass.TV_OFF), executed)
+        assertEquals(listOf(0L), authorizer.acceptedSequences)
+        assertEquals("", result.transcript)
+    }
+
+    @Test
+    fun physicalAuthorizationSurvivesAsrFinishFailure() {
+        val asr = FakeAsr().apply { failFinish = true }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.AC_OFF),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = asr,
+            router = VoiceTranscriptRouter { VoiceRouteDecision.Ignore },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
+        controller.acceptFrame(generation, frame(0, 0))
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertTrue(result.deviceCommandExecuted)
+        assertEquals(listOf(PhysicalCommandClass.AC_OFF), executed)
+        assertEquals("", result.transcript)
+    }
+
+    @Test
+    fun preRollAloneCannotExecuteEvenWithAcousticAuthorization() {
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.TV_ON),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = FakeAsr().apply { finalText = "옥자 TV 켜줘" },
+            router = VoiceTranscriptRouter { VoiceRouteDecision.DeviceCommand(it) },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(preRoll(3_200L)))
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertFalse(result.deviceCommandExecuted)
+        assertTrue(result.blockedByAudioIntegrity)
+        assertTrue(executed.isEmpty())
     }
 
     @Test
