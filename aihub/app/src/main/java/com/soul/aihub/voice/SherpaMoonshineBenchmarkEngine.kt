@@ -78,8 +78,8 @@ class SherpaMoonshineBenchmarkEngine(
             val normalized = FloatArray(samples.size) { index -> samples[index] / 32768.0f }
             val stream = recognizer.createStream()
             try {
-                stream.acceptWaveform(normalized, sampleRate = sampleRateHz)
                 val decodeStart = nowElapsedRealtimeNs()
+                stream.acceptWaveform(normalized, sampleRate = sampleRateHz)
                 recognizer.decode(stream)
                 lastDecodeMs = (nowElapsedRealtimeNs() - decodeStart) / 1_000_000.0
                 val finalizeStart = nowElapsedRealtimeNs()
