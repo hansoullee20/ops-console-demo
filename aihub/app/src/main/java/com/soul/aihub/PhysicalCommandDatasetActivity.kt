@@ -21,7 +21,6 @@ import com.soul.aihub.voice.PcmWindow
 import com.soul.aihub.voice.PhysicalCommandClass
 import com.soul.aihub.voice.PorcupineKoreanModelProvisioner
 import com.soul.aihub.voice.PorcupinePcmWakeDetector
-import com.soul.aihub.voice.PorcupineSessionAccessKey
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -50,27 +49,12 @@ import kotlin.math.sqrt
  *
  * AudioEngine remains the sole microphone owner. Each trial saves exactly 3.0 s of 16 kHz mono
  * PCM16 plus one JSONL manifest row containing label, speaker/session/condition provenance, prompt,
- * and continuity-checked sample metadata. Sanity mode records wake + Moonshine timing on that same
- * captured PCM and writes to a separate, non-training directory.
+ * and continuity-checked sample metadata. Sanity mode writes separate non-training evidence.
  */
 class PhysicalCommandDatasetActivity : Activity() {
-    private data class Prompt(
-        val label: PhysicalCommandClass,
-        val text: String,
-        val id: String? = null,
-    )
-
-    private data class CaptureResult(
-        val window: PcmWindow,
-        val wakeFrameIndex: Long?,
-    )
-
-    private data class AsrTiming(
-        val initMs: Double,
-        val decodeMs: Double?,
-        val finalizeMs: Double?,
-        val text: String,
-    )
+    private data class Prompt(val label: PhysicalCommandClass, val text: String, val id: String? = null)
+    private data class CaptureResult(val window: PcmWindow, val wakeFrameIndex: Long?)
+    private data class AsrTiming(val initMs: Double, val decodeMs: Double?, val finalizeMs: Double?, val text: String)
 
     private val prompts = listOf(
         Prompt(PhysicalCommandClass.TV_ON, "옥자 TV 켜줘"),
@@ -94,20 +78,13 @@ class PhysicalCommandDatasetActivity : Activity() {
         Prompt(PhysicalCommandClass.OTHER, "TV 켜... 아니 꺼줘"),
         Prompt(PhysicalCommandClass.OTHER, "에어컨 꺼... 아니 켜줘"),
     )
-
     private val sanityPrompts = listOf(
-        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 켜줘", "S01"),
-        Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 꺼줘", "S02"),
-        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 켜줘", "S03"),
-        Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 꺼줘", "S04"),
-        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 좀 켜줘", "S05"),
-        Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 좀 꺼줘", "S06"),
-        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 좀 켜줘", "S07"),
-        Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 좀 꺼줘", "S08"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 뭐하니", "S09"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 지금 몇 시야", "S10"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 오늘 날씨 어때", "S11"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 잘 자", "S12"),
+        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 켜줘", "S01"), Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 꺼줘", "S02"),
+        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 켜줘", "S03"), Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 꺼줘", "S04"),
+        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 좀 켜줘", "S05"), Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 좀 꺼줘", "S06"),
+        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 좀 켜줘", "S07"), Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 좀 꺼줘", "S08"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 뭐하니", "S09"), Prompt(PhysicalCommandClass.OTHER, "옥자야 지금 몇 시야", "S10"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 오늘 날씨 어때", "S11"), Prompt(PhysicalCommandClass.OTHER, "옥자야 잘 자", "S12"),
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -164,15 +141,7 @@ class PhysicalCommandDatasetActivity : Activity() {
         root.addView(speakerIdInput)
         root.addView(text("Condition", 14f, Color.LTGRAY))
         root.addView(conditionInput)
-
-        sanityMode = Switch(this).apply {
-            text = "Sanity mode"
-            setTextColor(Color.WHITE)
-            setOnCheckedChangeListener { _, _ ->
-                promptIndex = 0
-                renderPrompt()
-            }
-        }
+        sanityMode = Switch(this).apply { text = "Sanity mode"; setTextColor(Color.WHITE); setOnCheckedChangeListener { _, _ -> promptIndex = 0; renderPrompt() } }
         root.addView(sanityMode)
 
         promptText = text("", 22f, Color.WHITE)
@@ -235,9 +204,7 @@ class PhysicalCommandDatasetActivity : Activity() {
         val prompt = activePrompts()[promptIndex]
         scope.launch {
             try {
-                if (sanityMode.isChecked) {
-                    runSanity(prompt)
-                } else {
+                if (sanityMode.isChecked) runSanity(prompt) else {
                     stateText.text = "준비… 0.8초 뒤 말하세요"
                     delay(800)
                     stateText.text = "지금 말하세요 · 3초 녹음"
@@ -258,76 +225,30 @@ class PhysicalCommandDatasetActivity : Activity() {
     }
 
     private suspend fun runSanity(prompt: Prompt) {
-        val accessKey = checkNotNull(PorcupineSessionAccessKey.current()) {
-            "Run Okja Porcupine Wake once first"
-        }
+        val accessKey = checkNotNull(PorcupineWakeActivity.sessionAccessKey) { "Run Okja Porcupine Wake once first" }
         check(hasMoonshineAssets()) { "Moonshine assets missing; use Moonshine benchmark APK" }
         val models = PorcupineKoreanModelProvisioner(this).provision(accessKey)
-        val detector = PorcupinePcmWakeDetector.create(
-            context = this,
-            accessKey = accessKey,
-            keywordPath = models.keywordPath,
-            modelPath = models.modelPath,
-        )
+        val detector = PorcupinePcmWakeDetector.create(this, accessKey, models.keywordPath, models.modelPath)
         try {
-            stateText.text = "준비… 0.8초 뒤 말하세요"
-            delay(800)
-            stateText.text = "SANITY · 지금 말하세요"
+            stateText.text = "준비… 0.8초 뒤 말하세요"; delay(800); stateText.text = "SANITY · 지금 말하세요"
             captureEpoch += 1
-            val capture = capturePcm(RECORD_SECONDS, detector)
-            val runId = UUID.randomUUID().toString()
-            saveSanityPcm(runId, capture.window.samples)
-
+            val capture = capturePcm(RECORD_SECONDS, detector); val runId = UUID.randomUUID().toString(); saveSanityPcm(runId, capture.window.samples)
             val onset = detectOnsetSample(capture.window.samples)
-            val wakeSample = capture.wakeFrameIndex?.let {
-                minOf(capture.window.endSampleIndexExclusive, (it + 1L) * AudioEngine.FRAME_SAMPLES)
-            }
-            val preRollStart = wakeSample?.let {
-                maxOf(
-                    capture.window.startSampleIndex,
-                    it - AudioEngine.SAMPLE_RATE_HZ * AudioEngine.DEFAULT_PRE_ROLL_MS / 1000L,
-                )
-            }
-            if (wakeSample != null) {
-                checkNotNull(onset) { "SANITY STOP: utterance onset not found" }
-                check(preRollStart!! <= onset) { "SANITY STOP: pre-roll clipping" }
-            }
-
+            val wakeSample = capture.wakeFrameIndex?.let { minOf(capture.window.endSampleIndexExclusive, (it + 1L) * AudioEngine.FRAME_SAMPLES) }
+            val preRollStart = wakeSample?.let { maxOf(0L, it - AudioEngine.SAMPLE_RATE_HZ * AudioEngine.DEFAULT_PRE_ROLL_MS / 1000L) }
+            if (wakeSample != null) { checkNotNull(onset) { "SANITY STOP: utterance onset not found" }; check(preRollStart!! <= onset) { "SANITY STOP: pre-roll clipping" } }
             val asr = withContext(Dispatchers.Default) { runMoonshine(capture.window) }
             val row = JSONObject().apply {
-                put("run_id", runId)
-                put("phrase_id", prompt.id)
-                put("capture_epoch", captureEpoch)
-                put("pcm_start_sample", capture.window.startSampleIndex)
-                put("pcm_end_sample", capture.window.endSampleIndexExclusive)
-                put("continuity_ok", true)
-                put("wake_frame_index", capture.wakeFrameIndex ?: JSONObject.NULL)
-                put("keyword_end_sample", JSONObject.NULL)
-                put("keyword_end_to_wake_ms", JSONObject.NULL)
-                put(
-                    "onset_to_wake_ms",
-                    if (wakeSample != null) {
-                        (wakeSample - onset!!) * 1000.0 / AudioEngine.SAMPLE_RATE_HZ
-                    } else JSONObject.NULL,
-                )
-                put("preroll_start_sample", preRollStart ?: JSONObject.NULL)
-                put("asr_init_ms", asr.initMs)
-                put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL)
-                put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL)
-                put("transcript", asr.text)
-                put("apk_sha256", sha256(File(applicationInfo.sourceDir)))
+                put("run_id", runId); put("phrase_id", prompt.id); put("capture_epoch", captureEpoch); put("pcm_start_sample", 0); put("pcm_end_sample", capture.window.endSampleIndexExclusive); put("continuity_ok", true)
+                put("wake_frame_index", capture.wakeFrameIndex ?: JSONObject.NULL); put("keyword_end_sample", JSONObject.NULL); put("keyword_end_to_wake_ms", JSONObject.NULL)
+                put("onset_to_wake_ms", if (wakeSample != null) (wakeSample - onset!!) * 1000.0 / AudioEngine.SAMPLE_RATE_HZ else JSONObject.NULL); put("preroll_start_sample", preRollStart ?: JSONObject.NULL)
+                put("asr_init_ms", asr.initMs); put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL); put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL); put("transcript", asr.text); put("apk_sha256", sha256(File(applicationInfo.sourceDir)))
             }
-            File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8)
-            stateText.text = "SANITY SAVED · ${prompt.id} · $runId"
-        } finally {
-            detector.close()
-        }
+            File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8); stateText.text = "SANITY SAVED · ${prompt.id} · $runId"
+        } finally { detector.close() }
     }
 
-    private suspend fun capturePcm(
-        seconds: Int,
-        wakeDetector: PorcupinePcmWakeDetector? = null,
-    ): CaptureResult {
+    private suspend fun capturePcm(seconds: Int, wakeDetector: PorcupinePcmWakeDetector? = null): CaptureResult {
         val targetSamples = AudioEngine.SAMPLE_RATE_HZ * seconds
         val buffer = Pcm16UtteranceBuffer(maxSamples = targetSamples)
         val continuity = PcmContinuityTracker()
@@ -352,19 +273,12 @@ class PhysicalCommandDatasetActivity : Activity() {
                         firstFrame = false
                     }
                     val observation = continuity.observe(frame)
-                    check(observation.continuous) {
-                        "SANITY STOP: PCM discontinuity"
-                    }
-                    if (wakeFrameIndex == null && wakeDetector?.accept(frame) != null) {
-                        wakeFrameIndex = frame.sequence
-                    }
+                    check(observation.continuous) { "SANITY STOP: PCM discontinuity" }
+                    if (wakeFrameIndex == null && wakeDetector?.accept(frame) != null) wakeFrameIndex = frame.sequence
                     val remaining = targetSamples - buffer.sampleCount()
                     if (remaining > 0) {
-                        if (frame.samples.size <= remaining) {
-                            buffer.append(frame.samples)
-                        } else {
-                            buffer.append(frame.samples.copyOf(remaining))
-                        }
+                        if (frame.samples.size <= remaining) buffer.append(frame.samples)
+                        else buffer.append(frame.samples.copyOf(remaining))
                     }
                 }
         }
@@ -377,66 +291,26 @@ class PhysicalCommandDatasetActivity : Activity() {
             collector.cancel()
         }
         val result = buffer.snapshot()
-        check(result.size == targetSamples) {
-            "capture length mismatch: ${result.size} != $targetSamples samples"
-        }
-        return CaptureResult(
-            window = PcmWindow(result, 0L, result.size.toLong()),
-            wakeFrameIndex = wakeFrameIndex,
-        )
+        check(result.size == targetSamples) { "capture length mismatch: ${result.size} != $targetSamples samples" }
+        return CaptureResult(PcmWindow(result, 0L, result.size.toLong()), wakeFrameIndex)
     }
 
     private fun runMoonshine(window: PcmWindow): AsrTiming {
-        val initStart = SystemClock.elapsedRealtimeNanos()
-        val engine = SherpaMoonshineBenchmarkEngine(assets)
+        val initStart = SystemClock.elapsedRealtimeNanos(); val engine = SherpaMoonshineBenchmarkEngine(assets)
         val initMs = (SystemClock.elapsedRealtimeNanos() - initStart) / 1_000_000.0
-        return try {
-            engine.begin(window.samples)
-            val text = engine.finish()?.text.orEmpty()
-            AsrTiming(initMs, engine.lastDecodeMs, engine.lastFinalizeMs, text)
-        } finally {
-            engine.close()
-        }
+        return try { engine.begin(window.samples); val text = engine.finish()?.text.orEmpty(); AsrTiming(initMs, engine.lastDecodeMs, engine.lastFinalizeMs, text) } finally { engine.close() }
     }
 
     private fun detectOnsetSample(pcm: ShortArray): Long? {
-        val frameSamples = AudioEngine.FRAME_SAMPLES
-        val baselineFrames = minOf(20, pcm.size / frameSamples / 2)
-        fun rms(offset: Int): Double {
-            var sum = 0.0
-            for (i in offset until minOf(offset + frameSamples, pcm.size)) {
-                sum += pcm[i].toDouble() * pcm[i]
-            }
-            return sqrt(sum / frameSamples)
-        }
-        val baseline = (0 until baselineFrames).map { rms(it * frameSamples) }.average()
-        val threshold = maxOf(500.0, baseline * 4.0)
-        var consecutive = 0
-        for (frame in baselineFrames until pcm.size / frameSamples) {
-            consecutive = if (rms(frame * frameSamples) >= threshold) consecutive + 1 else 0
-            if (consecutive >= 2) return ((frame - 1) * frameSamples).toLong()
-        }
+        val n = AudioEngine.FRAME_SAMPLES; val baselineFrames = minOf(20, pcm.size / n / 2)
+        fun rms(offset: Int): Double { var sum = 0.0; for (i in offset until minOf(offset + n, pcm.size)) sum += pcm[i].toDouble() * pcm[i]; return sqrt(sum / n) }
+        val threshold = maxOf(500.0, (0 until baselineFrames).map { rms(it * n) }.average() * 4.0); var consecutive = 0
+        for (frame in baselineFrames until pcm.size / n) { consecutive = if (rms(frame * n) >= threshold) consecutive + 1 else 0; if (consecutive >= 2) return ((frame - 1) * n).toLong() }
         return null
     }
 
-    private fun hasMoonshineAssets(): Boolean = listOf(
-        "$MOONSHINE_ASSET_DIR/encoder_model.ort",
-        "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort",
-        "$MOONSHINE_ASSET_DIR/tokens.txt",
-    ).all { path ->
-        try {
-            assets.open(path).use { }
-            true
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun saveSanityPcm(runId: String, pcm: ShortArray) {
-        val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
-        pcm.forEach { bytes.putShort(it) }
-        FileOutputStream(File(sanityDir(), "$runId.pcm16le")).use { it.write(bytes.array()) }
-    }
+    private fun hasMoonshineAssets() = listOf("$MOONSHINE_ASSET_DIR/encoder_model.ort", "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort", "$MOONSHINE_ASSET_DIR/tokens.txt").all { path -> try { assets.open(path).use { }; true } catch (_: Throwable) { false } }
+    private fun saveSanityPcm(runId: String, pcm: ShortArray) { val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN); pcm.forEach { bytes.putShort(it) }; FileOutputStream(File(sanityDir(), "$runId.pcm16le")).use { it.write(bytes.array()) } }
 
     private fun saveTrial(
         prompt: Prompt,
@@ -506,32 +380,13 @@ class PhysicalCommandDatasetActivity : Activity() {
     }
 
     private fun datasetDir(): File = dataDir(DATASET_DIR)
-
     private fun sanityDir(): File = dataDir(SANITY_DIR)
-
-    private fun dataDir(name: String): File {
-        val root = getExternalFilesDir(name) ?: File(filesDir, name)
-        check(root.exists() || root.mkdirs()) { "Unable to create $name" }
-        return root
-    }
+    private fun dataDir(name: String): File { val root = getExternalFilesDir(name) ?: File(filesDir, name); check(root.exists() || root.mkdirs()) { "Unable to create $name" }; return root }
 
     private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (read > 0) digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+    private fun sha256(file: File): String { val digest = MessageDigest.getInstance("SHA-256"); file.inputStream().use { input -> val buffer = ByteArray(64 * 1024); while (true) { val read = input.read(buffer); if (read < 0) break; if (read > 0) digest.update(buffer, 0, read) } }; return digest.digest().joinToString("") { "%02x".format(it) } }
 
     private fun button(label: String) = Button(this).apply {
         isAllCaps = false
@@ -564,7 +419,6 @@ class PhysicalCommandDatasetActivity : Activity() {
         private const val PREFS_NAME = "okja-command-dataset"
         private const val PREF_SPEAKER_ID = "speaker-id"
         private const val PREF_CONDITION = "condition"
-        private const val MOONSHINE_ASSET_DIR =
-            "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27"
+        private const val MOONSHINE_ASSET_DIR = "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27"
     }
 }
