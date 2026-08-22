@@ -16,7 +16,6 @@ import android.widget.TextView
 import com.soul.aihub.voice.AudioEngine
 import com.soul.aihub.voice.PorcupineKoreanModelProvisioner
 import com.soul.aihub.voice.PorcupinePcmWakeDetector
-import com.soul.aihub.voice.PorcupineSessionAccessKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -149,7 +148,7 @@ class PorcupineWakeActivity : Activity() {
             try {
                 val models = PorcupineKoreanModelProvisioner(this@PorcupineWakeActivity)
                     .provision(accessKey)
-                PorcupineSessionAccessKey.remember(accessKey)
+                sessionAccessKey = accessKey
                 val localDetector = PorcupinePcmWakeDetector.create(
                     context = this@PorcupineWakeActivity,
                     accessKey = accessKey,
@@ -246,6 +245,9 @@ class PorcupineWakeActivity : Activity() {
     }
 
     companion object {
+        @Volatile
+        var sessionAccessKey: String? = null
+            private set
         private const val REQ_AUDIO = 3301
     }
 }
