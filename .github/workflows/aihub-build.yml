@@ -34,6 +34,20 @@ jobs:
         working-directory: aihub/phone
         run: python -m unittest -v test_prebuild_failure_matrix.py
 
+      - name: Compile protected-command tooling
+        working-directory: aihub/command_classifier
+        run: |
+          python -m py_compile \
+            corpus.py \
+            validate_corpus.py \
+            install_qualified_classifier.py \
+            train_physical_classifier.py \
+            test_install_qualified_classifier.py
+
+      - name: Verify qualified-model deployment gate
+        working-directory: aihub/command_classifier
+        run: python -m unittest -v test_install_qualified_classifier.py
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
