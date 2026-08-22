@@ -5,7 +5,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Okja Fold4 Diagnostic"
+        android:label="Okja Command Dataset"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"
@@ -20,12 +20,24 @@
             android:name=".PerfActivity"
             android:exported="false" />
         <activity
-            android:name=".DiagnosticActivity"
+            android:name=".PorcupineWakeActivity"
+            android:label="Okja Porcupine Wake"
+            android:exported="false" />
+        <activity
+            android:name=".PhysicalCommandDatasetActivity"
+            android:label="Okja Command Dataset"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".LocalAsrBenchmarkActivity"
+            android:label="Okja ASR Benchmark"
+            android:exported="false" />
+        <activity
+            android:name=".DiagnosticActivity"
+            android:exported="false" />
     </application>
 </manifest>

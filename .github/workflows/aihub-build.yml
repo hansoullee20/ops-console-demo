@@ -3,6 +3,11 @@ name: Verify and build AI Hub test APK
 on:
   workflow_dispatch:
   push:
+    branches: [ aihub-voice-test, feat/voice-pipeline-v2 ]
+    paths:
+      - 'aihub/**'
+      - '.github/workflows/aihub-build.yml'
+  pull_request:
     branches: [ aihub-voice-test ]
     paths:
       - 'aihub/**'
@@ -29,7 +34,21 @@ jobs:
         working-directory: aihub/phone
         run: python -m unittest -v test_prebuild_failure_matrix.py
 
-      - uses: actions/setup-java@v4
+      - name: Compile protected-command tooling
+        working-directory: aihub/command_classifier
+        run: |
+          python -m py_compile \
+            corpus.py \
+            validate_corpus.py \
+            install_qualified_classifier.py \
+            train_physical_classifier.py \
+            test_install_qualified_classifier.py
+
+      - name: Verify qualified-model deployment gate
+        working-directory: aihub/command_classifier
+        run: python -m unittest -v test_install_qualified_classifier.py
+
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -37,6 +56,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+
+      - name: Run Android JVM tests
+        run: gradle -p aihub testDebugUnitTest --stacktrace
 
       - name: Build debug APK after verification
         run: gradle -p aihub assembleDebug --stacktrace
