@@ -52,13 +52,17 @@ The command benchmark must report:
 
 An opposite-action execution is release-blocking regardless of aggregate accuracy.
 
-### 3. The first wake-engine benchmark is Porcupine v4.0 with `옥자야`
+### 3. The first wake-engine benchmark is Porcupine 4.0.2 with `옥자야`
 
-The first new wake-engine benchmark candidate is Picovoice Porcupine v4.0 using its low-level caller-owned PCM API, not a microphone-owning manager API.
+The first new wake-engine benchmark candidate is Picovoice Porcupine `porcupine-android:4.0.2` using its low-level caller-owned PCM API, not `PorcupineManager` or any microphone-owning API.
 
 Primary phrase: `옥자야`.
 
 Bare `옥자` remains a comparison/control phrase only because its shorter acoustic form is expected to be more confusable.
+
+For Korean inference the detector explicitly supplies `porcupine_params_ko.pv`. Okja provisions the current pinned upstream Korean parameter file into app-private storage and verifies its upstream Git blob identity before use. The custom Android keyword file is generated through Porcupine's official `trainWakeWordFromPhrase(accessKey, outputPath, "ko", "옥자야")` API and cached privately.
+
+The Picovoice AccessKey is not committed. Keyword/model provisioning may require network once; wake inference after provisioning is local.
 
 This is a benchmark decision, not an assumption that Porcupine has already passed Okja's licensing, false-wake, recall, battery, or Fold4 resource gates.
 
@@ -75,6 +79,20 @@ Keep the 3-second ring buffer, but stop treating a fixed 1.5-second decoder pre-
 ### 6. TTS remains half-duplex for v1
 
 Wake remains disabled while Okja TTS is speaking. Full-duplex/AEC/barge-in remains deferred until the basic command-safety architecture is qualified.
+
+### 7. Physical-classifier runtime is isolated from sherpa-onnx
+
+The Android app already depends on `sherpa-onnx:v1.13.4`. That Android build carries a version-pinned ONNX Runtime native library. Okja therefore does **not** add a second `onnxruntime-android` AAR for the physical-command classifier.
+
+The five-class classifier is exported as TFLite and executed with Google Play services LiteRT (`play-services-tflite-java:16.5.0`) using `FROM_SYSTEM_ONLY`.
+
+Reason:
+
+- avoid two incompatible `libonnxruntime.so` / JNI stacks in one APK;
+- keep the tiny protected classifier independent of the conversation-ASR runtime;
+- fail closed if the system LiteRT module or classifier cannot initialize.
+
+This changes deployment runtime only. It does not change the acoustic-authority architecture or safety gates.
 
 ## Release gates
 
@@ -95,8 +113,8 @@ Abstention is explicitly preferable to a wrong physical action.
 
 1. implement semantic physical-command benchmark scoring;
 2. move physical execution behind typed acoustic authorization;
-3. implement and train the five-class acoustic classifier;
-4. integrate Porcupine v4.0 low-level PCM for `옥자야` and benchmark on identical PCM/Fold4;
+3. collect real session/speaker/condition-labeled Fold4 audio and train/calibrate the five-class TFLite classifier;
+4. provision/integrate Porcupine 4.0.2 low-level PCM for `옥자야` and benchmark on identical PCM/Fold4;
 5. calibrate wake-relative slicing and endpointing;
 6. requalify Moonshine for conversation only;
 7. harden Android/Samsung lifecycle and run long soak tests;
@@ -109,13 +127,15 @@ Positive:
 - observed ASR `켜/꺼` inversions can no longer directly actuate a device;
 - the benchmark measures the actual product hazard instead of average transcription quality;
 - the architecture becomes simpler than ASR + constrained grammar + N-best + separate phoneme verifier by default;
-- wake complexity is earned by measurement rather than assumed up front.
+- wake complexity is earned by measurement rather than assumed up front;
+- the protected classifier avoids sharing sherpa's native ONNX Runtime.
 
 Costs:
 
 - Okja now owns a small acoustic-classifier dataset/training/calibration task;
 - physical commands fail closed until that model is qualified;
-- Porcupine introduces a vendor/licensing dependency that must be evaluated before production adoption.
+- Porcupine introduces a vendor/licensing/AccessKey dependency that must be evaluated before production adoption;
+- initial Porcupine Korean provisioning requires network access before subsequent local inference.
 
 ## Non-decisions
 
