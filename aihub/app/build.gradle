@@ -23,13 +23,20 @@ android {
     // ASR model blobs are already binary/quantized and can be hundreds of MB. Avoid
     // AGP reading them wholesale into heap for asset compression; keeping them
     // uncompressed also gives native runtimes efficient AssetManager access.
+    // The physical-command model is memory-mapped by LiteRT and must also stay uncompressed.
     androidResources {
-        noCompress += ['onnx', 'ort']
+        noCompress += ['onnx', 'ort', 'tflite']
     }
 }
 
 dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
     implementation 'com.github.k2-fsa:sherpa-onnx:v1.13.4'
+
+    // Use the system-provided LiteRT runtime from Google Play services for the tiny physical
+    // command classifier. Do not add onnxruntime-android here: sherpa-onnx v1.13.4 already
+    // packages a version-pinned libonnxruntime.so, and a second ORT JNI/runtime can conflict.
+    implementation 'com.google.android.gms:play-services-tflite-java:16.5.0'
+
     testImplementation 'junit:junit:4.13.2'
 }

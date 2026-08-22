@@ -4,9 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -31,14 +33,15 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Fold4 data-capture surface for the five-class physical-command model.
  *
  * AudioEngine remains the sole microphone owner. Each trial saves raw 16 kHz mono PCM16 plus one
- * JSONL manifest row containing the requested label/prompt and continuity-checked sample metadata.
- * This activity intentionally does not train or authorize anything.
+ * JSONL manifest row containing label, speaker/session/condition provenance, prompt, and
+ * continuity-checked sample metadata. This activity intentionally does not train or authorize.
  */
 class PhysicalCommandDatasetActivity : Activity() {
     private data class Prompt(
@@ -67,12 +70,15 @@ class PhysicalCommandDatasetActivity : Activity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val running = AtomicBoolean(false)
+    private val sessionId = UUID.randomUUID().toString()
     private var promptIndex = 0
     private var activeAudio: AudioEngine? = null
 
     private lateinit var promptText: TextView
     private lateinit var stateText: TextView
     private lateinit var statsText: TextView
+    private lateinit var speakerIdInput: EditText
+    private lateinit var conditionInput: EditText
     private lateinit var recordButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,6 +92,7 @@ class PhysicalCommandDatasetActivity : Activity() {
     }
 
     private fun buildUi() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 38, 32, 32)
@@ -94,6 +101,25 @@ class PhysicalCommandDatasetActivity : Activity() {
         }
         root.addView(text("옥자 · Physical Command Dataset", 24f, Color.WHITE))
         root.addView(text("5-class PCM capture · AudioEngine only", 14f, Color.LTGRAY))
+
+        speakerIdInput = EditText(this).apply {
+            hint = "speaker id"
+            setText(prefs.getString(PREF_SPEAKER_ID, "speaker-01"))
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            singleLine = true
+        }
+        conditionInput = EditText(this).apply {
+            hint = "condition (quiet/tv/noise/...)"
+            setText(prefs.getString(PREF_CONDITION, "quiet"))
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            singleLine = true
+        }
+        root.addView(text("Speaker ID", 14f, Color.LTGRAY))
+        root.addView(speakerIdInput)
+        root.addView(text("Condition", 14f, Color.LTGRAY))
+        root.addView(conditionInput)
 
         promptText = text("", 22f, Color.WHITE)
         stateText = text("READY", 17f, Color.rgb(180, 220, 255))
@@ -137,6 +163,18 @@ class PhysicalCommandDatasetActivity : Activity() {
             return
         }
 
+        val speakerId = speakerIdInput.text.toString().trim()
+        val condition = conditionInput.text.toString().trim()
+        if (speakerId.isBlank() || condition.isBlank()) {
+            running.set(false)
+            stateText.text = "FAILED · speaker id와 condition은 비워둘 수 없습니다"
+            return
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putString(PREF_SPEAKER_ID, speakerId)
+            .putString(PREF_CONDITION, condition)
+            .apply()
+
         recordButton.isEnabled = false
         val prompt = prompts[promptIndex]
         scope.launch {
@@ -145,7 +183,7 @@ class PhysicalCommandDatasetActivity : Activity() {
                 delay(800)
                 stateText.text = "지금 말하세요 · 3초 녹음"
                 val pcm = capturePcm(RECORD_SECONDS)
-                val record = saveTrial(prompt, pcm)
+                val record = saveTrial(prompt, pcm, speakerId, condition)
                 stateText.text = "SAVED · ${record.name}"
                 renderStats()
             } catch (t: Throwable) {
@@ -193,7 +231,12 @@ class PhysicalCommandDatasetActivity : Activity() {
         return buffer.snapshot()
     }
 
-    private fun saveTrial(prompt: Prompt, pcm: ShortArray): File {
+    private fun saveTrial(
+        prompt: Prompt,
+        pcm: ShortArray,
+        speakerId: String,
+        condition: String,
+    ): File {
         val root = datasetDir()
         val timestamp = System.currentTimeMillis()
         val stem = "$timestamp-${prompt.label.name.lowercase()}"
@@ -204,10 +247,13 @@ class PhysicalCommandDatasetActivity : Activity() {
         FileOutputStream(pcmFile).use { it.write(payload) }
 
         val row = JSONObject().apply {
-            put("schema", "okja.physical-command-corpus.v1")
+            put("schema", "okja.physical-command-corpus.v2")
             put("created_at_ms", timestamp)
             put("label", prompt.label.name)
             put("prompt", prompt.text)
+            put("speaker_id", speakerId)
+            put("session_id", sessionId)
+            put("condition", condition)
             put("pcm_file", pcmFile.name)
             put("sample_rate_hz", AudioEngine.SAMPLE_RATE_HZ)
             put("channels", 1)
@@ -217,6 +263,9 @@ class PhysicalCommandDatasetActivity : Activity() {
             put("sha256", sha256(payload))
             put("capture_owner", "AudioEngine")
             put("pcm_continuity_verified", true)
+            put("device_manufacturer", Build.MANUFACTURER)
+            put("device_model", Build.MODEL)
+            put("android_sdk_int", Build.VERSION.SDK_INT)
         }
         File(root, MANIFEST_NAME).appendText(row.toString() + "\n", Charsets.UTF_8)
         return pcmFile
@@ -236,11 +285,12 @@ class PhysicalCommandDatasetActivity : Activity() {
                     val label = PhysicalCommandClass.valueOf(JSONObject(line).getString("label"))
                     counts[label] = counts.getValue(label) + 1
                 } catch (_: Throwable) {
-                    // A malformed historical row is ignored here; training import must fail loudly.
+                    // Display is best-effort; training import validates every row strictly.
                 }
             }
         }
         statsText.text = buildString {
+            append("session: ").append(sessionId).append("\n")
             append("저장 위치: ").append(datasetDir().absolutePath).append("\n")
             PhysicalCommandClass.entries.forEach { label ->
                 append(label.name).append(": ").append(counts.getValue(label)).append("\n")
@@ -285,5 +335,8 @@ class PhysicalCommandDatasetActivity : Activity() {
         private const val RECORD_SECONDS = 3
         private const val DATASET_DIR = "okja-physical-command-dataset"
         private const val MANIFEST_NAME = "manifest.jsonl"
+        private const val PREFS_NAME = "okja-command-dataset"
+        private const val PREF_SPEAKER_ID = "speaker-id"
+        private const val PREF_CONDITION = "condition"
     }
 }
