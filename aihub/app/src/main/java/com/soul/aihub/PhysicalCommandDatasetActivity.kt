@@ -19,7 +19,6 @@ import com.soul.aihub.voice.Pcm16UtteranceBuffer
 import com.soul.aihub.voice.PcmContinuityTracker
 import com.soul.aihub.voice.PcmWindow
 import com.soul.aihub.voice.PhysicalCommandClass
-import com.soul.aihub.voice.PorcupineKoreanModelProvisioner
 import com.soul.aihub.voice.PorcupinePcmWakeDetector
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
 import kotlinx.coroutines.CoroutineScope
@@ -226,29 +225,46 @@ class PhysicalCommandDatasetActivity : Activity() {
     }
 
     private suspend fun runSanity(prompt: Prompt) {
-        val accessKey = checkNotNull(PorcupineWakeActivity.sessionAccessKey) { "Run Okja Porcupine Wake once first" }
         check(hasMoonshineAssets()) { "Moonshine assets missing; use Moonshine benchmark APK" }
-        val models = PorcupineKoreanModelProvisioner(this).provision(accessKey)
-        val detector = PorcupinePcmWakeDetector.create(this, accessKey, models.keywordPath, models.modelPath)
-        try {
-            stateText.text = "준비… 1.2초 뒤 말하세요"
-            val cue = scope.launch { delay(SANITY_CUE_DELAY_MS); stateText.text = "SANITY · 지금 말하세요" }
-            captureEpoch = SystemClock.elapsedRealtimeNanos()
-            val capture = try { capturePcm(RECORD_SECONDS, detector) } finally { cue.cancel() }
-            val runId = UUID.randomUUID().toString(); saveSanityPcm(runId, capture.window.samples)
-            val onset = detectOnsetSample(capture.window.samples)
-            val wakeSample = capture.wakeFrameIndex?.let { minOf(capture.window.endSampleIndexExclusive, (it + 1L) * AudioEngine.FRAME_SAMPLES) }
-            val preRollStart = wakeSample?.let { maxOf(0L, it - AudioEngine.SAMPLE_RATE_HZ * AudioEngine.DEFAULT_PRE_ROLL_MS / 1000L) }
-            if (wakeSample != null) { checkNotNull(onset) { "SANITY STOP: utterance onset not found" }; check(preRollStart!! <= onset) { "SANITY STOP: pre-roll clipping" } }
-            val asr = withContext(Dispatchers.Default) { runMoonshine(capture.window) }
-            val row = JSONObject().apply {
-                put("run_id", runId); put("phrase_id", prompt.id); put("capture_epoch", captureEpoch); put("pcm_start_sample", 0); put("pcm_end_sample", capture.window.endSampleIndexExclusive); put("continuity_ok", true)
-                put("wake_frame_index", capture.wakeFrameIndex ?: JSONObject.NULL); put("keyword_end_sample", JSONObject.NULL); put("keyword_end_to_wake_ms", JSONObject.NULL)
-                put("onset_to_wake_ms", if (wakeSample != null) (wakeSample - onset!!) * 1000.0 / AudioEngine.SAMPLE_RATE_HZ else JSONObject.NULL); put("preroll_start_sample", preRollStart ?: JSONObject.NULL)
-                put("asr_init_ms", asr.initMs); put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL); put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL); put("transcript", asr.text); put("apk_sha256", installedApkSha256)
-            }
-            File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8); stateText.text = "SANITY SAVED · ${prompt.id} · $runId"
-        } finally { detector.close() }
+        stateText.text = "BOOTSTRAP · 준비… 1.2초 뒤 말하세요"
+        val cue = scope.launch { delay(SANITY_CUE_DELAY_MS); stateText.text = "BOOTSTRAP · 지금 말하세요" }
+        captureEpoch = SystemClock.elapsedRealtimeNanos()
+        val capture = try { capturePcm(RECORD_SECONDS) } finally { cue.cancel() }
+        val runId = UUID.randomUUID().toString()
+        saveSanityPcm(runId, capture.window.samples)
+        val onset = checkNotNull(detectOnsetSample(capture.window.samples)) { "SANITY STOP: utterance onset not found" }
+        val asr = withContext(Dispatchers.Default) { runMoonshine(capture.window) }
+        val row = JSONObject().apply {
+            put("schema", "okja.pipeline-sanity.v2")
+            put("run_id", runId)
+            put("phrase_id", checkNotNull(prompt.id))
+            put("prompt_text", prompt.text)
+            put("capture_epoch", captureEpoch)
+            put("sample_rate_hz", AudioEngine.SAMPLE_RATE_HZ)
+            put("pcm_start_sample", capture.window.startSampleIndex)
+            put("pcm_end_sample", capture.window.endSampleIndexExclusive)
+            put("continuity_ok", true)
+            put("onset_sample", onset)
+            put("wake_engine", "none-bootstrap")
+            put("wake_model_name", JSONObject.NULL)
+            put("wake_model_sha256", JSONObject.NULL)
+            put("wake_config_sha256", JSONObject.NULL)
+            put("wake_detector_init_ms", JSONObject.NULL)
+            put("wake_engine_warmup_ms", JSONObject.NULL)
+            put("wake_frame_index", JSONObject.NULL)
+            put("wake_decision_sample", JSONObject.NULL)
+            put("keyword_end_sample", JSONObject.NULL)
+            put("keyword_end_to_wake_ms", JSONObject.NULL)
+            put("onset_to_wake_ms", JSONObject.NULL)
+            put("preroll_start_sample", JSONObject.NULL)
+            put("asr_init_ms", asr.initMs)
+            put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL)
+            put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL)
+            put("transcript", asr.text)
+            put("apk_sha256", installedApkSha256)
+        }
+        File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8)
+        stateText.text = "BOOTSTRAP SAVED · ${prompt.id} · $runId"
     }
 
     private suspend fun capturePcm(seconds: Int, wakeDetector: PorcupinePcmWakeDetector? = null): CaptureResult {
@@ -418,8 +434,8 @@ class PhysicalCommandDatasetActivity : Activity() {
         private const val SANITY_CUE_DELAY_MS = 1_200L
         private const val DATASET_DIR = "okja-physical-command-dataset"
         private const val MANIFEST_NAME = "manifest.jsonl"
-        private const val SANITY_DIR = "okja-pipeline-sanity"
-        private const val SANITY_JSONL = "sanity.jsonl"
+        private const val SANITY_DIR = "okja-pipeline-sanity-v2"
+        private const val SANITY_JSONL = "sanity-v2.jsonl"
         private const val PREFS_NAME = "okja-command-dataset"
         private const val PREF_SPEAKER_ID = "speaker-id"
         private const val PREF_CONDITION = "condition"
