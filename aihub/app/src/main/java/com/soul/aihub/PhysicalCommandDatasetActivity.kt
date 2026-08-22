@@ -90,6 +90,7 @@ class PhysicalCommandDatasetActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val running = AtomicBoolean(false)
     private val sessionId = UUID.randomUUID().toString()
+    private val installedApkSha256 by lazy { sha256(File(applicationInfo.sourceDir)) }
     private var promptIndex = 0
     private var captureEpoch = 0L
     private var activeAudio: AudioEngine? = null
@@ -230,9 +231,11 @@ class PhysicalCommandDatasetActivity : Activity() {
         val models = PorcupineKoreanModelProvisioner(this).provision(accessKey)
         val detector = PorcupinePcmWakeDetector.create(this, accessKey, models.keywordPath, models.modelPath)
         try {
-            stateText.text = "준비… 0.8초 뒤 말하세요"; delay(800); stateText.text = "SANITY · 지금 말하세요"
-            captureEpoch += 1
-            val capture = capturePcm(RECORD_SECONDS, detector); val runId = UUID.randomUUID().toString(); saveSanityPcm(runId, capture.window.samples)
+            stateText.text = "준비… 1.2초 뒤 말하세요"
+            val cue = scope.launch { delay(SANITY_CUE_DELAY_MS); stateText.text = "SANITY · 지금 말하세요" }
+            captureEpoch = SystemClock.elapsedRealtimeNanos()
+            val capture = try { capturePcm(RECORD_SECONDS, detector) } finally { cue.cancel() }
+            val runId = UUID.randomUUID().toString(); saveSanityPcm(runId, capture.window.samples)
             val onset = detectOnsetSample(capture.window.samples)
             val wakeSample = capture.wakeFrameIndex?.let { minOf(capture.window.endSampleIndexExclusive, (it + 1L) * AudioEngine.FRAME_SAMPLES) }
             val preRollStart = wakeSample?.let { maxOf(0L, it - AudioEngine.SAMPLE_RATE_HZ * AudioEngine.DEFAULT_PRE_ROLL_MS / 1000L) }
@@ -242,7 +245,7 @@ class PhysicalCommandDatasetActivity : Activity() {
                 put("run_id", runId); put("phrase_id", prompt.id); put("capture_epoch", captureEpoch); put("pcm_start_sample", 0); put("pcm_end_sample", capture.window.endSampleIndexExclusive); put("continuity_ok", true)
                 put("wake_frame_index", capture.wakeFrameIndex ?: JSONObject.NULL); put("keyword_end_sample", JSONObject.NULL); put("keyword_end_to_wake_ms", JSONObject.NULL)
                 put("onset_to_wake_ms", if (wakeSample != null) (wakeSample - onset!!) * 1000.0 / AudioEngine.SAMPLE_RATE_HZ else JSONObject.NULL); put("preroll_start_sample", preRollStart ?: JSONObject.NULL)
-                put("asr_init_ms", asr.initMs); put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL); put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL); put("transcript", asr.text); put("apk_sha256", sha256(File(applicationInfo.sourceDir)))
+                put("asr_init_ms", asr.initMs); put("asr_decode_ms", asr.decodeMs ?: JSONObject.NULL); put("asr_finalize_ms", asr.finalizeMs ?: JSONObject.NULL); put("transcript", asr.text); put("apk_sha256", installedApkSha256)
             }
             File(sanityDir(), SANITY_JSONL).appendText(row.toString() + "\n", Charsets.UTF_8); stateText.text = "SANITY SAVED · ${prompt.id} · $runId"
         } finally { detector.close() }
@@ -412,6 +415,7 @@ class PhysicalCommandDatasetActivity : Activity() {
     companion object {
         private const val REQ_AUDIO = 3201
         private const val RECORD_SECONDS = 3
+        private const val SANITY_CUE_DELAY_MS = 1_200L
         private const val DATASET_DIR = "okja-physical-command-dataset"
         private const val MANIFEST_NAME = "manifest.jsonl"
         private const val SANITY_DIR = "okja-pipeline-sanity"
