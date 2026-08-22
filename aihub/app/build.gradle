@@ -25,13 +25,16 @@ android {
     // uncompressed also gives native runtimes efficient AssetManager access.
     // The physical-command model is memory-mapped by LiteRT and must also stay uncompressed.
     androidResources {
-        noCompress += ['onnx', 'ort', 'tflite']
+        noCompress += ['onnx', 'ort', 'tflite', 'ppn', 'pv']
     }
 }
 
 dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
     implementation 'com.github.k2-fsa:sherpa-onnx:v1.13.4'
+
+    // Low-level wake API only. Okja never uses PorcupineManager because AudioEngine owns the mic.
+    implementation 'ai.picovoice:porcupine-android:4.0.2'
 
     // Use the system-provided LiteRT runtime from Google Play services for the tiny physical
     // command classifier. Do not add onnxruntime-android here: sherpa-onnx v1.13.4 already
