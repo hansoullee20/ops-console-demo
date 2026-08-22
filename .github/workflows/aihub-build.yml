@@ -48,7 +48,7 @@ jobs:
         working-directory: aihub/command_classifier
         run: python -m unittest -v test_install_qualified_classifier.py
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'

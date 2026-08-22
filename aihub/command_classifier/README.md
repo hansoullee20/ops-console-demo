@@ -24,20 +24,15 @@ The candidate model contract is:
 - TFLite input shape `[1, 48000]`;
 - five output logits in the fixed class order above.
 
-Until endpointing is calibrated, Android explicitly abstains on physical-command windows longer than 48,000 samples rather than silently cropping them.
-
 ## 1. Collect real Fold4 audio
 
 Use the Android launcher **Okja Command Dataset**.
 
-Before recording, set:
+Before recording, set an anonymous stable speaker ID and an acoustic condition such as `quiet`, `tv`, `kitchen`, `fan`, or `far-field`.
 
-- `speaker id`: anonymous stable speaker identifier such as `speaker-01`;
-- `condition`: e.g. `quiet`, `tv`, `kitchen`, `fan`, `far-field`.
+A new `session_id` is generated each time the activity is created. Deliberately collect multiple sessions: train/validation/test splitting is session-grouped to prevent near-duplicate leakage.
 
-A new `session_id` is generated each time the activity is created. Do not force all recordings into one session: train/validation/test splitting is session-grouped to prevent near-duplicate leakage.
-
-The app saves data under its app-specific external-files directory:
+The app saves under its app-specific external-files directory:
 
 ```text
 Android/data/com.soul.aihub/files/okja-physical-command-dataset/
@@ -45,30 +40,20 @@ Android/data/com.soul.aihub/files/okja-physical-command-dataset/
   *.pcm16le
 ```
 
-Each manifest row contains SHA-256, speaker/session/condition provenance, device/Android metadata, and a flag confirming PCM continuity from `AudioEngine`.
+Each manifest row contains SHA-256, speaker/session/condition provenance, device/Android metadata, and PCM-continuity status. Capture now requires the first observed frame to be the start of a fresh `AudioEngine` epoch and writes exactly 48,000 samples.
 
 ## 2. Pull and validate the corpus
 
-Example with adb:
+Example:
 
 ```bash
 adb pull /sdcard/Android/data/com.soul.aihub/files/okja-physical-command-dataset ./okja-corpus
 python aihub/command_classifier/validate_corpus.py ./okja-corpus --min-per-class 30
 ```
 
-Validation fails on:
-
-- missing or malformed provenance;
-- non-16-kHz/non-mono/non-PCM16 records;
-- PCM size mismatch;
-- SHA-256 mismatch;
-- duplicate audio bytes;
-- unverified PCM continuity;
-- missing classes.
+Validation fails on malformed provenance, wrong PCM format/length, SHA mismatch, duplicate bytes, unverified continuity, unsafe paths, or missing classes.
 
 ## 3. Train a candidate
-
-Create a dedicated environment and install the pinned training dependency:
 
 ```bash
 python -m venv .venv-okja-command
@@ -79,59 +64,34 @@ python aihub/command_classifier/train_physical_classifier.py \
   ./okja-command-output
 ```
 
-The training script:
+The training script validates every row, splits by capture session, trains the small raw-waveform model, augments training data only, calibrates abstention thresholds on validation data, evaluates semantic safety on the separate test split, and exports TFLite.
 
-1. validates every corpus row;
-2. splits by whole capture session, never individual clip;
-3. trains a small raw-waveform 1-D depthwise/separable CNN;
-4. performs gain/noise/time-shift augmentation on training data only;
-5. calibrates confidence, top-two margin, and explicit opposite-action margin on validation data;
-6. evaluates semantic physical-command safety on a separate test split;
-7. exports a float-input TFLite candidate and a threshold JSON record.
-
-The script returns exit code `2` unless the development gate is met. A non-qualified candidate remains useful for diagnostics but must not be copied into the production asset path.
+The report also records speakers in each split and all speaker overlap. **Session-grouped is not the same as speaker-disjoint.** A model tested on overlapping speakers must not be described as validated for unseen-speaker generalization.
 
 ## Development gate encoded by the trainer
 
 A `physical-command-qualified.tflite` file is emitted only when the held-out test set satisfies all of these:
 
 - at least 3,000 physical-command examples;
+- at least 1,000 `OTHER` examples;
 - correct physical execution >= 98%;
 - wrong device = 0;
 - wrong ON/OFF action = 0;
-- false physical execution rate on `OTHER` < 0.1%.
+- false physical execution from `OTHER` = 0.
 
-This is only the development gate. Production qualification still requires the larger Okja release protocol, including long household-negative testing and the final 6,000-trial opposite-action gate.
+This is only the development gate. Production qualification remains stricter, including the >=6,000 balanced physical-command inversion test and >=300 h representative household-negative protocol.
 
-## 4. Install only a qualified artifact
+The script returns exit code `2` when the candidate is not deployment-qualified. A failed candidate remains useful for diagnostics but must not be copied into Android production assets.
 
-Do not manually copy a `.tflite` candidate into Android assets. Use:
+## 4. Install only an explicit qualified artifact
 
 ```bash
 python aihub/command_classifier/install_qualified_classifier.py \
   ./okja-command-output
 ```
 
-The installer refuses deployment unless:
-
-- `training-report.json` says `deployment_allowed=true`;
-- the development gate is explicitly passed;
-- report and threshold class order exactly match `TV_ON, TV_OFF, AC_ON, AC_OFF, OTHER`;
-- the model's actual SHA-256 matches both records;
-- all calibrated thresholds are valid.
-
-It then creates only:
-
-```text
-aihub/app/src/main/assets/okja-physical-command/
-  physical-command.tflite
-  qualified-manifest.json
-```
-
-This asset directory is git-ignored. Android's `QualifiedPhysicalCommandAuthorizerFactory` independently rechecks schema, deployment flag, class order, canonical filename, model SHA-256, and thresholds before it creates a LiteRT authorizer. Any failure returns the reject-all authorizer.
-
-The installer and its tamper/non-qualified rejection cases run in the main GitHub Actions build workflow.
+The installer verifies the training report, development gate, exact class order, model SHA-256, and calibrated thresholds before creating the Android asset manifest. Android independently verifies that manifest/model again before constructing the LiteRT authorizer. Any failure leaves physical control reject-all.
 
 ## Data-quality rule
 
-Synthetic TTS may be added later for augmentation/hard-negative generation, but it must not substitute for held-out real-speaker/Fold4 evidence. Production qualification metrics are calculated from real held-out audio.
+Synthetic TTS may later augment training or hard negatives, but it must not replace held-out real-speaker/Fold4 evidence. Production qualification metrics are calculated from real held-out audio.

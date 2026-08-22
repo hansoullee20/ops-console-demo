@@ -46,6 +46,9 @@ data class VoiceSessionResult(
  *
  * AudioEngine remains the only microphone owner. Physical execution requires an independent
  * caller-owned-PCM authorizer; ASR text and the transcript router are never actuator authority.
+ *
+ * A session can start only from a [PcmWindow] carrying the exact pre-roll sample range. This lets
+ * the integrity gate prove that the first live frame begins exactly where pre-roll ended.
  */
 class VoiceSessionController(
     private val asr: StreamingAsrEngine,
@@ -94,7 +97,7 @@ class VoiceSessionController(
     )
 
     @Synchronized
-    fun startUtterance(preRollPcm16: ShortArray): Long? {
+    fun startUtterance(preRoll: PcmWindow): Long? {
         check(!closed) { "controller is closed" }
         if (state !in setOf(State.IDLE, State.FOLLOW_UP)) return null
 
@@ -105,19 +108,19 @@ class VoiceSessionController(
         asr.reset()
         try {
             physicalCommandAuthorizer.reset()
-            physicalCommandAuthorizer.begin(preRollPcm16)
+            physicalCommandAuthorizer.begin(preRoll.samples)
             physicalAuthorizerHealthy = true
         } catch (_: Throwable) {
             physicalAuthorizerHealthy = false
         }
-        integrity.beginUtterance()
+        integrity.beginUtterance(preRoll.endSampleIndexExclusive)
 
         return try {
-            asr.begin(preRollPcm16)
+            asr.begin(preRoll.samples)
             utteranceActive = true
             state = State.CAPTURING
             generation
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             integrity.endUtterance()
             safeResetPhysicalAuthorizerLocked()
             noteRecoverableFailureLocked()
@@ -143,7 +146,7 @@ class VoiceSessionController(
                 }
             }
             asr.accept(frame)
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             abortUtteranceLocked()
             noteRecoverableFailureLocked()
             null
@@ -171,7 +174,7 @@ class VoiceSessionController(
 
         val update = try {
             asr.finish()
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             abortUtteranceLocked()
             noteRecoverableFailureLocked()
             return null
@@ -208,7 +211,7 @@ class VoiceSessionController(
                     blockedByAudioIntegrity = false,
                     blockedByPhysicalAuthorization = false,
                 )
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 state = State.DEGRADED
                 VoiceSessionResult(
                     generation = generation,
@@ -237,7 +240,7 @@ class VoiceSessionController(
 
         val route = try {
             router.route(transcript)
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             state = State.DEGRADED
             return null
         }

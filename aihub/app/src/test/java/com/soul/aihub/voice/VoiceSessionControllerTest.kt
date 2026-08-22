@@ -24,13 +24,11 @@ class VoiceSessionControllerTest {
             return null
         }
 
-        override fun finish(): AsrUpdate {
-            return AsrUpdate(
-                text = finalText,
-                isFinal = true,
-                producedAtElapsedRealtimeNs = 123L,
-            )
-        }
+        override fun finish(): AsrUpdate = AsrUpdate(
+            text = finalText,
+            isFinal = true,
+            producedAtElapsedRealtimeNs = 123L,
+        )
 
         override fun reset() {
             resetCount += 1
@@ -67,14 +65,21 @@ class VoiceSessionControllerTest {
         }
     }
 
-    private fun frame(sequence: Long, startSampleIndex: Long): PcmFrame {
-        return PcmFrame(
-            samples = ShortArray(320) { 1 },
-            capturedAtElapsedRealtimeNs = sequence * 20_000_000L,
-            sequence = sequence,
-            startSampleIndex = startSampleIndex,
-        )
-    }
+    private fun frame(sequence: Long, startSampleIndex: Long): PcmFrame = PcmFrame(
+        samples = ShortArray(320) { 1 },
+        capturedAtElapsedRealtimeNs = sequence * 20_000_000L,
+        sequence = sequence,
+        startSampleIndex = startSampleIndex,
+    )
+
+    private fun preRoll(
+        endSampleIndexExclusive: Long = 0L,
+        samples: ShortArray = ShortArray(0),
+    ): PcmWindow = PcmWindow(
+        samples = samples,
+        startSampleIndex = endSampleIndexExclusive - samples.size.toLong(),
+        endSampleIndexExclusive = endSampleIndexExclusive,
+    )
 
     private fun requireGeneration(value: Long?): Long {
         assertNotNull(value)
@@ -101,9 +106,11 @@ class VoiceSessionControllerTest {
             physicalCommandAuthorizer = authorizer,
         )
 
-        val generation = requireGeneration(controller.startUtterance(shortArrayOf(7, 8)))
-        controller.acceptFrame(generation, frame(10, 3200))
-        controller.acceptFrame(generation, frame(11, 3520))
+        val generation = requireGeneration(
+            controller.startUtterance(preRoll(3_200L, shortArrayOf(7, 8))),
+        )
+        controller.acceptFrame(generation, frame(10, 3_200L))
+        controller.acceptFrame(generation, frame(11, 3_520L))
 
         val result = requireResult(controller.finishUtterance(generation))
 
@@ -130,7 +137,7 @@ class VoiceSessionControllerTest {
             speechOutput = VoiceSpeechOutput { _, _ -> },
         )
 
-        val generation = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
         controller.acceptFrame(generation, frame(0, 0))
         val result = requireResult(controller.finishUtterance(generation))
 
@@ -155,7 +162,7 @@ class VoiceSessionControllerTest {
             physicalCommandAuthorizer = authorizer,
         )
 
-        val generation = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
         controller.acceptFrame(generation, frame(0, 0))
         controller.acceptFrame(generation, frame(2, 640))
 
@@ -166,6 +173,31 @@ class VoiceSessionControllerTest {
         assertFalse(result.blockedByPhysicalAuthorization)
         assertTrue(executed.isEmpty())
         assertEquals(VoiceSessionController.State.IDLE, controller.snapshot().state)
+    }
+
+    @Test
+    fun prerollToLiveGapFailsClosedEvenWithAcousticAuthorization() {
+        val asr = FakeAsr().apply { finalText = "옥자 TV 켜줘" }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.TV_ON),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = asr,
+            router = VoiceTranscriptRouter { VoiceRouteDecision.DeviceCommand(it) },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(preRoll(3_200L)))
+        controller.acceptFrame(generation, frame(10, 3_520L))
+
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertFalse(result.deviceCommandExecuted)
+        assertTrue(result.blockedByAudioIntegrity)
+        assertTrue(executed.isEmpty())
     }
 
     @Test
@@ -181,13 +213,13 @@ class VoiceSessionControllerTest {
             speechOutput = VoiceSpeechOutput { text, generation -> spoken += text to generation },
         )
 
-        val generation = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val generation = requireGeneration(controller.startUtterance(preRoll()))
         controller.acceptFrame(generation, frame(0, 0))
         controller.finishUtterance(generation)
 
         assertEquals(VoiceSessionController.State.SPEAKING, controller.snapshot().state)
         assertEquals(listOf("응, 듣고 있어" to generation), spoken)
-        assertNull(controller.startUtterance(shortArrayOf(1)))
+        assertNull(controller.startUtterance(preRoll(1L, shortArrayOf(1))))
 
         controller.onSpeechFinished(generation - 1L)
         assertEquals(VoiceSessionController.State.SPEAKING, controller.snapshot().state)
@@ -195,7 +227,9 @@ class VoiceSessionControllerTest {
         controller.onSpeechFinished(generation)
         assertEquals(VoiceSessionController.State.FOLLOW_UP, controller.snapshot().state)
 
-        val nextGeneration = requireGeneration(controller.startUtterance(shortArrayOf(1)))
+        val nextGeneration = requireGeneration(
+            controller.startUtterance(preRoll(1L, shortArrayOf(1))),
+        )
         assertTrue(nextGeneration > generation)
         assertEquals(VoiceSessionController.State.CAPTURING, controller.snapshot().state)
     }
@@ -210,15 +244,15 @@ class VoiceSessionControllerTest {
             speechOutput = VoiceSpeechOutput { _, _ -> },
         )
 
-        val oldGeneration = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val oldGeneration = requireGeneration(controller.startUtterance(preRoll()))
         controller.onMicUnavailable()
         assertEquals(VoiceSessionController.State.MIC_OFF, controller.snapshot().state)
 
         controller.onMicAvailable()
-        val currentGeneration = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val currentGeneration = requireGeneration(controller.startUtterance(preRoll(3_200L)))
 
         assertNull(controller.acceptFrame(oldGeneration, frame(0, 0)))
-        controller.acceptFrame(currentGeneration, frame(10, 3200))
+        controller.acceptFrame(currentGeneration, frame(10, 3_200L))
 
         assertEquals(listOf(10L), asr.acceptedSequences)
     }
@@ -234,19 +268,19 @@ class VoiceSessionControllerTest {
             maxRecoverableFailures = 1,
         )
 
-        val first = requireGeneration(controller.startUtterance(shortArrayOf()))
+        val first = requireGeneration(controller.startUtterance(preRoll()))
         controller.acceptFrame(first, frame(0, 0))
         controller.finishUtterance(first)
         assertEquals(VoiceSessionController.State.IDLE, controller.snapshot().state)
         assertEquals(1, controller.snapshot().recoverableFailures)
         assertTrue(controller.snapshot().canRetry)
 
-        val second = requireGeneration(controller.startUtterance(shortArrayOf()))
-        controller.acceptFrame(second, frame(10, 3200))
+        val second = requireGeneration(controller.startUtterance(preRoll(3_200L)))
+        controller.acceptFrame(second, frame(10, 3_200L))
         controller.finishUtterance(second)
         assertEquals(VoiceSessionController.State.DEGRADED, controller.snapshot().state)
         assertFalse(controller.snapshot().canRetry)
-        assertNull(controller.startUtterance(shortArrayOf()))
+        assertNull(controller.startUtterance(preRoll()))
 
         controller.recoverFromDegraded()
         assertEquals(VoiceSessionController.State.IDLE, controller.snapshot().state)

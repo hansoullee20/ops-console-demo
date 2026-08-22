@@ -1,20 +1,9 @@
-name: Build Okja local ASR benchmark APK
+name: Build Okja Moonshine benchmark APK
 
-# Large ASR models are provisioned only for explicit benchmark builds.
-# Current device pair: Moonshine tiny-ko + SenseVoice 2025 (SenseVoice language pinned to ko).
-# Normal PR/code commits use the lightweight verification workflow.
+# Large ASR model assets are provisioned only for an explicit benchmark build.
+# Rejected comparator engines are not packaged into the active benchmark APK.
 on:
   workflow_dispatch:
-  push:
-    branches: [ feat/voice-pipeline-v2 ]
-    paths:
-      - '.github/workflows/okja-local-asr-benchmark-apk.yml'
-      - 'aihub/gradle.properties'
-  pull_request:
-    branches: [ aihub-voice-test ]
-    paths:
-      - '.github/workflows/okja-local-asr-benchmark-apk.yml'
-      - 'aihub/gradle.properties'
 
 jobs:
   build-benchmark-apk:
@@ -35,12 +24,10 @@ jobs:
       - name: Verify Android JVM tests before model provisioning
         run: gradle -p aihub testDebugUnitTest --stacktrace
 
-      - name: Provision official Korean ASR model assets
-        run: |
-          bash aihub/tools/fetch_sherpa_moonshine_korean_model.sh
-          bash aihub/tools/fetch_sherpa_sensevoice_korean_model.sh
+      - name: Provision Moonshine tiny-ko assets
+        run: bash aihub/tools/fetch_sherpa_moonshine_korean_model.sh
 
-      - name: Build benchmark APK with Moonshine and SenseVoice
+      - name: Build Moonshine benchmark APK
         run: gradle -p aihub assembleDebug --stacktrace
 
       - name: Record APK and model provenance
@@ -52,14 +39,10 @@ jobs:
             benchmark-provenance/moonshine-archive.txt
           cp aihub/app/src/main/assets/sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27/OKJA_MODEL_FILES.sha256 \
             benchmark-provenance/moonshine-files.sha256
-          cp aihub/app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/OKJA_MODEL_PROVENANCE.txt \
-            benchmark-provenance/sensevoice-archive.txt
-          cp aihub/app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/OKJA_MODEL_FILES.sha256 \
-            benchmark-provenance/sensevoice-files.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: okja-local-asr-benchmark-apk
+          name: okja-moonshine-benchmark-apk
           retention-days: 7
           path: |
             aihub/app/build/outputs/apk/debug/app-debug.apk

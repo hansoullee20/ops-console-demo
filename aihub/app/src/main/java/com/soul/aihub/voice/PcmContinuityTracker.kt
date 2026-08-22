@@ -1,6 +1,6 @@
 package com.soul.aihub.voice
 
-/** Result of validating one PCM frame against the previously observed frame. */
+/** Result of validating one PCM frame against the expected stream position. */
 data class PcmContinuityStatus(
     val continuous: Boolean,
     val expectedSequence: Long?,
@@ -16,8 +16,10 @@ data class PcmContinuityStatus(
  *
  * AudioEngine intentionally uses bounded fan-out. If a consumer falls behind,
  * frames may be dropped for that consumer. Sequence/sample metadata lets the
- * consumer detect that loss and fail closed instead of trusting an incomplete
- * utterance for a physical device command.
+ * consumer detect that loss and fail closed instead of trusting incomplete PCM.
+ *
+ * [reset] may seed the expected first live sample position. VoiceSessionController
+ * uses this to prove continuity from a ring-buffer pre-roll snapshot into live PCM.
  */
 class PcmContinuityTracker {
     private var nextSequence: Long? = null
@@ -26,8 +28,10 @@ class PcmContinuityTracker {
     fun observe(frame: PcmFrame): PcmContinuityStatus {
         val expectedSequence = nextSequence
         val expectedStartSampleIndex = nextSampleIndex
-        val continuous = expectedSequence == null ||
-            (frame.sequence == expectedSequence && frame.startSampleIndex == expectedStartSampleIndex)
+        val sequenceContinuous = expectedSequence == null || frame.sequence == expectedSequence
+        val samplePositionContinuous =
+            expectedStartSampleIndex == null || frame.startSampleIndex == expectedStartSampleIndex
+        val continuous = sequenceContinuous && samplePositionContinuous
 
         val missingFrames = if (expectedSequence == null) {
             0L
@@ -54,8 +58,15 @@ class PcmContinuityTracker {
         )
     }
 
-    fun reset() {
-        nextSequence = null
-        nextSampleIndex = null
+    fun reset(
+        expectedSequence: Long? = null,
+        expectedStartSampleIndex: Long? = null,
+    ) {
+        expectedSequence?.let { require(it >= 0L) { "expectedSequence must be non-negative" } }
+        expectedStartSampleIndex?.let {
+            require(it >= 0L) { "expectedStartSampleIndex must be non-negative" }
+        }
+        nextSequence = expectedSequence
+        nextSampleIndex = expectedStartSampleIndex
     }
 }

@@ -19,7 +19,6 @@ class PcmContinuityTrackerTest {
     @Test
     fun contiguousFramesRemainTrusted() {
         val tracker = PcmContinuityTracker()
-
         val first = tracker.observe(frame(0, 0))
         assertTrue(first.continuous)
         assertNull(first.expectedSequence)
@@ -34,7 +33,6 @@ class PcmContinuityTrackerTest {
     fun droppedFrameIsDetectedBySequenceAndSampleGap() {
         val tracker = PcmContinuityTracker()
         tracker.observe(frame(0, 0))
-
         val status = tracker.observe(frame(2, 640))
 
         assertFalse(status.continuous)
@@ -48,7 +46,6 @@ class PcmContinuityTrackerTest {
     fun outOfOrderFrameIsAlsoUntrusted() {
         val tracker = PcmContinuityTracker()
         tracker.observe(frame(3, 960))
-
         val status = tracker.observe(frame(2, 640))
 
         assertFalse(status.continuous)
@@ -61,11 +58,23 @@ class PcmContinuityTrackerTest {
         val tracker = PcmContinuityTracker()
         tracker.observe(frame(5, 1600))
         tracker.reset()
-
         val status = tracker.observe(frame(100, 32_000))
 
         assertTrue(status.continuous)
         assertNull(status.expectedSequence)
         assertNull(status.expectedStartSampleIndex)
+    }
+
+    @Test
+    fun seededSampleBoundaryDetectsGapBeforeFirstLiveFrame() {
+        val tracker = PcmContinuityTracker()
+        tracker.reset(expectedStartSampleIndex = 3_200L)
+
+        val status = tracker.observe(frame(10, 3_520L))
+
+        assertFalse(status.continuous)
+        assertNull(status.expectedSequence)
+        assertEquals(3_200L, status.expectedStartSampleIndex)
+        assertEquals(320L, status.missingSamples)
     }
 }

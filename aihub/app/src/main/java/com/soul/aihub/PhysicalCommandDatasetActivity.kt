@@ -39,9 +39,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Fold4 data-capture surface for the five-class physical-command model.
  *
- * AudioEngine remains the sole microphone owner. Each trial saves raw 16 kHz mono PCM16 plus one
- * JSONL manifest row containing label, speaker/session/condition provenance, prompt, and
- * continuity-checked sample metadata. This activity intentionally does not train or authorize.
+ * AudioEngine remains the sole microphone owner. Each trial saves exactly 3.0 s of 16 kHz mono
+ * PCM16 plus one JSONL manifest row containing label, speaker/session/condition provenance, prompt,
+ * and continuity-checked sample metadata. This activity intentionally does not train or authorize.
  */
 class PhysicalCommandDatasetActivity : Activity() {
     private data class Prompt(
@@ -54,6 +54,10 @@ class PhysicalCommandDatasetActivity : Activity() {
         Prompt(PhysicalCommandClass.TV_OFF, "옥자 TV 꺼줘"),
         Prompt(PhysicalCommandClass.AC_ON, "옥자 에어컨 켜줘"),
         Prompt(PhysicalCommandClass.AC_OFF, "옥자 에어컨 꺼줘"),
+        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 켜줘"),
+        Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 꺼줘"),
+        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 켜줘"),
+        Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 꺼줘"),
         Prompt(PhysicalCommandClass.TV_ON, "TV 좀 켜줘"),
         Prompt(PhysicalCommandClass.TV_OFF, "TV 좀 꺼줘"),
         Prompt(PhysicalCommandClass.AC_ON, "에어컨 좀 켜줘"),
@@ -199,11 +203,12 @@ class PhysicalCommandDatasetActivity : Activity() {
 
     private suspend fun capturePcm(seconds: Int): ShortArray {
         val targetSamples = AudioEngine.SAMPLE_RATE_HZ * seconds
-        val buffer = Pcm16UtteranceBuffer(maxSamples = targetSamples + AudioEngine.SAMPLE_RATE_HZ)
+        val buffer = Pcm16UtteranceBuffer(maxSamples = targetSamples)
         val continuity = PcmContinuityTracker()
         buffer.begin(ShortArray(0))
         val audio = AudioEngine(ringCapacityMs = AudioEngine.DEFAULT_RING_CAPACITY_MS)
         activeAudio = audio
+        var firstFrame = true
 
         val collector = scope.async(
             context = Dispatchers.Default,
@@ -212,12 +217,26 @@ class PhysicalCommandDatasetActivity : Activity() {
             audio.frames
                 .takeWhile { buffer.sampleCount() < targetSamples }
                 .collect { frame ->
+                    if (firstFrame) {
+                        check(frame.sequence == 0L && frame.startSampleIndex == 0L) {
+                            "capture did not start at AudioEngine epoch origin: " +
+                                "sequence=${frame.sequence}, sample=${frame.startSampleIndex}"
+                        }
+                        firstFrame = false
+                    }
                     val observation = continuity.observe(frame)
                     check(observation.continuous) {
                         "PCM discontinuity: expected sequence=${observation.expectedSequence}, " +
                             "actual=${observation.actualSequence}, missingFrames=${observation.missingFrames}"
                     }
-                    buffer.append(frame.samples)
+                    val remaining = targetSamples - buffer.sampleCount()
+                    if (remaining > 0) {
+                        if (frame.samples.size <= remaining) {
+                            buffer.append(frame.samples)
+                        } else {
+                            buffer.append(frame.samples.copyOf(remaining))
+                        }
+                    }
                 }
         }
 
@@ -228,7 +247,11 @@ class PhysicalCommandDatasetActivity : Activity() {
             audio.stop()
             collector.cancel()
         }
-        return buffer.snapshot()
+        val result = buffer.snapshot()
+        check(result.size == targetSamples) {
+            "capture length mismatch: ${result.size} != $targetSamples samples"
+        }
+        return result
     }
 
     private fun saveTrial(

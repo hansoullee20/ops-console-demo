@@ -95,8 +95,8 @@ def build_model() -> tf.keras.Model:
 
 def softmax(logits: np.ndarray) -> np.ndarray:
     shifted = logits - np.max(logits, axis=1, keepdims=True)
-    exp = np.exp(shifted)
-    return exp / np.sum(exp, axis=1, keepdims=True)
+    exp_values = np.exp(shifted)
+    return exp_values / np.sum(exp_values, axis=1, keepdims=True)
 
 
 def opposite_index(index: int) -> int:
@@ -195,6 +195,20 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def speaker_split_metadata(split):
+    speakers = {
+        name: sorted({row.speaker_id for row in part})
+        for name, part in split.items()
+    }
+    sets = {name: set(values) for name, values in speakers.items()}
+    overlap = {
+        "train_validation": sorted(sets["train"] & sets["validation"]),
+        "train_test": sorted(sets["train"] & sets["test"]),
+        "validation_test": sorted(sets["validation"] & sets["test"]),
+    }
+    return speakers, overlap
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Train and safety-calibrate the Okja five-class raw-PCM command model"
@@ -206,7 +220,15 @@ def main() -> int:
     parser.add_argument("--min-per-class", type=int, default=30)
     parser.add_argument("--min-validation-correct-rate", type=float, default=0.98)
     parser.add_argument("--development-heldout-physical-min", type=int, default=3000)
+    parser.add_argument("--development-heldout-other-min", type=int, default=1000)
     args = parser.parse_args()
+
+    if args.epochs <= 0 or args.batch_size <= 0 or args.min_per_class <= 0:
+        raise SystemExit("FAIL: epochs, batch-size, and min-per-class must be positive")
+    if not 0.0 <= args.min_validation_correct_rate <= 1.0:
+        raise SystemExit("FAIL: min-validation-correct-rate must be in [0, 1]")
+    if args.development_heldout_physical_min <= 0 or args.development_heldout_other_min <= 0:
+        raise SystemExit("FAIL: held-out development minimums must be positive")
 
     tf.keras.utils.set_random_seed(SEED)
     try:
@@ -274,6 +296,7 @@ def main() -> int:
     candidate_path.write_bytes(tflite_bytes)
     model_sha = sha256_bytes(tflite_bytes)
 
+    split_speakers, speaker_overlap = speaker_split_metadata(split)
     report = {
         "schema": "okja.physical-command-training.v1",
         "seed": SEED,
@@ -289,6 +312,9 @@ def main() -> int:
         "split_sessions": {
             name: sorted({row.session_id for row in part}) for name, part in split.items()
         },
+        "split_speakers": split_speakers,
+        "speaker_overlap": speaker_overlap,
+        "speaker_disjoint_split": all(not values for values in speaker_overlap.values()),
         "training_epochs_completed": len(history.history.get("loss", [])),
         "validation_calibration_found": calibration is not None,
         "deployment_allowed": False,
@@ -307,7 +333,8 @@ def main() -> int:
             "validation_metrics": val_metrics,
             "test_metrics": test_metrics,
         }
-        (args.output_dir / "physical-command-candidate-thresholds.json").write_text(
+        candidate_thresholds = args.output_dir / "physical-command-candidate-thresholds.json"
+        candidate_thresholds.write_text(
             json.dumps(threshold_record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
@@ -315,24 +342,26 @@ def main() -> int:
 
         development_gate = (
             test_metrics["physical_total"] >= args.development_heldout_physical_min
+            and test_metrics["other_total"] >= args.development_heldout_other_min
             and test_metrics["correct_execution_rate"] >= 0.98
             and test_metrics["wrong_device"] == 0
             and test_metrics["wrong_action"] == 0
-            and test_metrics["false_physical_rate"] < 0.001
+            and test_metrics["false_physical_execution"] == 0
         )
         report["development_gate"] = {
             "passed": development_gate,
             "required_heldout_physical": args.development_heldout_physical_min,
+            "required_heldout_other": args.development_heldout_other_min,
             "required_correct_execution_rate": 0.98,
             "required_wrong_device": 0,
             "required_wrong_action": 0,
-            "required_false_physical_rate_lt": 0.001,
+            "required_false_physical_execution": 0,
         }
         report["deployment_allowed"] = bool(development_gate)
         if development_gate:
             shutil.copy2(candidate_path, args.output_dir / "physical-command-qualified.tflite")
             shutil.copy2(
-                args.output_dir / "physical-command-candidate-thresholds.json",
+                candidate_thresholds,
                 args.output_dir / "physical-command-qualified-thresholds.json",
             )
     else:
@@ -348,8 +377,7 @@ def main() -> int:
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
 
-    # A candidate model is useful for diagnosis, but only the explicit qualified filename may be
-    # copied into the Android production asset path.
+    # Candidate artifacts are diagnostic only. Only explicit qualified filenames can be installed.
     return 0 if report["deployment_allowed"] else 2
 
 

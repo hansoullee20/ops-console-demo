@@ -18,7 +18,6 @@ import com.soul.aihub.voice.Pcm16UtteranceBuffer
 import com.soul.aihub.voice.PcmContinuityTracker
 import com.soul.aihub.voice.RecordedPcmCase
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
-import com.soul.aihub.voice.SherpaSenseVoiceBenchmarkEngine
 import com.soul.aihub.voice.StreamingAsrEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -40,11 +39,12 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Fold4 diagnostic runner for comparing local ASR engines against one captured PCM case.
+ * Fold4 regression surface for Moonshine tiny-ko on caller-owned PCM.
  *
- * Capture is owned exclusively by [AudioEngine]. Recording is stopped before either ASR
- * engine is created, so both recognizers receive the exact same saved PCM and neither
- * recognizer can acquire the microphone.
+ * SenseVoice and the Korean streaming Zipformer were removed from the active app after failing the
+ * target-device comparator. Historical results remain in project evidence/docs. This Activity now
+ * answers one narrow question: does the current conversation-ASR baseline preserve the same short
+ * Korean content on captured Fold4 PCM?
  */
 class LocalAsrBenchmarkActivity : Activity() {
     private data class Phrase(val text: String, val suffix: String)
@@ -86,6 +86,7 @@ class LocalAsrBenchmarkActivity : Activity() {
         super.onCreate(savedInstanceState)
         buildUi()
         renderPhrase()
+        updateModelAvailability()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
         }
@@ -98,8 +99,8 @@ class LocalAsrBenchmarkActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setBackgroundColor(Color.rgb(16, 16, 18))
         }
-        root.addView(text("옥자 · Same-PCM ASR Benchmark", 25f, Color.WHITE))
-        root.addView(text("Moonshine tiny-ko ↔ SenseVoice 2025 · 동일 PCM", 14f, Color.LTGRAY))
+        root.addView(text("옥자 · Moonshine Same-PCM Regression", 25f, Color.WHITE))
+        root.addView(text("Moonshine tiny-ko · conversation ASR only", 14f, Color.LTGRAY))
 
         phraseText = text("", 23f, Color.WHITE)
         stateText = text("READY", 17f, Color.rgb(180, 220, 255))
@@ -116,7 +117,7 @@ class LocalAsrBenchmarkActivity : Activity() {
         }
         root.addView(next)
 
-        recordButton = button("4초 녹음 → 동일 PCM 비교")
+        recordButton = button("4초 녹음 → Moonshine 실행")
         recordButton.setOnClickListener { startBenchmark() }
         root.addView(recordButton)
         root.addView(resultText)
@@ -126,8 +127,32 @@ class LocalAsrBenchmarkActivity : Activity() {
         setContentView(scroll)
     }
 
+    private fun updateModelAvailability() {
+        val available = hasMoonshineAssets()
+        recordButton.isEnabled = available
+        if (!available) {
+            stateText.text = "MODEL MISSING"
+            resultText.text =
+                "Moonshine assets are intentionally absent from the normal debug build. " +
+                    "Use the manual Moonshine benchmark workflow/device build to provision them."
+        }
+    }
+
+    private fun hasMoonshineAssets(): Boolean = listOf(
+        "$MOONSHINE_ASSET_DIR/encoder_model.ort",
+        "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort",
+        "$MOONSHINE_ASSET_DIR/tokens.txt",
+    ).all { path ->
+        try {
+            assets.open(path).use { }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     private fun startBenchmark() {
-        if (!running.compareAndSet(false, true)) return
+        if (!recordButton.isEnabled || !running.compareAndSet(false, true)) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             running.set(false)
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
@@ -145,16 +170,16 @@ class LocalAsrBenchmarkActivity : Activity() {
                 stateText.text = "지금 말하세요 · 4초 녹음"
                 val pcm = captureFourSeconds()
                 val corpusFile = savePcm(pcm, currentPhraseIndex)
-                stateText.text = "동일 PCM 로컬 ASR 실행 중…"
+                stateText.text = "동일 PCM Moonshine 실행 중…"
 
                 val results = withContext(Dispatchers.Default) {
-                    runSamePcm(pcm, phrase)
+                    runCapturedPcm(pcm, phrase)
                 }
                 val resultFile = saveResults(corpusFile, phrase, results)
                 recordAggregate(currentPhraseIndex, results)
                 val summaryFile = saveSummary()
                 renderResults(results, corpusFile, resultFile, summaryFile)
-                stateText.text = "DONE · 같은 PCM 비교 완료"
+                stateText.text = "DONE · Moonshine regression 완료"
             } catch (t: Throwable) {
                 stateText.text = "FAILED"
                 resultText.text = "${t.javaClass.simpleName}: ${t.message ?: "unknown"}"
@@ -162,18 +187,19 @@ class LocalAsrBenchmarkActivity : Activity() {
                 activeAudio?.close()
                 activeAudio = null
                 running.set(false)
-                recordButton.isEnabled = true
+                recordButton.isEnabled = hasMoonshineAssets()
             }
         }
     }
 
     private suspend fun captureFourSeconds(): ShortArray {
         val targetSamples = AudioEngine.SAMPLE_RATE_HZ * RECORD_SECONDS
-        val buffer = Pcm16UtteranceBuffer(maxSamples = AudioEngine.SAMPLE_RATE_HZ * 5)
+        val buffer = Pcm16UtteranceBuffer(maxSamples = targetSamples)
         val continuity = PcmContinuityTracker()
         buffer.begin(ShortArray(0))
         val audio = AudioEngine(ringCapacityMs = AudioEngine.DEFAULT_RING_CAPACITY_MS)
         activeAudio = audio
+        var firstFrame = true
 
         val collector = scope.async(
             context = Dispatchers.Default,
@@ -182,13 +208,26 @@ class LocalAsrBenchmarkActivity : Activity() {
             audio.frames
                 .takeWhile { buffer.sampleCount() < targetSamples }
                 .collect { frame ->
+                    if (firstFrame) {
+                        check(frame.sequence == 0L && frame.startSampleIndex == 0L) {
+                            "capture did not start at AudioEngine epoch origin"
+                        }
+                        firstFrame = false
+                    }
                     val observation = continuity.observe(frame)
                     check(observation.continuous) {
                         "PCM capture discontinuity: expected sequence=${observation.expectedSequence}, " +
                             "actual=${observation.actualSequence}, missingFrames=${observation.missingFrames}, " +
                             "missingSamples=${observation.missingSamples}"
                     }
-                    buffer.append(frame.samples)
+                    val remaining = targetSamples - buffer.sampleCount()
+                    if (remaining > 0) {
+                        if (frame.samples.size <= remaining) {
+                            buffer.append(frame.samples)
+                        } else {
+                            buffer.append(frame.samples.copyOf(remaining))
+                        }
+                    }
                 }
         }
 
@@ -199,10 +238,14 @@ class LocalAsrBenchmarkActivity : Activity() {
             audio.stop()
             collector.cancel()
         }
-        return buffer.snapshot()
+        val result = buffer.snapshot()
+        check(result.size == targetSamples) {
+            "capture length mismatch: ${result.size} != $targetSamples samples"
+        }
+        return result
     }
 
-    private fun runSamePcm(pcm: ShortArray, phrase: Phrase): List<EngineOutcome> {
+    private fun runCapturedPcm(pcm: ShortArray, phrase: Phrase): List<EngineOutcome> {
         val recorded = RecordedPcmCase(
             id = "fold4-${System.currentTimeMillis()}",
             pcm16 = pcm,
@@ -210,17 +253,11 @@ class LocalAsrBenchmarkActivity : Activity() {
             expectedCommandSuffix = phrase.suffix,
         )
         val harness = AsrBenchmarkHarness()
-        val outcomes = mutableListOf<EngineOutcome>()
-
-        outcomes += runEngine("moonshine-tiny-ko") {
-            SherpaMoonshineBenchmarkEngine(assets)
-        }.invoke(harness, recorded)
-
-        outcomes += runEngine("sensevoice-ko-2025") {
-            SherpaSenseVoiceBenchmarkEngine(assets)
-        }.invoke(harness, recorded)
-
-        return outcomes
+        return listOf(
+            runEngine("moonshine-tiny-ko") {
+                SherpaMoonshineBenchmarkEngine(assets)
+            }.invoke(harness, recorded),
+        )
     }
 
     private fun runEngine(
@@ -244,7 +281,10 @@ class LocalAsrBenchmarkActivity : Activity() {
             engine = null // harness closes successful engines.
             EngineOutcome(name, result, initMs, processingMs, null)
         } catch (t: Throwable) {
-            try { engine?.close() } catch (_: Throwable) {}
+            try {
+                engine?.close()
+            } catch (_: Throwable) {
+            }
             EngineOutcome(
                 name = name,
                 result = null,
@@ -269,7 +309,7 @@ class LocalAsrBenchmarkActivity : Activity() {
         outcomes: List<EngineOutcome>,
     ): File {
         val root = JSONObject()
-        root.put("schema", "okja.asr-benchmark.v2")
+        root.put("schema", "okja.asr-benchmark.v3")
         root.put("created_at_ms", System.currentTimeMillis())
         root.put("phrase", phrase.text)
         root.put("expected_suffix", phrase.suffix)
@@ -312,7 +352,7 @@ class LocalAsrBenchmarkActivity : Activity() {
 
     private fun saveSummary(): File {
         val root = JSONObject()
-        root.put("schema", "okja.asr-benchmark.summary.v1")
+        root.put("schema", "okja.asr-benchmark.summary.v2")
         root.put("updated_at_ms", System.currentTimeMillis())
         root.put("total_trials_this_run", totalTrials)
 
@@ -377,7 +417,9 @@ class LocalAsrBenchmarkActivity : Activity() {
 
     private fun renderPhrase() {
         phraseText.text = "말할 문구: “${phrases[phraseIndex].text}”"
-        resultText.text = "한 번 녹음한 PCM을 Moonshine과 SenseVoice에 그대로 재생합니다."
+        if (hasMoonshineAssets()) {
+            resultText.text = "한 번 캡처한 PCM을 Moonshine tiny-ko에 그대로 재생합니다."
+        }
     }
 
     private fun button(label: String) = Button(this).apply {
@@ -404,5 +446,7 @@ class LocalAsrBenchmarkActivity : Activity() {
     companion object {
         private const val REQ_AUDIO = 3101
         private const val RECORD_SECONDS = 4
+        private const val MOONSHINE_ASSET_DIR =
+            "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27"
     }
 }

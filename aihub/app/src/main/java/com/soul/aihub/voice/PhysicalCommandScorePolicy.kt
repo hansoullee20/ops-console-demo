@@ -4,7 +4,7 @@ import kotlin.math.exp
 
 /** Pure JVM-testable decision policy for five-class classifier logits. */
 object PhysicalCommandScorePolicy {
-    val CLASS_ORDER = arrayOf(
+    val CLASS_ORDER: List<PhysicalCommandClass> = listOf(
         PhysicalCommandClass.TV_ON,
         PhysicalCommandClass.TV_OFF,
         PhysicalCommandClass.AC_ON,
