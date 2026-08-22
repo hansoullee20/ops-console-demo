@@ -20,6 +20,15 @@
             android:name=".PerfActivity"
             android:exported="false" />
         <activity
+            android:name=".PorcupineWakeActivity"
+            android:label="Okja Porcupine Wake"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name=".PhysicalCommandDatasetActivity"
             android:label="Okja Command Dataset"
             android:exported="true">
