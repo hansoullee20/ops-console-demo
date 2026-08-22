@@ -1,5 +1,9 @@
 # Large/local model assets are provisioned for explicit device benchmark builds, not committed.
 app/src/main/assets/sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27/
 
+# Historical/rejected comparator assets also stay untracked if present in a developer checkout.
+app/src/main/assets/sherpa-onnx-streaming-zipformer-korean-2024-06-16/
+app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/
+
 # Installed only after the offline trainer's explicit safety gate passes.
 app/src/main/assets/okja-physical-command/
