@@ -29,6 +29,11 @@ class SherpaMoonshineBenchmarkEngine(
     private var begun = false
     private var closed = false
 
+    var lastDecodeMs: Double? = null
+        private set
+    var lastFinalizeMs: Double? = null
+        private set
+
     init {
         require(sampleRateHz == 16_000) { "Okja Moonshine benchmark currently requires 16 kHz PCM" }
         require(maxUtteranceSeconds in 1..30) { "maxUtteranceSeconds must be within 1..30" }
@@ -49,6 +54,8 @@ class SherpaMoonshineBenchmarkEngine(
         check(!closed) { "engine is closed" }
         pcm.begin(preRollPcm16)
         begun = true
+        lastDecodeMs = null
+        lastFinalizeMs = null
     }
 
     override fun accept(frame: PcmFrame): AsrUpdate? {
@@ -64,14 +71,21 @@ class SherpaMoonshineBenchmarkEngine(
 
         val samples = pcm.snapshot()
         val text = if (samples.isEmpty()) {
+            lastDecodeMs = 0.0
+            lastFinalizeMs = 0.0
             ""
         } else {
             val normalized = FloatArray(samples.size) { index -> samples[index] / 32768.0f }
             val stream = recognizer.createStream()
             try {
                 stream.acceptWaveform(normalized, sampleRate = sampleRateHz)
+                val decodeStart = nowElapsedRealtimeNs()
                 recognizer.decode(stream)
-                recognizer.getResult(stream).text
+                lastDecodeMs = (nowElapsedRealtimeNs() - decodeStart) / 1_000_000.0
+                val finalizeStart = nowElapsedRealtimeNs()
+                val result = recognizer.getResult(stream).text
+                lastFinalizeMs = (nowElapsedRealtimeNs() - finalizeStart) / 1_000_000.0
+                result
             } finally {
                 stream.release()
             }
@@ -89,6 +103,8 @@ class SherpaMoonshineBenchmarkEngine(
         check(!closed) { "engine is closed" }
         pcm.reset()
         begun = false
+        lastDecodeMs = null
+        lastFinalizeMs = null
     }
 
     override fun close() {
