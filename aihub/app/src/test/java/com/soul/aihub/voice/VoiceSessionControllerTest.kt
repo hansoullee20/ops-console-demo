@@ -42,6 +42,31 @@ class VoiceSessionControllerTest {
         }
     }
 
+    private class FakePhysicalAuthorizer(
+        var decision: PhysicalCommandDecision,
+    ) : PhysicalCommandAuthorizer {
+        var beginCount = 0
+        var finishCount = 0
+        val acceptedSequences = mutableListOf<Long>()
+
+        override fun reset() {
+            acceptedSequences.clear()
+        }
+
+        override fun begin(preRollPcm16: ShortArray) {
+            beginCount += 1
+        }
+
+        override fun accept(frame: PcmFrame) {
+            acceptedSequences += frame.sequence
+        }
+
+        override fun finish(): PhysicalCommandDecision {
+            finishCount += 1
+            return decision
+        }
+    }
+
     private fun frame(sequence: Long, startSampleIndex: Long): PcmFrame {
         return PcmFrame(
             samples = ShortArray(320) { 1 },
@@ -62,14 +87,18 @@ class VoiceSessionControllerTest {
     }
 
     @Test
-    fun routesWholeWakeCommandAndExecutesExactlyOnceWhenPcmIsContinuous() {
-        val asr = FakeAsr().apply { finalText = "옥자 TV 켜줘" }
-        val executed = mutableListOf<String>()
+    fun acousticAuthorizationExecutesEvenWhenAsrTextSuggestsOppositeAction() {
+        val asr = FakeAsr().apply { finalText = "옥자 TV 꺼줘" }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.TV_ON),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
         val controller = VoiceSessionController(
             asr = asr,
             router = VoiceTranscriptRouter { VoiceRouteDecision.DeviceCommand(it) },
             deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
             speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
         )
 
         val generation = requireGeneration(controller.startUtterance(shortArrayOf(7, 8)))
@@ -78,21 +107,22 @@ class VoiceSessionControllerTest {
 
         val result = requireResult(controller.finishUtterance(generation))
 
-        assertEquals("옥자 TV 켜줘", result.transcript)
+        assertEquals("옥자 TV 꺼줘", result.transcript)
         assertTrue(result.deviceCommandExecuted)
         assertFalse(result.blockedByAudioIntegrity)
-        assertEquals(listOf("옥자 TV 켜줘"), executed)
+        assertFalse(result.blockedByPhysicalAuthorization)
+        assertEquals(listOf(PhysicalCommandClass.TV_ON), executed)
+        assertEquals(1, authorizer.finishCount)
         assertEquals(VoiceSessionController.State.IDLE, controller.snapshot().state)
 
-        // A duplicate/stale finish callback for the same generation is ignored.
         assertNull(controller.finishUtterance(generation))
         assertEquals(1, executed.size)
     }
 
     @Test
-    fun discontinuousPcmFailsClosedBeforePhysicalExecution() {
-        val asr = FakeAsr().apply { finalText = "옥자 에어컨 꺼줘" }
-        val executed = mutableListOf<String>()
+    fun asrDeviceIntentCannotExecuteWithoutAcousticAuthorization() {
+        val asr = FakeAsr().apply { finalText = "옥자 TV 켜줘" }
+        val executed = mutableListOf<PhysicalCommandClass>()
         val controller = VoiceSessionController(
             asr = asr,
             router = VoiceTranscriptRouter { VoiceRouteDecision.DeviceCommand(it) },
@@ -102,12 +132,38 @@ class VoiceSessionControllerTest {
 
         val generation = requireGeneration(controller.startUtterance(shortArrayOf()))
         controller.acceptFrame(generation, frame(0, 0))
-        controller.acceptFrame(generation, frame(2, 640)) // frame 1 / samples 320..639 missing
+        val result = requireResult(controller.finishUtterance(generation))
+
+        assertFalse(result.deviceCommandExecuted)
+        assertTrue(result.blockedByPhysicalAuthorization)
+        assertTrue(executed.isEmpty())
+        assertTrue(result.physicalDecision is PhysicalCommandDecision.Abstain)
+    }
+
+    @Test
+    fun discontinuousPcmFailsClosedEvenWithAcousticAuthorization() {
+        val asr = FakeAsr().apply { finalText = "옥자 에어컨 꺼줘" }
+        val authorizer = FakePhysicalAuthorizer(
+            PhysicalCommandDecision.Authorized(PhysicalCommandClass.AC_OFF),
+        )
+        val executed = mutableListOf<PhysicalCommandClass>()
+        val controller = VoiceSessionController(
+            asr = asr,
+            router = VoiceTranscriptRouter { VoiceRouteDecision.DeviceCommand(it) },
+            deviceExecutor = VoiceDeviceCommandExecutor { executed += it },
+            speechOutput = VoiceSpeechOutput { _, _ -> },
+            physicalCommandAuthorizer = authorizer,
+        )
+
+        val generation = requireGeneration(controller.startUtterance(shortArrayOf()))
+        controller.acceptFrame(generation, frame(0, 0))
+        controller.acceptFrame(generation, frame(2, 640))
 
         val result = requireResult(controller.finishUtterance(generation))
 
         assertFalse(result.deviceCommandExecuted)
         assertTrue(result.blockedByAudioIntegrity)
+        assertFalse(result.blockedByPhysicalAuthorization)
         assertTrue(executed.isEmpty())
         assertEquals(VoiceSessionController.State.IDLE, controller.snapshot().state)
     }

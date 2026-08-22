@@ -2,6 +2,10 @@ package com.soul.aihub.voice
 
 /** ASR-agnostic routing result for one completed utterance. */
 sealed interface VoiceRouteDecision {
+    /**
+     * Diagnostic/semantic device intent from ASR text only.
+     * This can never authorize physical execution by itself.
+     */
     data class DeviceCommand(
         val command: String,
         val spokenConfirmation: String? = null,
@@ -20,7 +24,7 @@ fun interface VoiceTranscriptRouter {
 }
 
 fun interface VoiceDeviceCommandExecutor {
-    fun execute(command: String)
+    fun execute(command: PhysicalCommandClass)
 }
 
 fun interface VoiceSpeechOutput {
@@ -31,23 +35,24 @@ data class VoiceSessionResult(
     val generation: Long,
     val transcript: String,
     val route: VoiceRouteDecision?,
+    val physicalDecision: PhysicalCommandDecision,
     val deviceCommandExecuted: Boolean,
     val blockedByAudioIntegrity: Boolean,
+    val blockedByPhysicalAuthorization: Boolean,
 )
 
 /**
  * Single authority for one voice interaction lifecycle.
  *
- * This class is deliberately independent from Android Activity lifecycle and microphone APIs.
- * AudioEngine remains the only microphone owner; callers feed the same canonical PCM frames here.
- * A single [StreamingAsrEngine] instance is reused across utterances, preventing parallel decoder
- * ownership while avoiding repeated model initialization.
+ * AudioEngine remains the only microphone owner. Physical execution requires an independent
+ * caller-owned-PCM authorizer; ASR text and the transcript router are never actuator authority.
  */
 class VoiceSessionController(
     private val asr: StreamingAsrEngine,
     private val router: VoiceTranscriptRouter,
     private val deviceExecutor: VoiceDeviceCommandExecutor,
     private val speechOutput: VoiceSpeechOutput,
+    private val physicalCommandAuthorizer: PhysicalCommandAuthorizer = RejectingPhysicalCommandAuthorizer,
     private val maxRecoverableFailures: Int = 1,
 ) : AutoCloseable {
     enum class State {
@@ -74,6 +79,7 @@ class VoiceSessionController(
     private var followUpAfterSpeech = false
     private var closed = false
     private var utteranceActive = false
+    private var physicalAuthorizerHealthy = false
 
     init {
         require(maxRecoverableFailures >= 0) { "maxRecoverableFailures must be >= 0" }
@@ -87,13 +93,6 @@ class VoiceSessionController(
         canRetry = recoverableFailures <= maxRecoverableFailures && state != State.DEGRADED,
     )
 
-    /**
-     * Starts one utterance using already-captured pre-roll from AudioEngine.
-     * Returns the generation token that must accompany later callbacks/frames.
-     *
-     * While TTS is speaking, wake/capture requests are rejected so synthesized speech cannot
-     * recursively start another command.
-     */
     @Synchronized
     fun startUtterance(preRollPcm16: ShortArray): Long? {
         check(!closed) { "controller is closed" }
@@ -102,7 +101,15 @@ class VoiceSessionController(
         generation += 1L
         followUpAfterSpeech = false
         utteranceActive = false
+        physicalAuthorizerHealthy = false
         asr.reset()
+        try {
+            physicalCommandAuthorizer.reset()
+            physicalCommandAuthorizer.begin(preRollPcm16)
+            physicalAuthorizerHealthy = true
+        } catch (_: Throwable) {
+            physicalAuthorizerHealthy = false
+        }
         integrity.beginUtterance()
 
         return try {
@@ -112,12 +119,12 @@ class VoiceSessionController(
             generation
         } catch (t: Throwable) {
             integrity.endUtterance()
+            safeResetPhysicalAuthorizerLocked()
             noteRecoverableFailureLocked()
             null
         }
     }
 
-    /** Frames from an older generation are ignored instead of contaminating the active utterance. */
     @Synchronized
     fun acceptFrame(callbackGeneration: Long, frame: PcmFrame): AsrUpdate? {
         check(!closed) { "controller is closed" }
@@ -127,6 +134,14 @@ class VoiceSessionController(
 
         return try {
             integrity.observe(frame)
+            if (physicalAuthorizerHealthy) {
+                try {
+                    physicalCommandAuthorizer.accept(frame)
+                } catch (_: Throwable) {
+                    physicalAuthorizerHealthy = false
+                    safeResetPhysicalAuthorizerLocked()
+                }
+            }
             asr.accept(frame)
         } catch (t: Throwable) {
             abortUtteranceLocked()
@@ -135,13 +150,6 @@ class VoiceSessionController(
         }
     }
 
-    /**
-     * Finishes and routes the current utterance exactly once.
-     *
-     * Device commands are executed only when the entire observed utterance remained PCM-contiguous.
-     * The transcript is routed as a whole, so a command suffix already present after the wake phrase
-     * is never discarded in favor of a second recognizer pass.
-     */
     @Synchronized
     fun finishUtterance(callbackGeneration: Long): VoiceSessionResult? {
         check(!closed) { "controller is closed" }
@@ -150,6 +158,17 @@ class VoiceSessionController(
         }
 
         state = State.ROUTING
+        val physicalDecision = if (physicalAuthorizerHealthy) {
+            try {
+                physicalCommandAuthorizer.finish()
+            } catch (_: Throwable) {
+                PhysicalCommandDecision.Abstain("physical-command authorizer failed")
+            }
+        } else {
+            PhysicalCommandDecision.Abstain("physical-command authorizer unavailable")
+        }
+        physicalAuthorizerHealthy = false
+
         val update = try {
             asr.finish()
         } catch (t: Throwable) {
@@ -159,61 +178,78 @@ class VoiceSessionController(
         }
 
         val transcript = update?.text?.trim().orEmpty()
+        val audioTrusted = integrity.canAuthorizeDeviceCommand()
+        endUtteranceLocked()
+
+        if (physicalDecision is PhysicalCommandDecision.Authorized) {
+            recoverableFailures = 0
+            if (!audioTrusted) {
+                state = State.IDLE
+                return VoiceSessionResult(
+                    generation = generation,
+                    transcript = transcript,
+                    route = null,
+                    physicalDecision = physicalDecision,
+                    deviceCommandExecuted = false,
+                    blockedByAudioIntegrity = true,
+                    blockedByPhysicalAuthorization = false,
+                )
+            }
+
+            return try {
+                deviceExecutor.execute(physicalDecision.command)
+                state = State.IDLE
+                VoiceSessionResult(
+                    generation = generation,
+                    transcript = transcript,
+                    route = null,
+                    physicalDecision = physicalDecision,
+                    deviceCommandExecuted = true,
+                    blockedByAudioIntegrity = false,
+                    blockedByPhysicalAuthorization = false,
+                )
+            } catch (t: Throwable) {
+                state = State.DEGRADED
+                VoiceSessionResult(
+                    generation = generation,
+                    transcript = transcript,
+                    route = null,
+                    physicalDecision = physicalDecision,
+                    deviceCommandExecuted = false,
+                    blockedByAudioIntegrity = false,
+                    blockedByPhysicalAuthorization = false,
+                )
+            }
+        }
+
         if (transcript.isBlank()) {
-            abortUtteranceLocked()
             noteRecoverableFailureLocked()
             return VoiceSessionResult(
                 generation = generation,
                 transcript = "",
                 route = null,
+                physicalDecision = physicalDecision,
                 deviceCommandExecuted = false,
                 blockedByAudioIntegrity = false,
+                blockedByPhysicalAuthorization = false,
             )
         }
 
         val route = try {
             router.route(transcript)
         } catch (t: Throwable) {
-            abortUtteranceLocked()
             state = State.DEGRADED
             return null
         }
 
-        val audioTrusted = integrity.canAuthorizeDeviceCommand()
-        endUtteranceLocked()
         recoverableFailures = 0
-
-        var executed = false
-        var blockedByAudioIntegrity = false
+        var blockedByPhysicalAuthorization = false
 
         when (route) {
             is VoiceRouteDecision.DeviceCommand -> {
-                if (audioTrusted) {
-                    try {
-                        deviceExecutor.execute(route.command)
-                        executed = true
-                    } catch (t: Throwable) {
-                        state = State.DEGRADED
-                        return VoiceSessionResult(
-                            generation = generation,
-                            transcript = transcript,
-                            route = route,
-                            deviceCommandExecuted = false,
-                            blockedByAudioIntegrity = false,
-                        )
-                    }
-                } else {
-                    blockedByAudioIntegrity = true
-                }
-
-                val confirmation = route.spokenConfirmation
-                if (!confirmation.isNullOrBlank()) {
-                    followUpAfterSpeech = false
-                    state = State.SPEAKING
-                    speechOutput.speak(confirmation, generation)
-                } else {
-                    state = State.IDLE
-                }
+                // ASR/router evidence is diagnostic only. Require a fresh acoustic authorization.
+                blockedByPhysicalAuthorization = true
+                state = State.IDLE
             }
 
             is VoiceRouteDecision.Speak -> {
@@ -231,12 +267,13 @@ class VoiceSessionController(
             generation = generation,
             transcript = transcript,
             route = route,
-            deviceCommandExecuted = executed,
-            blockedByAudioIntegrity = blockedByAudioIntegrity,
+            physicalDecision = physicalDecision,
+            deviceCommandExecuted = false,
+            blockedByAudioIntegrity = false,
+            blockedByPhysicalAuthorization = blockedByPhysicalAuthorization,
         )
     }
 
-    /** Stale TTS callbacks cannot change the state of a newer session. */
     @Synchronized
     fun onSpeechFinished(callbackGeneration: Long) {
         check(!closed) { "controller is closed" }
@@ -245,7 +282,6 @@ class VoiceSessionController(
         followUpAfterSpeech = false
     }
 
-    /** Any active work is invalidated immediately when microphone access becomes unavailable. */
     @Synchronized
     fun onMicUnavailable() {
         check(!closed) { "controller is closed" }
@@ -264,7 +300,6 @@ class VoiceSessionController(
         }
     }
 
-    /** Explicit recovery is required after the bounded failure budget is exhausted. */
     @Synchronized
     fun recoverFromDegraded() {
         check(!closed) { "controller is closed" }
@@ -285,6 +320,11 @@ class VoiceSessionController(
         abortUtteranceLocked()
         followUpAfterSpeech = false
         asr.close()
+        try {
+            physicalCommandAuthorizer.close()
+        } catch (_: Throwable) {
+            // Closing cannot reopen authority or change lifecycle state.
+        }
     }
 
     private fun endUtteranceLocked() {
@@ -299,10 +339,20 @@ class VoiceSessionController(
             integrity.endUtterance()
             utteranceActive = false
         }
+        physicalAuthorizerHealthy = false
+        safeResetPhysicalAuthorizerLocked()
         try {
             asr.reset()
         } catch (_: Throwable) {
             // The caller will move to DEGRADED/MIC_OFF as appropriate; never let cleanup recurse.
+        }
+    }
+
+    private fun safeResetPhysicalAuthorizerLocked() {
+        try {
+            physicalCommandAuthorizer.reset()
+        } catch (_: Throwable) {
+            // Failure is fail-closed because physicalAuthorizerHealthy remains false.
         }
     }
 
