@@ -24,6 +24,8 @@ The candidate model contract is:
 - TFLite input shape `[1, 48000]`;
 - five output logits in the fixed class order above.
 
+Until endpointing is calibrated, Android explicitly abstains on physical-command windows longer than 48,000 samples rather than silently cropping them.
+
 ## 1. Collect real Fold4 audio
 
 Use the Android launcher **Okja Command Dataset**.
@@ -100,6 +102,35 @@ A `physical-command-qualified.tflite` file is emitted only when the held-out tes
 - false physical execution rate on `OTHER` < 0.1%.
 
 This is only the development gate. Production qualification still requires the larger Okja release protocol, including long household-negative testing and the final 6,000-trial opposite-action gate.
+
+## 4. Install only a qualified artifact
+
+Do not manually copy a `.tflite` candidate into Android assets. Use:
+
+```bash
+python aihub/command_classifier/install_qualified_classifier.py \
+  ./okja-command-output
+```
+
+The installer refuses deployment unless:
+
+- `training-report.json` says `deployment_allowed=true`;
+- the development gate is explicitly passed;
+- report and threshold class order exactly match `TV_ON, TV_OFF, AC_ON, AC_OFF, OTHER`;
+- the model's actual SHA-256 matches both records;
+- all calibrated thresholds are valid.
+
+It then creates only:
+
+```text
+aihub/app/src/main/assets/okja-physical-command/
+  physical-command.tflite
+  qualified-manifest.json
+```
+
+This asset directory is git-ignored. Android's `QualifiedPhysicalCommandAuthorizerFactory` independently rechecks schema, deployment flag, class order, canonical filename, model SHA-256, and thresholds before it creates a LiteRT authorizer. Any failure returns the reject-all authorizer.
+
+The installer and its tamper/non-qualified rejection cases run in the main GitHub Actions build workflow.
 
 ## Data-quality rule
 
