@@ -15,6 +15,14 @@ class UtteranceAudioIntegrityGateTest {
     }
 
     @Test
+    fun preRollAloneCannotAuthorizeDeviceCommand() {
+        val gate = UtteranceAudioIntegrityGate()
+        gate.beginUtterance(expectedFirstLiveSampleIndex = 3_200L)
+
+        assertFalse(gate.canAuthorizeDeviceCommand())
+    }
+
+    @Test
     fun contiguousUtteranceCanAuthorizeDeviceCommand() {
         val gate = UtteranceAudioIntegrityGate()
         gate.beginUtterance(expectedFirstLiveSampleIndex = 0L)
