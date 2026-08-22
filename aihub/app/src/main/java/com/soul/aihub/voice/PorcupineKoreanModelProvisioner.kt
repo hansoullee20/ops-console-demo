@@ -10,6 +10,9 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /** Paths for one provisioned Korean Porcupine wake configuration. */
@@ -71,7 +74,6 @@ class PorcupineKoreanModelProvisioner(
             return
         }
 
-        destination.delete()
         val temporary = File(destination.parentFile, destination.name + ".download")
         temporary.delete()
         try {
@@ -109,6 +111,7 @@ class PorcupineKoreanModelProvisioner(
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
+                        if (read == 0) continue
                         total += read.toLong()
                         check(total <= MAX_MODEL_BYTES) { "Porcupine model download exceeds size limit" }
                         output.write(buffer, 0, read)
@@ -141,16 +144,25 @@ class PorcupineKoreanModelProvisioner(
         }
     }
 
+    /**
+     * Installs a fully-written file without deleting the last known-good destination first.
+     * Same-directory ATOMIC_MOVE is attempted first; filesystems without atomic replacement fall
+     * back to REPLACE_EXISTING. Any failure leaves either the previous file or no usable new file,
+     * both of which are handled fail-closed by subsequent validation/engine creation.
+     */
     private fun replaceAtomically(source: File, destination: File) {
-        destination.delete()
-        if (!source.renameTo(destination)) {
-            FileInputStream(source).use { input ->
-                FileOutputStream(destination).use { output ->
-                    input.copyTo(output)
-                    output.fd.sync()
-                }
-            }
-            source.delete()
+        check(source.isFile && source.length() > 0L) { "provisioned source is empty" }
+        val sourcePath = source.toPath()
+        val destinationPath = destination.toPath()
+        try {
+            Files.move(
+                sourcePath,
+                destinationPath,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(sourcePath, destinationPath, StandardCopyOption.REPLACE_EXISTING)
         }
         check(destination.isFile && destination.length() > 0L) {
             "failed to install provisioned Porcupine model ${destination.name}"
@@ -205,7 +217,7 @@ internal object GitBlobIntegrity {
             while (true) {
                 val read = input.read(buffer)
                 if (read < 0) break
-                digest.update(buffer, 0, read)
+                if (read > 0) digest.update(buffer, 0, read)
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
