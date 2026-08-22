@@ -6,7 +6,7 @@ This is the authoritative current-state source for Project Okja.
 
 ## State
 
-**STATE: WORKING — PROTECTED COMMAND PATH SCAFFOLDED; REAL FOLD4 DATA + ACCESSKEY-BASED WAKE TEST NEXT**
+**STATE: BUILD-VERIFIED — REPOSITORY SAFETY SCAFFOLD COMPLETE; TARGET-DEVICE DATA COLLECTION NEXT**
 
 Repository: `hansoullee20/ops-console-demo`
 
@@ -16,7 +16,7 @@ Draft PR: `#20 Voice pipeline v2: single-owner PCM audio core`
 
 Latest architecture decision: `architecture/ADR-0004-ACOUSTIC-PHYSICAL-AUTHORITY.md`.
 
-## Production rules now fixed
+## Production rules fixed
 
 1. `AudioEngine` is the sole `AudioRecord` owner.
 2. Physical commands are authorized by a closed-set acoustic path, never generic ASR/LLM text.
@@ -25,29 +25,57 @@ Latest architecture decision: `architecture/ADR-0004-ACOUSTIC-PHYSICAL-AUTHORITY
 5. First wake-engine benchmark: Picovoice Porcupine `4.0.2`, low-level caller-owned PCM, phrase `옥자야`.
 6. A mandatory second-stage wake verifier is deferred unless measured false-wake/recall data justifies it.
 7. TTS remains half-duplex for v1.
-8. MainActivity production migration stays blocked until classifier, wake, endpointing, and lifecycle gates pass.
+8. `MainActivity` production migration stays blocked until classifier, wake, endpointing, and lifecycle gates pass.
 
-## Implemented safety boundary
+## Verified build state
 
-### Physical action authority
+Latest verified source head: `da72171ba631cb063da958039e7428410bef0de0`.
 
-`PhysicalCommandSafety.kt` now provides:
+GitHub Actions verification:
+
+- workflow: **Verify and build AI Hub test APK**;
+- run number: **348**;
+- run ID: `32558811518`;
+- result: **success**;
+- protected-command Python syntax checks: success;
+- qualified-model deployment-gate unit tests: success;
+- Android JVM tests / Kotlin compilation: success;
+- `assembleDebug`: success;
+- APK artifact upload: success.
+
+APK artifact:
+
+- name: `aihub-dual-profile-debug-apk`;
+- artifact ID: `9472192514`;
+- size: `55,542,291` bytes;
+- artifact digest: `sha256:b5cd9b8eaffc24f4d8c22aea271637d1f907ffaaeb2c2480fece534d943dda0c`.
+
+Two CI defects were found and corrected before this green run:
+
+1. Porcupine/LiteRT dependencies require AndroidX -> `android.useAndroidX=true` added.
+2. dataset `EditText` fields used invalid Kotlin property `singleLine` -> corrected to `isSingleLine`.
+
+Therefore current compilation/build status is verified rather than inferred.
+
+## Physical action authority
+
+`PhysicalCommandSafety.kt` provides:
 
 - `PhysicalCommandClass`;
 - `PhysicalCommandDecision.Authorized` / `Abstain`;
 - `PhysicalCommandAuthorizer`;
 - reject-all default authorizer;
-- explicit semantic safety outcomes including opposite-action inversion and false physical execution.
+- semantic safety outcomes including opposite-action inversion and false physical execution.
 
-`VoiceSessionController` feeds caller-owned PCM to both ASR and the physical authorizer, but only an independent typed acoustic authorization may reach `VoiceDeviceCommandExecutor`.
+`VoiceSessionController` feeds caller-owned PCM to ASR and the physical authorizer, but only an independent typed acoustic authorization may reach `VoiceDeviceCommandExecutor`.
 
-ASR/router `DeviceCommand` output is diagnostic only. A transcript saying `TV 켜줘` is structurally incapable of executing the TV without a physical authorization.
+ASR/router `DeviceCommand` output is diagnostic only. A transcript such as `TV 켜줘` cannot itself execute the TV.
 
-PCM discontinuity, stale generation, authorizer failure, or missing classifier => fail closed.
+PCM discontinuity, stale generation, authorizer failure, missing classifier, model-integrity failure, or ambiguous score => fail closed.
 
-### Safety benchmark
+## Physical-command benchmark
 
-`PhysicalCommandBenchmarkHarness` replays exact PCM and reports:
+`PhysicalCommandBenchmarkHarness` deterministically replays exact PCM and reports:
 
 - correct;
 - abstain;
@@ -62,12 +90,11 @@ Physical-command qualification no longer depends on WER/CER.
 
 Launcher: **Okja Command Dataset** (`PhysicalCommandDatasetActivity`).
 
-It captures 3.0-second, 16 kHz mono PCM16 samples through `AudioEngine` only and writes:
+It captures 3.0-second, 16 kHz mono PCM16 through `AudioEngine` only and writes:
 
 - raw `.pcm16le`;
 - `manifest.jsonl`;
-- label;
-- prompt;
+- label + prompt;
 - speaker ID;
 - session UUID;
 - acoustic condition;
@@ -87,7 +114,7 @@ Implemented:
 
 - strict corpus validation;
 - duplicate-byte and SHA mismatch rejection;
-- exact 48,000-sample input contract;
+- exact 48,000-sample training input contract;
 - session-grouped train/validation/test split;
 - small raw-waveform 1-D Conv/SeparableConv TensorFlow model;
 - training-only gain/noise/time-shift augmentation;
@@ -95,7 +122,7 @@ Implemented:
 - semantic held-out safety evaluation;
 - TFLite export.
 
-A `physical-command-qualified.tflite` artifact is emitted only if the development gate passes:
+Development qualification gate:
 
 - held-out physical examples >= 3,000;
 - correct physical execution >= 98%;
@@ -103,13 +130,25 @@ A `physical-command-qualified.tflite` artifact is emitted only if the developmen
 - wrong action = 0;
 - false physical execution rate on `OTHER` < 0.1%.
 
-No real classifier has been trained or qualified yet because no real Fold4 corpus is committed/provided. The runtime therefore remains intentionally reject-all.
+`install_qualified_classifier.py` will install a model into Android assets only when:
 
-### Runtime correction
+- training report says deployment is allowed;
+- development gate is explicitly passed;
+- class order exactly matches runtime contract;
+- model SHA-256 matches both report and threshold record;
+- calibrated thresholds are valid.
+
+Android then re-verifies `qualified-manifest.json`, exact class order, canonical model filename, SHA-256, and thresholds through `QualifiedPhysicalCommandAuthorizerFactory` before creating the authorizer. Any mismatch falls back to `RejectingPhysicalCommandAuthorizer`.
+
+Provisioned protected-model assets are git-ignored and cannot be mistaken for source-controlled production evidence.
+
+No real classifier has been trained or qualified yet because a real Fold4 corpus has not yet been collected. Physical control therefore remains intentionally reject-all.
+
+### Classifier runtime
 
 Do **not** add standalone `onnxruntime-android` while `sherpa-onnx:v1.13.4` remains in the APK. sherpa's Android build already carries a version-pinned `libonnxruntime.so`.
 
-The protected classifier instead uses Google Play services LiteRT:
+The protected classifier uses Google Play services LiteRT:
 
 ```text
 com.google.android.gms:play-services-tflite-java:16.5.0
@@ -117,6 +156,8 @@ InterpreterApi.Options().setRuntime(FROM_SYSTEM_ONLY)
 ```
 
 If LiteRT/model initialization fails, physical commands remain disabled.
+
+The qualified model window is 48,000 samples / 3 seconds. Until endpointing is calibrated, longer captured physical-command windows are explicitly abstained rather than silently cropped; this prevents removal of target/action audio.
 
 ## Porcupine wake path
 
@@ -134,10 +175,10 @@ Dependency: `ai.picovoice:porcupine-android:4.0.2`.
 
 `PorcupineKoreanModelProvisioner` performs one-time setup:
 
-1. downloads the Korean `porcupine_params_ko.pv` from a pinned Picovoice repository commit into app-private storage;
+1. downloads `porcupine_params_ko.pv` from a pinned Picovoice repository commit into app-private storage;
 2. verifies the exact upstream Git blob identity before installing it;
-3. invokes Porcupine's official `trainWakeWordFromPhrase(accessKey, ..., "ko", "옥자야")` API;
-4. caches the generated Android `.ppn` in app-private storage.
+3. invokes `Porcupine.trainWakeWordFromPhrase(accessKey, ..., "ko", "옥자야")`;
+4. caches the generated Android `.ppn` privately.
 
 Pinned upstream state:
 
@@ -156,7 +197,7 @@ Launcher: **Okja Porcupine Wake** (`PorcupineWakeActivity`).
 The screen:
 
 - accepts the AccessKey in memory only;
-- provisions/validates the Korean assets;
+- provisions/validates Korean assets;
 - starts `AudioEngine`;
 - feeds only shared PCM to Porcupine;
 - reports raw `옥자야` detections, engine version, and frame size.
@@ -219,19 +260,19 @@ Abstention is preferable to wrong physical execution.
 
 ### E1 — real five-class Fold4 command corpus
 
-Use the **Okja Command Dataset** launcher across multiple sessions/speakers/conditions.
+Install the verified debug APK and use **Okja Command Dataset** across multiple sessions/speakers/conditions.
 
-Immediate model-development minimum: enough complete sessions for every class to appear independently in train, validation, and test. The trainer deliberately refuses leaky/incomplete splits.
+The trainer deliberately refuses leaky or incomplete session splits.
 
 ### E2 — train/calibrate candidate
 
-Run the corpus validator and trainer in `aihub/command_classifier/`.
+Validate the collected corpus and run `train_physical_classifier.py`.
 
-The Android protected path stays reject-all unless a model actually clears the encoded development safety gate.
+The Android protected path remains reject-all unless a model clears the encoded safety gate and then passes the separate qualified-asset installer/runtime integrity checks.
 
 ### E3 — Porcupine Fold4 smoke + same-PCM benchmark
 
-Use **Okja Porcupine Wake** with a Picovoice AccessKey to validate provisioning and basic `옥자야` detection on the actual Fold4.
+Use **Okja Porcupine Wake** with a Picovoice AccessKey to validate provisioning and basic `옥자야` detection on the Fold4.
 
 Then move from smoke testing to annotated same-PCM wake cases and long negative listening:
 
@@ -251,7 +292,7 @@ Pass target:
 - physical endpoint p95 <=500 ms;
 - zero executable slice crossing a discontinuity.
 
-Do not replace VAD until this measurement proves the current VAD is the limiter.
+Do not replace VAD until measurement proves the current VAD is the limiter.
 
 ### E5 — Moonshine conversation requalification
 
@@ -266,20 +307,16 @@ Run screen-off, fold/unfold, Activity recreation, audio-route, Bluetooth, Doze, 
 Only after protected classifier, wake, endpointing, and lifecycle gates pass:
 
 - migrate `MainActivity`;
-- add the user-started microphone foreground-service lifecycle;
+- add user-started microphone foreground-service lifecycle;
 - remove the old `AudioRecord -> release -> SpeechRecognizer` production topology.
 
 ## Current external blockers
 
-Repository-side scaffolding is no longer the main blocker.
+Repository-side implementation and build verification are no longer the blocker.
 
-Actual measured progress now requires:
+Measured progress now requires:
 
 1. real Fold4 physical-command recordings;
 2. a Picovoice AccessKey for the Porcupine benchmark.
 
 The AccessKey must remain outside Git. No wake or classifier performance result should be claimed until those target-device runs exist.
-
-## Verification status
-
-The source changes have been committed to `feat/voice-pipeline-v2`. A successful Android/JVM build for the latest head has **not yet been independently observed through the available GitHub status interface**, so compile/CI status must be treated as unverified until a workflow result is retrieved.
