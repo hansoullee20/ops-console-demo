@@ -107,14 +107,14 @@ class PhysicalCommandDatasetActivity : Activity() {
             setText(prefs.getString(PREF_SPEAKER_ID, "speaker-01"))
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
-            singleLine = true
+            isSingleLine = true
         }
         conditionInput = EditText(this).apply {
             hint = "condition (quiet/tv/noise/...)"
             setText(prefs.getString(PREF_CONDITION, "quiet"))
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
-            singleLine = true
+            isSingleLine = true
         }
         root.addView(text("Speaker ID", 14f, Color.LTGRAY))
         root.addView(speakerIdInput)
