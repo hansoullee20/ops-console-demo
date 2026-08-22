@@ -33,8 +33,16 @@ sealed interface PhysicalCommandDecision {
     ) : PhysicalCommandDecision {
         init {
             require(command.isPhysical) { "OTHER cannot authorize a physical command" }
-            confidence?.let { require(it in 0f..1f) { "confidence must be in [0, 1]" } }
-            oppositeActionMargin?.let { require(it >= 0f) { "oppositeActionMargin must be non-negative" } }
+            confidence?.let {
+                require(it.isFinite() && it in 0f..1f) {
+                    "confidence must be finite and in [0, 1]"
+                }
+            }
+            oppositeActionMargin?.let {
+                require(it.isFinite() && it in 0f..1f) {
+                    "oppositeActionMargin must be finite and in [0, 1]"
+                }
+            }
         }
     }
 
@@ -49,8 +57,8 @@ sealed interface PhysicalCommandDecision {
  * Microphone-free physical-command authority.
  *
  * Implementations consume the exact caller-owned PCM stream used by the rest of Okja. They must
- * never acquire AudioRecord themselves. A production implementation will wrap the five-class
- * acoustic model {TV_ON, TV_OFF, AC_ON, AC_OFF, OTHER} plus calibrated abstention thresholds.
+ * never acquire AudioRecord themselves. A production implementation wraps the five-class acoustic
+ * model {TV_ON, TV_OFF, AC_ON, AC_OFF, OTHER} plus calibrated abstention thresholds.
  */
 interface PhysicalCommandAuthorizer : AutoCloseable {
     fun reset()
