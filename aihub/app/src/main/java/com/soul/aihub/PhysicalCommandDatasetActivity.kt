@@ -20,7 +20,6 @@ import com.soul.aihub.voice.Pcm16UtteranceBuffer
 import com.soul.aihub.voice.PcmContinuityTracker
 import com.soul.aihub.voice.PcmWindow
 import com.soul.aihub.voice.PhysicalCommandClass
-import com.soul.aihub.voice.PorcupinePcmWakeDetector
 import com.soul.aihub.voice.SherpaMoonshineBenchmarkEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -53,7 +52,7 @@ import kotlin.math.sqrt
  */
 class PhysicalCommandDatasetActivity : Activity() {
     private data class Prompt(val label: PhysicalCommandClass, val text: String, val id: String? = null)
-    private data class CaptureResult(val window: PcmWindow, val wakeFrameIndex: Long?)
+    private data class CaptureResult(val window: PcmWindow)
     private data class AsrTiming(val initMs: Double, val decodeMs: Double?, val finalizeMs: Double?, val text: String)
 
     private val prompts = listOf(
@@ -78,13 +77,20 @@ class PhysicalCommandDatasetActivity : Activity() {
         Prompt(PhysicalCommandClass.OTHER, "TV 켜... 아니 꺼줘"),
         Prompt(PhysicalCommandClass.OTHER, "에어컨 꺼... 아니 켜줘"),
     )
+
     private val sanityPrompts = listOf(
-        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 켜줘", "S01"), Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 꺼줘", "S02"),
-        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 켜줘", "S03"), Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 꺼줘", "S04"),
-        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 좀 켜줘", "S05"), Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 좀 꺼줘", "S06"),
-        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 좀 켜줘", "S07"), Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 좀 꺼줘", "S08"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 뭐하니", "S09"), Prompt(PhysicalCommandClass.OTHER, "옥자야 지금 몇 시야", "S10"),
-        Prompt(PhysicalCommandClass.OTHER, "옥자야 오늘 날씨 어때", "S11"), Prompt(PhysicalCommandClass.OTHER, "옥자야 잘 자", "S12"),
+        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 켜줘", "S01"),
+        Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 꺼줘", "S02"),
+        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 켜줘", "S03"),
+        Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 꺼줘", "S04"),
+        Prompt(PhysicalCommandClass.TV_ON, "옥자야 TV 좀 켜줘", "S05"),
+        Prompt(PhysicalCommandClass.TV_OFF, "옥자야 TV 좀 꺼줘", "S06"),
+        Prompt(PhysicalCommandClass.AC_ON, "옥자야 에어컨 좀 켜줘", "S07"),
+        Prompt(PhysicalCommandClass.AC_OFF, "옥자야 에어컨 좀 꺼줘", "S08"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 뭐하니", "S09"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 지금 몇 시야", "S10"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 오늘 날씨 어때", "S11"),
+        Prompt(PhysicalCommandClass.OTHER, "옥자야 잘 자", "S12"),
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -143,6 +149,7 @@ class PhysicalCommandDatasetActivity : Activity() {
         root.addView(speakerIdInput)
         root.addView(text("Condition", 14f, Color.LTGRAY))
         root.addView(conditionInput)
+
         sanityMode = Switch(this).apply {
             text = "Sanity mode · 12문장 × 각 5회"
             setTextColor(Color.WHITE)
@@ -183,6 +190,12 @@ class PhysicalCommandDatasetActivity : Activity() {
         recordButton = button("3초 녹음 → 라벨 저장")
         recordButton.setOnClickListener { captureCurrentPrompt() }
         root.addView(recordButton)
+
+        val rerecord = button("방금 녹음 다시하기")
+        rerecord.setOnClickListener {
+            if (!running.get()) rerecordLastSanityRun()
+        }
+        root.addView(rerecord)
 
         val resetSanity = button("Sanity 기록 전체 초기화")
         resetSanity.setOnClickListener {
@@ -246,7 +259,9 @@ class PhysicalCommandDatasetActivity : Activity() {
         val prompt = activePrompts()[promptIndex]
         scope.launch {
             try {
-                if (sanityMode.isChecked) runSanity(prompt) else {
+                if (sanityMode.isChecked) {
+                    runSanity(prompt)
+                } else {
                     stateText.text = "준비… 0.8초 뒤 말하세요"
                     delay(800)
                     stateText.text = "지금 말하세요 · 3초 녹음"
@@ -269,13 +284,23 @@ class PhysicalCommandDatasetActivity : Activity() {
     private suspend fun runSanity(prompt: Prompt) {
         check(hasMoonshineAssets()) { "Moonshine assets missing; use Moonshine benchmark APK" }
         stateText.text = "BOOTSTRAP · 준비… 1.2초 뒤 말하세요"
-        val cue = scope.launch { delay(SANITY_CUE_DELAY_MS); stateText.text = "BOOTSTRAP · 지금 말하세요" }
+        val cue = scope.launch {
+            delay(SANITY_CUE_DELAY_MS)
+            stateText.text = "BOOTSTRAP · 지금 말하세요"
+        }
         captureEpoch = SystemClock.elapsedRealtimeNanos()
-        val capture = try { capturePcm(RECORD_SECONDS) } finally { cue.cancel() }
+        val capture = try {
+            capturePcm(RECORD_SECONDS)
+        } finally {
+            cue.cancel()
+        }
+        val onset = checkNotNull(detectOnsetSample(capture.window.samples)) {
+            "SANITY STOP: utterance onset not found"
+        }
+        val asr = withContext(Dispatchers.Default) { runMoonshine(capture.window) }
         val runId = UUID.randomUUID().toString()
         saveSanityPcm(runId, capture.window.samples)
-        val onset = checkNotNull(detectOnsetSample(capture.window.samples)) { "SANITY STOP: utterance onset not found" }
-        val asr = withContext(Dispatchers.Default) { runMoonshine(capture.window) }
+
         val row = JSONObject().apply {
             put("schema", "okja.pipeline-sanity.v2")
             put("run_id", runId)
@@ -321,7 +346,7 @@ class PhysicalCommandDatasetActivity : Activity() {
         renderStats()
     }
 
-    private suspend fun capturePcm(seconds: Int, wakeDetector: PorcupinePcmWakeDetector? = null): CaptureResult {
+    private suspend fun capturePcm(seconds: Int): CaptureResult {
         val targetSamples = AudioEngine.SAMPLE_RATE_HZ * seconds
         val buffer = Pcm16UtteranceBuffer(maxSamples = targetSamples)
         val continuity = PcmContinuityTracker()
@@ -329,7 +354,6 @@ class PhysicalCommandDatasetActivity : Activity() {
         val audio = AudioEngine(ringCapacityMs = AudioEngine.DEFAULT_RING_CAPACITY_MS)
         activeAudio = audio
         var firstFrame = true
-        var wakeFrameIndex: Long? = null
 
         val collector = scope.async(
             context = Dispatchers.Default,
@@ -347,7 +371,6 @@ class PhysicalCommandDatasetActivity : Activity() {
                     }
                     val observation = continuity.observe(frame)
                     check(observation.continuous) { "SANITY STOP: PCM discontinuity" }
-                    if (wakeFrameIndex == null && wakeDetector?.accept(frame) != null) wakeFrameIndex = frame.sequence
                     val remaining = targetSamples - buffer.sampleCount()
                     if (remaining > 0) {
                         if (frame.samples.size <= remaining) buffer.append(frame.samples)
@@ -364,37 +387,80 @@ class PhysicalCommandDatasetActivity : Activity() {
             collector.cancel()
         }
         val result = buffer.snapshot()
-        check(result.size == targetSamples) { "capture length mismatch: ${result.size} != $targetSamples samples" }
-        return CaptureResult(PcmWindow(result, 0L, result.size.toLong()), wakeFrameIndex)
+        check(result.size == targetSamples) {
+            "capture length mismatch: ${result.size} != $targetSamples samples"
+        }
+        return CaptureResult(PcmWindow(result, 0L, result.size.toLong()))
     }
 
     private fun runMoonshine(window: PcmWindow): AsrTiming {
-        val initStart = SystemClock.elapsedRealtimeNanos(); val engine = SherpaMoonshineBenchmarkEngine(assets)
+        val initStart = SystemClock.elapsedRealtimeNanos()
+        val engine = SherpaMoonshineBenchmarkEngine(assets)
         val initMs = (SystemClock.elapsedRealtimeNanos() - initStart) / 1_000_000.0
-        return try { engine.begin(window.samples); val text = engine.finish()?.text.orEmpty(); AsrTiming(initMs, engine.lastDecodeMs, engine.lastFinalizeMs, text) } finally { engine.close() }
+        return try {
+            engine.begin(window.samples)
+            val text = engine.finish()?.text.orEmpty()
+            AsrTiming(initMs, engine.lastDecodeMs, engine.lastFinalizeMs, text)
+        } finally {
+            engine.close()
+        }
     }
 
     private fun detectOnsetSample(pcm: ShortArray): Long? {
-        val n = AudioEngine.FRAME_SAMPLES; val baselineFrames = minOf(20, pcm.size / n / 2)
-        fun rms(offset: Int): Double { var sum = 0.0; for (i in offset until minOf(offset + n, pcm.size)) sum += pcm[i].toDouble() * pcm[i]; return sqrt(sum / n) }
-        val threshold = maxOf(500.0, (0 until baselineFrames).map { rms(it * n) }.average() * 4.0); var consecutive = 0
-        for (frame in baselineFrames until pcm.size / n) { consecutive = if (rms(frame * n) >= threshold) consecutive + 1 else 0; if (consecutive >= 2) return ((frame - 1) * n).toLong() }
+        val n = AudioEngine.FRAME_SAMPLES
+        val baselineFrames = minOf(20, pcm.size / n / 2)
+        fun rms(offset: Int): Double {
+            var sum = 0.0
+            for (i in offset until minOf(offset + n, pcm.size)) {
+                sum += pcm[i].toDouble() * pcm[i]
+            }
+            return sqrt(sum / n)
+        }
+        val threshold = maxOf(
+            500.0,
+            (0 until baselineFrames).map { rms(it * n) }.average() * 4.0,
+        )
+        var consecutive = 0
+        for (frame in baselineFrames until pcm.size / n) {
+            consecutive = if (rms(frame * n) >= threshold) consecutive + 1 else 0
+            if (consecutive >= 2) return ((frame - 1) * n).toLong()
+        }
         return null
     }
 
-    private fun hasMoonshineAssets() = listOf("$MOONSHINE_ASSET_DIR/encoder_model.ort", "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort", "$MOONSHINE_ASSET_DIR/tokens.txt").all { path -> try { assets.open(path).use { }; true } catch (_: Throwable) { false } }
-    private fun saveSanityPcm(runId: String, pcm: ShortArray) { val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN); pcm.forEach { bytes.putShort(it) }; FileOutputStream(File(sanityDir(), "$runId.pcm16le")).use { it.write(bytes.array()) } }
+    private fun hasMoonshineAssets() = listOf(
+        "$MOONSHINE_ASSET_DIR/encoder_model.ort",
+        "$MOONSHINE_ASSET_DIR/decoder_model_merged.ort",
+        "$MOONSHINE_ASSET_DIR/tokens.txt",
+    ).all { path ->
+        try {
+            assets.open(path).use { }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun saveSanityPcm(runId: String, pcm: ShortArray) {
+        val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        pcm.forEach { bytes.putShort(it) }
+        FileOutputStream(File(sanityDir(), "$runId.pcm16le")).use { it.write(bytes.array()) }
+    }
+
+    private fun sanityLines(): List<String> {
+        val manifest = File(sanityDir(), SANITY_JSONL)
+        if (!manifest.exists()) return emptyList()
+        return manifest.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
+    }
 
     private fun sanityCounts(): Map<String, Int> {
         val counts = mutableMapOf<String, Int>()
-        val manifest = File(sanityDir(), SANITY_JSONL)
-        if (!manifest.exists()) return counts
-        manifest.forEachLine(Charsets.UTF_8) { line ->
+        sanityLines().forEach { line ->
             try {
                 val id = JSONObject(line).optString("phrase_id")
                 if (id.isNotBlank()) counts[id] = (counts[id] ?: 0) + 1
             } catch (_: Throwable) {
-                // Progress display is best-effort. The exported JSONL remains the source of truth.
+                // Progress display is best-effort. Export validation handles malformed rows.
             }
         }
         return counts
@@ -405,10 +471,55 @@ class PhysicalCommandDatasetActivity : Activity() {
     private fun selectFirstIncompleteSanityPrompt(): Boolean {
         if (!::sanityMode.isInitialized || !sanityMode.isChecked) return false
         val counts = sanityCounts()
-        val next = sanityPrompts.indexOfFirst { (counts[it.id] ?: 0) < SANITY_REPEATS_PER_PHRASE }
+        val next = sanityPrompts.indexOfFirst {
+            (counts[it.id] ?: 0) < SANITY_REPEATS_PER_PHRASE
+        }
         if (next < 0) return false
         promptIndex = next
         return true
+    }
+
+    private fun rerecordLastSanityRun() {
+        if (!sanityMode.isChecked) {
+            stateText.text = "Sanity mode를 먼저 켜세요"
+            return
+        }
+        val manifest = File(sanityDir(), SANITY_JSONL)
+        val lines = sanityLines()
+        if (lines.isEmpty()) {
+            stateText.text = "다시 녹음할 저장 기록이 없습니다"
+            return
+        }
+
+        val last = try {
+            JSONObject(lines.last())
+        } catch (_: Throwable) {
+            stateText.text = "FAILED · 마지막 sanity JSON을 읽을 수 없습니다"
+            return
+        }
+        val runId = last.optString("run_id")
+        val phraseId = last.optString("phrase_id")
+        val index = sanityPrompts.indexOfFirst { it.id == phraseId }
+        if (runId.isBlank() || index < 0) {
+            stateText.text = "FAILED · 마지막 sanity 기록 식별자가 잘못되었습니다"
+            return
+        }
+
+        val pcmFile = File(sanityDir(), "$runId.pcm16le")
+        if (pcmFile.exists() && !pcmFile.delete()) {
+            stateText.text = "FAILED · 마지막 PCM을 삭제하지 못했습니다"
+            return
+        }
+        val remaining = lines.dropLast(1)
+        manifest.writeText(
+            if (remaining.isEmpty()) "" else remaining.joinToString("\n", postfix = "\n"),
+            Charsets.UTF_8,
+        )
+        promptIndex = index
+        stateText.text = "$phraseId 마지막 1회 삭제 · 다시 녹음 시작"
+        renderPrompt()
+        renderStats()
+        captureCurrentPrompt()
     }
 
     private fun resetSanityProgress() {
@@ -468,8 +579,14 @@ class PhysicalCommandDatasetActivity : Activity() {
         if (sanityMode.isChecked) {
             val completed = sanityCount(checkNotNull(prompt.id))
             val nextRepeat = minOf(completed + 1, SANITY_REPEATS_PER_PHRASE)
-            promptText.text = "[${prompt.id}] 문장 ${promptIndex + 1}/${sanityPrompts.size} · 반복 $nextRepeat/$SANITY_REPEATS_PER_PHRASE\n“${prompt.text}”"
-            recordButton.text = if (completed >= SANITY_REPEATS_PER_PHRASE) "이 문장 완료 · 5/5" else "녹음 $nextRepeat/$SANITY_REPEATS_PER_PHRASE"
+            promptText.text =
+                "[${prompt.id}] 문장 ${promptIndex + 1}/${sanityPrompts.size} · " +
+                    "반복 $nextRepeat/$SANITY_REPEATS_PER_PHRASE\n“${prompt.text}”"
+            recordButton.text = if (completed >= SANITY_REPEATS_PER_PHRASE) {
+                "이 문장 완료 · 5/5"
+            } else {
+                "녹음 $nextRepeat/$SANITY_REPEATS_PER_PHRASE"
+            }
         } else {
             promptText.text = "[${prompt.id ?: prompt.label.name}]\n“${prompt.text}”"
             recordButton.text = "3초 녹음 → 라벨 저장"
@@ -483,7 +600,9 @@ class PhysicalCommandDatasetActivity : Activity() {
             statsText.text = buildString {
                 append("Sanity progress: ").append(total).append('/').append(SANITY_TOTAL_RUNS).append("\n")
                 sanityPrompts.forEach { prompt ->
-                    append(prompt.id).append(": ").append(counts[prompt.id] ?: 0).append('/').append(SANITY_REPEATS_PER_PHRASE).append("\n")
+                    append(prompt.id).append(": ")
+                        .append(counts[prompt.id] ?: 0)
+                        .append('/').append(SANITY_REPEATS_PER_PHRASE).append("\n")
                 }
                 append("저장 위치: ").append(sanityDir().absolutePath)
             }
@@ -513,12 +632,29 @@ class PhysicalCommandDatasetActivity : Activity() {
 
     private fun datasetDir(): File = dataDir(DATASET_DIR)
     private fun sanityDir(): File = dataDir(SANITY_DIR)
-    private fun dataDir(name: String): File { val root = getExternalFilesDir(name) ?: File(filesDir, name); check(root.exists() || root.mkdirs()) { "Unable to create $name" }; return root }
+
+    private fun dataDir(name: String): File {
+        val root = getExternalFilesDir(name) ?: File(filesDir, name)
+        check(root.exists() || root.mkdirs()) { "Unable to create $name" }
+        return root
+    }
 
     private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
-    private fun sha256(file: File): String { val digest = MessageDigest.getInstance("SHA-256"); file.inputStream().use { input -> val buffer = ByteArray(64 * 1024); while (true) { val read = input.read(buffer); if (read < 0) break; if (read > 0) digest.update(buffer, 0, read) } }; return digest.digest().joinToString("") { "%02x".format(it) } }
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     private fun button(label: String) = Button(this).apply {
         isAllCaps = false
@@ -554,6 +690,7 @@ class PhysicalCommandDatasetActivity : Activity() {
         private const val PREFS_NAME = "okja-command-dataset"
         private const val PREF_SPEAKER_ID = "speaker-id"
         private const val PREF_CONDITION = "condition"
-        private const val MOONSHINE_ASSET_DIR = "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27"
+        private const val MOONSHINE_ASSET_DIR =
+            "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27"
     }
 }
