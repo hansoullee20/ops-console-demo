@@ -1,6 +1,7 @@
 package com.soul.aihub.voice
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -12,7 +13,8 @@ import java.security.MessageDigest
  *
  * Missing/tampered/mismatched assets do not produce an authorizer. Callers should use
  * [createOrRejecting] so physical control remains fail-closed instead of attempting a candidate
- * model or hand-entered thresholds.
+ * model or hand-entered thresholds. Coroutine cancellation is never converted into a usable
+ * reject-all result; lifecycle cancellation propagates normally.
  */
 object QualifiedPhysicalCommandAuthorizerFactory {
     private const val ASSET_DIR = "okja-physical-command"
@@ -23,7 +25,8 @@ object QualifiedPhysicalCommandAuthorizerFactory {
     suspend fun createOrRejecting(context: Context): PhysicalCommandAuthorizer {
         return try {
             create(context)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             RejectingPhysicalCommandAuthorizer
         }
     }
@@ -86,7 +89,7 @@ object QualifiedPhysicalCommandAuthorizerFactory {
             while (true) {
                 val read = input.read(buffer)
                 if (read < 0) break
-                digest.update(buffer, 0, read)
+                if (read > 0) digest.update(buffer, 0, read)
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
